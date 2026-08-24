@@ -62,7 +62,7 @@ datasets/             외부 정답지 (실측 통계·패치 노트 스냅샷)
 docs/adr/             기술 결정 기록
 ```
 
-작업 규칙은 [`AGENTS.md`](AGENTS.md)(= [`CLAUDE.md`](CLAUDE.md))에 있다.
+무엇을 만드는지는 [`docs/plan.md`](docs/plan.md)에, 어떻게 작업하는지는 [`AGENTS.md`](AGENTS.md)(= [`CLAUDE.md`](CLAUDE.md))에 있다.
 
 ## 게임 데이터에 대해
 
