@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""웹 아카이브를 거쳐 u.gg `champion_ranking` 을 받는다.
+
+라이브 API 는 Cloudflare 가 막으므로 아카이브를 경유한다. 아카이브는 간헐적으로
+죽고 요청 제한도 걸리므로 **이어받기가 전제다.** 이미 받은 패치는 건너뛴다.
+
+받은 것은 그 자리에서 항등식으로 검사한다 — 전체 승률이 50% 가 아니거나
+판수 합계가 게임 수의 열 배가 아니면 저장하지 않는다. **형식이 조용히 바뀌면
+파싱은 성공하는데 값만 틀어지기 때문이다.**
+
+    ./scripts/fetch-ugg
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from patchlens.fetch import Retryable, get_with_retry, save  # noqa: E402
+from patchlens.ugg import (  # noqa: E402
+    check_games_identity,
+    check_win_rate_identity,
+    parse_champion_ranking,
+)
+
+OUT = Path(__file__).resolve().parents[1] / "data" / "ugg" / "champion_ranking"
+CDX = (
+    "https://web.archive.org/cdx/search/cdx?url=stats2.u.gg*&output=json"
+    "&fl=timestamp,original&filter=statuscode:200"
+    "&filter=original:.*champion_ranking/world.*emerald_plus.*"
+    "&collapse=urlkey&limit=500&from=2023"
+)
+PATCH_RE = re.compile(r"champion_ranking/world/(\d{1,2}_\d{1,2})/")
+
+
+def main() -> int:
+    rows = json.loads(get_with_retry(CDX, timeout=180).decode())[1:]
+    by_patch: dict[str, tuple[str, str]] = {}
+    for ts, url in rows:
+        m = PATCH_RE.search(url)
+        if m:
+            by_patch.setdefault(m.group(1), (ts, url))
+    order = sorted(by_patch, key=lambda p: tuple(int(x) for x in p.split("_")))
+    print(f"아카이브에 있는 패치 {len(order)}개", flush=True)
+
+    done = skipped = failed = 0
+    for i, patch in enumerate(order, 1):
+        path = OUT / f"{patch}.json"
+        if path.exists():
+            skipped += 1
+            continue
+        ts, url = by_patch[patch]
+        try:
+            body = get_with_retry(f"https://web.archive.org/web/{ts}id_/{url}")
+            ranking = parse_champion_ranking(json.loads(body))
+            check_win_rate_identity(ranking)
+            check_games_identity(ranking)
+            save(path, body)
+            done += 1
+            print(
+                f"[{i}/{len(order)}] {patch}  {len(body):,}B  "
+                f"항목 {len(ranking.rows)}  게임 {ranking.games:,}",
+                flush=True,
+            )
+        except (Retryable, ValueError) as exc:
+            failed += 1
+            print(f"[{i}/{len(order)}] {patch}  실패: {exc}", flush=True)
+        time.sleep(3)  # 아카이브에 몰아 치면 429 가 난다
+
+    print(f"\n완료: 새로 받음 {done} · 건너뜀 {skipped} · 실패 {failed}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
