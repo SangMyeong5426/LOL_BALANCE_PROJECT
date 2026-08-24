@@ -1,7 +1,7 @@
 """실행 환경 설정.
 
-`.env` 에서 읽고 없으면 기본값을 쓴다. 여기서 하는 일은 값을 읽어 오는 것뿐이고
-전투 규칙이나 밸런스 수치는 다루지 않는다 — 그쪽은 `data/` 의 JSON 이 기준이다.
+`.env` 에서 읽고 없으면 기본값을 쓴다. 여기서 하는 일은 값을 읽어 오는 것뿐이다.
+데이터 출처와 수집 규칙은 `docs/spec/data-sources.md` 가 기준이다.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ class Settings:
     def llm_available(self) -> bool:
         """LLM 호출이 가능한지.
 
-        Phase 0-A·0-B·1 은 이 값이 False 여도 전부 돌아간다. 시뮬레이션 결과가
-        LLM 에 의존하지 않는다는 설계 원칙이 여기서 확인된다.
+        수집·집계·통계 베이스라인은 이 값이 False 여도 전부 돌아간다.
+        LLM 이 없으면 못 하는 것과 있어도 그만인 것을 가르는 경계다.
         """
         return bool(self.anthropic_api_key)
 
@@ -42,15 +42,15 @@ def _read_seed(raw: str | None) -> int:
     try:
         return int(raw)
     except ValueError as exc:
-        # 시드가 조용히 기본값으로 떨어지면 재현성이 깨진 것을 아무도 모른다.
-        raise ValueError(f"ASCENT_SEED 는 정수여야 한다: {raw!r}") from exc
+        # 시드가 조용히 기본값으로 떨어지면 학습·평가 분할이 바뀐 것을 아무도 모른다.
+        raise ValueError(f"PATCHLENS_SEED 는 정수여야 한다: {raw!r}") from exc
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
     """`.env` 를 읽어 설정을 만든다.
 
     이미 셸에 있는 환경변수를 덮어쓰지 않는다(`override=False`). CI 나 일회성
-    실행에서 `ASCENT_SEED=1 python ...` 이 파일보다 우선하게 하기 위해서다.
+    실행에서 `PATCHLENS_SEED=1 python ...` 이 파일보다 우선하게 하기 위해서다.
     """
     load_dotenv(
         env_file if env_file is not None else PROJECT_ROOT / ".env", override=False
@@ -58,7 +58,8 @@ def load_settings(env_file: Path | None = None) -> Settings:
 
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     return Settings(
-        seed=_read_seed(os.environ.get("ASCENT_SEED")),
-        llm_model=os.environ.get("ASCENT_LLM_MODEL", "").strip() or DEFAULT_LLM_MODEL,
+        seed=_read_seed(os.environ.get("PATCHLENS_SEED")),
+        llm_model=os.environ.get("PATCHLENS_LLM_MODEL", "").strip()
+        or DEFAULT_LLM_MODEL,
         anthropic_api_key=key or None,
     )
