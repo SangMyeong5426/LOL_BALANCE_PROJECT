@@ -1,0 +1,22 @@
+# 런타임 의존성. 직접 쓰는 것만 적고 정확한 버전으로 고정한다.
+# 전이 의존성까지 pip freeze 로 쏟아붓지 않는 이유는 docs/adr/0001 에 있다.
+#
+#   pip install -r requirements.txt
+
+# 로그 집계와 지표 산출 (Phase 3-1)
+pandas==3.0.5
+
+# 스피어만 순위 상관계수 — 실측 승률 대조 (Phase 3-4 축 1)
+scipy==1.17.1
+
+# 카드·적 데이터 스키마 검증, LLM 구조화 출력 파싱 실패 처리 (Phase 1-1, 2-4)
+pydantic==2.13.4
+
+# .env 로드 — API 키를 코드에 두지 않는다
+python-dotenv==1.2.3
+
+# 결과 시각화. 발표에 화면이 필요하다 (Phase 3)
+matplotlib==3.11.1
+
+# 페르소나 정책 생성, 분석 리포트 (Phase 2-4, 3-3)
+anthropic==1.0.0
