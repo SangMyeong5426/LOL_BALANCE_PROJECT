@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Data Dragon 에서 챔피언 수치 스냅샷을 받는다.
+
+버전 간 diff 가 곧 수치 변경 내역이고, 그것이 이 프로젝트의 정답지다.
+
+`championFull.json` 하나에 전 챔피언이 들어 있으므로 버전당 요청이 한 번이다.
+라이엇 CDN 이라 요청 제한이 없다.
+
+    ./scripts/fetch-ddragon [--all]
+
+기본은 우리 범위(13.14 ~ 16.15)만 받는다. `--all` 이면 전 버전을 받는다.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from patchlens.fetch import Retryable, get_with_retry, save  # noqa: E402
+
+BASE = "https://ddragon.leagueoflegends.com"
+OUT = Path(__file__).resolve().parents[1] / "data" / "ddragon"
+
+# 확정 범위. docs/spec/data-sources.md 7장.
+FIRST = (13, 14)
+LAST = (16, 15)
+
+
+def in_scope(version: str) -> bool:
+    m = re.match(r"^(\d+)\.(\d+)\.", version)
+    if not m:
+        return False
+    key = (int(m.group(1)), int(m.group(2)))
+    return FIRST <= key <= LAST
+
+
+def main() -> int:
+    take_all = "--all" in sys.argv
+    versions = json.loads(get_with_retry(f"{BASE}/api/versions.json").decode())
+    targets = versions if take_all else [v for v in versions if in_scope(v)]
+    targets = sorted(set(targets))
+    print(f"대상 {len(targets)}개 버전 (전체 {len(versions)}개 중)", flush=True)
+
+    done = skipped = failed = 0
+    for i, v in enumerate(targets, 1):
+        path = OUT / f"{v}.json"
+        if path.exists():
+            skipped += 1
+            continue
+        url = f"{BASE}/cdn/{v}/data/en_US/championFull.json"
+        try:
+            body = get_with_retry(url, attempts=3, base_delay=5.0)
+            json.loads(body)  # 온전한 JSON 인지 확인하고 저장한다
+            save(path, body)
+            done += 1
+            print(f"[{i}/{len(targets)}] {v}  {len(body):,}B", flush=True)
+        except (Retryable, ValueError) as exc:
+            failed += 1
+            print(f"[{i}/{len(targets)}] {v}  실패: {exc}", flush=True)
+
+    print(f"\n완료: 새로 받음 {done} · 건너뜀 {skipped} · 실패 {failed}", flush=True)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
