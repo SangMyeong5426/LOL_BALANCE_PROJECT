@@ -16,7 +16,7 @@ repos:
       - id: check-yaml
       - id: check-json
       - id: check-merge-conflict
-      # 게임에서 추출한 원본 데이터나 디컴파일 산출물이 딸려 들어가는 것을 막는다.
+      # 수집한 원자료(아카이브 HTML·JSON, CSV)가 딸려 들어가는 것을 막는다.
       - id: check-added-large-files
         args: [--maxkb=2048]
 

@@ -3,20 +3,27 @@
 #
 #   pip install -r requirements.txt
 
-# 로그 집계와 지표 산출 (Phase 3-1)
+# 패치 × 챔피언 시계열 집계
 pandas==3.0.5
 
-# 스피어만 순위 상관계수 — 실측 승률 대조 (Phase 3-4 축 1)
+# 통계 베이스라인 — LLM 이 값을 하는지 비교할 대상
 scipy==1.17.1
+scikit-learn==1.8.0
 
-# 카드·적 데이터 스키마 검증, LLM 구조화 출력 파싱 실패 처리 (Phase 1-1, 2-4)
+# 수집한 JSON·CSV 스키마 검증, LLM 구조화 출력 파싱 실패 처리
 pydantic==2.13.4
+
+# 데이터 수집 (아카이브 경유 요청 포함)
+httpx==0.28.1
+
+# 웹 아카이브 HTML 파싱 (op.gg 스냅샷 등)
+beautifulsoup4==4.14.2
 
 # .env 로드 — API 키를 코드에 두지 않는다
 python-dotenv==1.2.3
 
-# 결과 시각화. 발표에 화면이 필요하다 (Phase 3)
+# 결과 시각화
 matplotlib==3.11.1
 
-# 페르소나 정책 생성, 분석 리포트 (Phase 2-4, 3-3)
+# 패치 노트 구조화, 규칙 추출, 예측 에이전트
 anthropic==1.0.0

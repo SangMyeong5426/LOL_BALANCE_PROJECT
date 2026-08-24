@@ -11,14 +11,23 @@
 | 3 | Oracle's Elixir 2021~2026 주소 | 아무 때나 | 새 사이트가 SPA |
 | 4 | op.gg 아카이브가 KR 인지 검증 | 실제 수집할 때 | 지금은 정황 증거뿐 |
 | 5 | 국제 대회 일정표 (약 30행) | 아무 때나 | — |
-| 6 | **패키지 이름** `src/ascent/` | 계획서 쓸 때 | 아래 |
+| 6 | **저장소 디렉터리 이름** | 사용자가 직접 | 아래 |
 | 7 | 강의 자료 4종 본문 | 아무 때나 | 아래 |
 
-### 6. 패키지 이름이 아직 슬더스2 것이다
+### 6. 저장소 디렉터리 이름이 아직 이전 것이다
 
-`src/ascent/` 의 `ascent` 는 슬더스2 프로젝트 이름이었다. 저장소 디렉터리 이름(`PROJECT_STS2_AI`)도 마찬가지다.
+패키지는 `src/patchlens/` 로 바꿨는데, **저장소 디렉터리 이름 `PROJECT_STS2_AI` 는 그대로다.** 이건 저장소 밖의 경로라 사용자가 직접 바꿔야 한다.
 
-**계획서를 쓰면서 프로젝트 이름을 정하고 함께 바꾼다.** 지금 바꾸면 이름을 두 번 정하게 된다.
+바꾸면 가상환경 경로가 깨지므로 `.venv` 를 다시 만들어야 한다.
+
+```bash
+mv ~/workspace/PROJECT_STS2_AI ~/workspace/patchlens
+cd ~/workspace/patchlens
+rm -rf .venv && python3.11 -m venv .venv
+source .venv/bin/activate && pip install -r requirements-dev.txt
+```
+
+`patchlens` 라는 이름도 임시다. 계획서를 쓰면서 확정한다.
 
 ### 7. 강의 자료 4종의 본문을 아직 읽지 못했다
 
