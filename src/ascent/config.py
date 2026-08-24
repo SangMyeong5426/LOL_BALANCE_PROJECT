@@ -14,9 +14,6 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# 검증 기준선을 고정하는 값이다. 진행 중 패치가 나와도 이 버전으로 붙잡는다.
-GAME_VERSION = "v0.111.0"
-
 DEFAULT_LLM_MODEL = "claude-opus-5"
 DEFAULT_SEED = 20260824
 
