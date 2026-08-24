@@ -1,0 +1,46 @@
+# 이 파일은 도구 설정만 담는다. 패키징하지 않는다.
+# 의존성의 단일 기준은 requirements.txt / requirements-dev.txt 다.
+#   근거: docs/adr/0001-python-environment-and-tooling.md
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+# 강의(데이터 분석을 위한 Python 이해)가 제시한 E·F·I·UP 에 B 를 더했다.
+# B(flake8-bugbear)는 가변 기본 인자, 루프 변수 캡처 같은 "돌긴 도는" 결함을 잡는다.
+# 이 프로젝트는 데미지 계산이 한 번 틀리면 전체 결과가 무의미해지므로 그 종류를 늘렸다.
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+# 패키지를 설치하지 않으므로 src 를 import 경로에 넣는다.
+pythonpath = ["src"]
+addopts = "-ra --strict-markers"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+warn_unused_configs = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+# 타입 스텁이 없는 서드파티용 [[tool.mypy.overrides]] 는 실제로 import 할 때 추가한다.
+# 미리 적어 두면 warn_unused_configs 가 매번 note 를 뱉는다.
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true

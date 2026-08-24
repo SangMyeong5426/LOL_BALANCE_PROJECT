@@ -1,0 +1,31 @@
+# 설치:  pre-commit install
+# 전체 검사:  pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      # 게임에서 추출한 원본 데이터나 디컴파일 산출물이 딸려 들어가는 것을 막는다.
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+
+  - repo: local
+    hooks:
+      # AGENTS.md 와 CLAUDE.md 는 같은 문서다. 갈라지면 커밋을 막는다.
+      - id: agents-claude-identical
+        name: AGENTS.md 와 CLAUDE.md 가 같은지 검사
+        entry: scripts/check-rule-docs
+        language: system
+        pass_filenames: false
+        files: '^(AGENTS|CLAUDE)\.md$'

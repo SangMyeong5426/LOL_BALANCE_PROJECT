@@ -1,0 +1,29 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# 도구 캐시
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 환경
+.env
+
+# macOS
+.DS_Store
+
+# 시뮬레이션 산출물 — 재현 가능하므로 커밋하지 않는다.
+# 시드와 설정이 커밋돼 있으면 같은 CSV가 다시 나온다.
+runs/
+outputs/
+
+# 게임 원본 데이터·디컴파일 결과는 저장소에 올리지 않는다.
+# 여기서 추출해 자체 형식으로 정리한 data/**/*.json 만 커밋한다.
+decompiled/
+raw-game-data/
+*.dll
+*.tar

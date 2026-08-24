@@ -1,0 +1,15 @@
+-r requirements.txt
+
+# 린팅·포매팅 (flake8 + black + isort 대체)
+ruff==0.16.4
+
+# 데미지 계산 단위 테스트 — 이 프로젝트에서 절대 줄이지 않는 항목
+pytest==9.1.1
+pytest-cov==7.1.0
+
+# 정적 타입 검사
+mypy==2.3.1
+pandas-stubs==3.0.5.260730
+
+# 커밋 전 ruff 자동 실행
+pre-commit==4.6.2
