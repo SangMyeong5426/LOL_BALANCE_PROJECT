@@ -39,7 +39,12 @@ from lol_balance.rules import Rule, RulePredictor
 
 @dataclass(frozen=True)
 class Result:
-    """arm 하나의 성적."""
+    """arm 하나의 성적.
+
+    `uses_llm` 은 **모델이 이 arm 의 산출물을 만드는 데 관여했는가**다.
+    실행 시점에 API 를 부른다는 뜻이 아니다 — A4·B4 의 규칙은 대화 중 Claude 가
+    제안했고 저장소에 텍스트로 들어 있다. 그 구분을 `rules.Provenance` 가 담는다.
+    """
 
     arm: str
     label: str
@@ -135,7 +140,9 @@ def target_arms(
         # **가중치는 학습 구간에서만 뽑는다.** 규칙 자체도 학습만 보고 제안했다.
         predictor = RulePredictor.fit(rules, train)
         scores = np.array([predictor.adjusted_score(r) for r in test])
-        out.append(Result("A4", "규칙 엔진 (LLM 제안)", True, _rank_scores(te, scores)))
+        out.append(
+            Result("A4", "규칙 엔진 — 대화 중 제안", True, _rank_scores(te, scores))
+        )
 
     base = sum(r.adjusted_next for r in test) / len(test)
     return out, {"기준선": base, "학습": len(train), "평가": len(test)}
@@ -215,7 +222,7 @@ def direction_arms(
         out.append(
             Result(
                 "B4",
-                "규칙 엔진 (LLM 제안)",
+                "규칙 엔진 — 대화 중 제안",
                 True,
                 {
                     "auc": roc_auc(te.y, scores),

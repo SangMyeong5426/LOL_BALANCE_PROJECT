@@ -149,12 +149,10 @@ def main() -> int:
         )
     )
     print(f"\n저장: {path.relative_to(ROOT)}")
-    llm = sum(1 for r in [*target, *direction] if r.uses_llm)
-    print(
-        f"\nA0~A3 · B0~B3 은 통계 베이스라인이고, A4 · B4 는 LLM 이 제안한 규칙이다"
-        f" ({llm}개)."
-    )
-    print("에이전트(A5 · A6)는 아직 없다.")
+    print("\nA0~A3 · B0~B3 은 통계 베이스라인이다.")
+    print("A4 · B4 는 **대화 중 Claude 가 제안한 규칙**을 코드가 채점한 것이다 —")
+    print("실행할 때 API 를 부르지 않는다. 근거는 ground_truth/README.md.")
+    print("에이전트(A5 · A6)와 수치 추출은 아직 없다.")
     return 0
 
 
