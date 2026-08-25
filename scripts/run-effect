@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""조정이 의도한 방향으로 갔는지 잰다.
+
+    ./scripts/run-effect
+
+조정된 챔피언의 승률 변화에서 **같은 패치 대조군(조정 안 된 챔피언)의 평균
+변화를 뺀다.** 아이템·룬처럼 그 패치에 함께 바뀐 것들이 대조군에도 똑같이
+걸리므로 그만큼 상쇄된다.
+
+**측정이지 판정이 아니다.** 「너프했는데 승률이 올랐다」는 적어도 「그러니
+이렇게 했어야 한다」는 적지 않는다.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.effect import outcomes  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+
+
+def main() -> int:
+    rows = read_panel(PANEL)
+    by_patch: dict[str, list] = {}
+    for row in rows:
+        by_patch.setdefault(row.patch, []).append(row)
+
+    found = []
+    pairs = 0
+    for i in range(len(PATCH_SEQUENCE) - 1):
+        a, b = PATCH_SEQUENCE[i], PATCH_SEQUENCE[i + 1]
+        if a in by_patch and b in by_patch:
+            pairs += 1
+            found.extend(outcomes(tuple(by_patch[a]), tuple(by_patch[b])))
+
+    if not found:
+        print("잴 것이 없다. ./scripts/build-panel 을 먼저 돌린다.")
+        return 1
+
+    print(f"인접 패치 쌍 {pairs}개 · 방향이 분명한 조정 {len(found)}건\n")
+    print(f"{'':8}{'n':>5}{'원변화':>10}{'대조군 뺀 뒤':>13}{'의도대로':>10}")
+    for direction in ("nerf", "buff"):
+        part = [o for o in found if o.direction == direction]
+        raw = np.array([o.raw_shift for o in part]) * 100
+        adj = np.array([o.adjusted_shift for o in part]) * 100
+        worked = sum(1 for o in part if o.worked) / len(part)
+        print(
+            f"{direction:8}{len(part):>5}{raw.mean():>+9.3f}%p"
+            f"{adj.mean():>+12.3f}%p{worked:>10.1%}"
+        )
+
+    every = np.array([o.adjusted_shift for o in found]) * 100
+    print("\n효과 크기 분포 (대조군 뺀 뒤, %p)")
+    for q in (10, 25, 50, 75, 90):
+        print(f"   {q:>3}% 분위  {np.percentile(np.abs(every), q):>6.3f}")
+
+    print("\n라벨 출처별 — 자동 판정은 스탯·쿨다운 조정 쪽으로 치우쳐 있다")
+    for source in ("auto", "label"):
+        part = [o for o in found if o.source == source]
+        if not part:
+            continue
+        worked = sum(1 for o in part if o.worked) / len(part)
+        adj = np.array([o.adjusted_shift for o in part]) * 100
+        print(
+            f"   {source:6} {len(part):>4}건 · 의도대로 {worked:.1%} · 평균 |효과| {np.abs(adj).mean():.3f}%p"
+        )
+
+    print("\n**측정이지 판정이 아니다.** 이 표는 조정이 어느 방향으로 얼마나")
+    print("움직였는지만 말한다. 라이엇이 잘했는지는 다루지 않는다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
