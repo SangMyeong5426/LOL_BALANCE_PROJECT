@@ -22,6 +22,16 @@ USER_AGENT = (
 ARCHIVE_OFFLINE_MARKER = b"Temporarily Offline"
 RATE_LIMIT_MARKER = b"429 Too Many Requests"
 
+ARCHIVE_BASE = "https://web.archive.org/web"
+
+# 아카이브 replay 형식. 둘 다 배너를 끼워 넣지 않은 **원본 바이트**를 준다.
+#
+# `id_` 를 먼저 쓰지만 이것만 믿으면 안 된다 — **일부 스냅샷은 `id_` 로 빈 응답이
+# 오는데 같은 스냅샷이 `if_` 로는 멀쩡히 나온다.** 15_2 · 15_6 · 16_2 세 패치가
+# 그랬고, 여덟 시간 간격으로 11회 넘게 시도해도 `id_` 는 계속 0바이트였다.
+# 하마터면 「아카이브에 없는 패치」로 적을 뻔했다.
+REPLAY_MODIFIERS = ("id_", "if_")
+
 
 class FetchError(RuntimeError):
     """받기를 포기해야 하는 상황."""
@@ -68,6 +78,37 @@ def get_with_retry(
             if i < attempts - 1:
                 time.sleep(base_delay * (2**i))
     raise Retryable(f"{attempts}회 시도 실패: {last}")
+
+
+def get_archived(
+    timestamp: str,
+    url: str,
+    attempts: int = 5,
+    base_delay: float = 20.0,
+    timeout: int = 120,
+) -> bytes:
+    """웹 아카이브 스냅샷 하나를 받는다.
+
+    `REPLAY_MODIFIERS` 를 차례로 시도한다. **한 형식이 죽었다고 스냅샷이 없는
+    것이 아니다** — 다른 형식으로는 같은 바이트가 나온다.
+
+    앞 형식에는 시도 횟수를 적게 준다. 빈 응답은 다시 해도 대개 같은 결과라
+    형식을 바꾸는 쪽이 훨씬 빠르고, 실제로 그렇게 살아났다. 아카이브 장애나
+    429 처럼 정말 시간이 약인 경우를 위해 **마지막 형식에서만 끝까지 버틴다.**
+    """
+    last: Exception | None = None
+    for modifier in REPLAY_MODIFIERS:
+        budget = attempts if modifier == REPLAY_MODIFIERS[-1] else 2
+        try:
+            return get_with_retry(
+                f"{ARCHIVE_BASE}/{timestamp}{modifier}/{url}",
+                attempts=budget,
+                base_delay=base_delay,
+                timeout=timeout,
+            )
+        except Retryable as exc:
+            last = exc
+    raise Retryable(f"replay 형식 {len(REPLAY_MODIFIERS)}종 모두 실패: {last}")
 
 
 def save(path: Path, body: bytes) -> None:
