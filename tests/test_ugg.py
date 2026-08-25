@@ -88,6 +88,14 @@ def test_win_rate_identity_catches_a_shifted_field() -> None:
         check_win_rate_identity(parse_champion_ranking(payload))
 
 
+def test_small_asymmetry_is_tolerated() -> None:
+    """실제 수집물에 0.04% 어긋나는 패치가 있었다 — 리메이크 같은 비대칭 판이다."""
+    payload = make_payload()
+    payload[0]["mid"][0][2] -= 1  # 1000판 중 1승을 뺀다 → 49.95%
+
+    check_win_rate_identity(parse_champion_ranking(payload))
+
+
 def test_games_identity_catches_a_missing_role() -> None:
     payload = make_payload()
     del payload[0]["supp"]
