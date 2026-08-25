@@ -14,7 +14,7 @@
 | **2e** | **추출 모델 등급 확정** | **파일럿 실행 직후** | `ANTHROPIC_API_KEY` 대기. [ADR-0003](adr/0003-llm-provider-and-calling-convention.md) |
 | 3 | Oracle's Elixir 2021~2026 주소 | 아무 때나 | 새 사이트가 SPA |
 | 4 | op.gg 아카이브가 KR 인지 검증 | 실제 수집할 때 | 지금은 정황 증거뿐 |
-| 5 | 국제 대회 일정표 (약 30행) | 아무 때나 | — |
+| ~~5~~ | ~~국제 대회 일정표~~ | **닫음 (2026-08-25)** — 만들어도 못 쓴다 | [prediction-signals](spec/prediction-signals.md) |
 | 7 | 강의 자료 4종 본문 | 아무 때나 | 아래 |
 
 ### 2b · 2d. `rankings` 해독이 커버리지 결정을 가로막고 있다
