@@ -9,7 +9,12 @@ from __future__ import annotations
 import pytest
 
 from lol_balance.ddragon import Change
-from lol_balance.direction import champion_direction, change_direction, value_shift
+from lol_balance.direction import (
+    champion_direction,
+    change_direction,
+    drop_mass_changes,
+    value_shift,
+)
 from lol_balance.groundtruth import compare
 
 
@@ -85,3 +90,30 @@ def test_compare_separates_extension_from_conflict(
     label: str, automatic: str, verdict: str
 ) -> None:
     assert compare(label, automatic) == verdict  # type: ignore[arg-type]
+
+
+def test_a_field_that_changes_for_everyone_is_not_a_balance_change() -> None:
+    """16.5 에서 `attackdamageperlevel` 이 171종 전부 5 → 0 이 됐다.
+
+    스키마가 바뀐 것이지 라이엇이 전 챔피언을 너프한 것이 아니다. 걸러내지
+    않으면 그 패치의 방향 라벨이 통째로 nerf 가 되고, 실제로 노트에 버그 수정
+    한 줄뿐인 챔피언까지 너프로 잡혔다.
+    """
+    schema = [Change(f"C{i}", "stat", "attackdamageperlevel", 5, 0) for i in range(90)]
+    real = Change("Ahri", "stat", "hp", 610, 580)
+
+    kept = drop_mass_changes([*schema, real], champion_count=100)
+
+    assert kept == (real,)
+
+
+def test_a_field_that_changes_for_a_few_survives() -> None:
+    """열 종이 같은 스탯을 조정받는 것은 흔한 밸런스 패치다."""
+    changes = [Change(f"C{i}", "stat", "hp", 610, 580) for i in range(10)]
+
+    assert len(drop_mass_changes(changes, champion_count=100)) == 10
+
+
+def test_mass_filter_is_a_no_op_without_a_champion_count() -> None:
+    changes = [Change("Ahri", "stat", "hp", 610, 580)]
+    assert drop_mass_changes(changes, champion_count=0) == tuple(changes)
