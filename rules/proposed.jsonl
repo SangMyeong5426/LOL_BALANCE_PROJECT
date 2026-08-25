@@ -1,0 +1,9 @@
+{"id": "A-ban", "rationale": "밴이 몰리는 챔피언은 건드린다. 학습 구간 40.8% (n=238)", "then": "adjusted", "when": [{"metric": "ban_rate", "op": ">=", "value": 0.2}]}
+{"id": "A-gap", "rationale": "5할에서 멀면 어느 쪽이든 건드린다. 학습 구간 35.5% (n=307)", "then": "adjusted", "when": [{"metric": "wr_gap", "op": ">=", "value": 0.03}]}
+{"id": "A-strong", "rationale": "명백히 센 챔피언. 학습 구간 31.2% (n=125)", "then": "adjusted", "when": [{"metric": "win_rate", "op": ">=", "value": 0.53}]}
+{"id": "A-popular", "rationale": "많이 하고 많이 밴하는 챔피언. 두 신호를 겹친다", "then": "adjusted", "when": [{"metric": "pick_rate", "op": ">=", "value": 0.08}, {"metric": "ban_rate", "op": ">=", "value": 0.1}]}
+{"id": "D-ban", "rationale": "밴율이 방향의 가장 강한 신호다. 학습 구간 79.6% (n=54)", "then": "nerf", "when": [{"metric": "ban_rate", "op": ">=", "value": 0.15}]}
+{"id": "D-strong", "rationale": "세고 많이 하면 너프. 승률·픽률을 겹친다", "then": "nerf", "when": [{"metric": "win_rate", "op": ">=", "value": 0.51}, {"metric": "pick_rate", "op": ">=", "value": 0.08}]}
+{"id": "D-above", "rationale": "5할을 확실히 넘으면 너프. 학습 구간 66.3% (n=95)", "then": "nerf", "when": [{"metric": "win_rate", "op": ">=", "value": 0.505}]}
+{"id": "D-weak", "rationale": "명백히 약하면 버프. 학습 구간 87.9% (n=116)", "then": "buff", "when": [{"metric": "win_rate", "op": "<", "value": 0.49}]}
+{"id": "D-unpopular", "rationale": "안 밴하고 약하면 버프. 두 신호를 겹친다", "then": "buff", "when": [{"metric": "ban_rate", "op": "<", "value": 0.05}, {"metric": "win_rate", "op": "<", "value": 0.5}]}

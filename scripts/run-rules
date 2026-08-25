@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""제안된 규칙을 채점한다 — **밸런스 기준 문서에 무엇을 실을지 정한다.**
+
+    ./scripts/run-rules [--split 15_13] [--min-lift 1.3] [--min-coverage 0.02]
+
+학습 구간 성적으로 규칙을 거르고, **평가 구간에서 다시 잰다.** 학습에서만
+좋고 평가에서 무너지는 규칙은 기준이 아니라 우연이다.
+
+**제안은 사람·LLM 이 하고 채점은 코드가 한다.** 이 경계가 이 프로젝트의 축이다.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import split  # noqa: E402
+from lol_balance.rules import Rule, Score, read_rules, score  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+RULES = ROOT / "rules" / "proposed.jsonl"
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def line(tag: str, result: Score) -> str:
+    return (
+        f"{tag:6}{result.fired:>6}{result.coverage:>9.1%}"
+        f"{result.precision:>10.1%}{result.base_rate:>9.1%}{result.lift:>8.2f}배"
+    )
+
+
+def main() -> int:
+    at = arg("--split", "15_13")
+    min_lift = float(arg("--min-lift", "1.3"))
+    min_coverage = float(arg("--min-coverage", "0.02"))
+
+    rules = read_rules(RULES)
+    if not rules:
+        print(f"규칙이 없다. {RULES.relative_to(ROOT)} 를 채운다.")
+        return 1
+    train, test = split(read_panel(PANEL), at)
+
+    print(f"분할 {at} · 규칙 {len(rules)}개")
+    print(f"통과 기준: 향상 {min_lift}배 이상 · 적용률 {min_coverage:.0%} 이상\n")
+
+    kept: list[Rule] = []
+    for rule in rules:
+        on_train, on_test = score(rule, train), score(rule, test)
+        passes = on_train.lift >= min_lift and on_train.coverage >= min_coverage
+        holds = on_test.lift >= min_lift
+        mark = "✅" if passes and holds else ("⚠️ " if passes else "❌")
+        if passes and holds:
+            kept.append(rule)
+
+        print(f"{mark} {rule}")
+        print(f"   {rule.rationale}")
+        print(f"{'':6}{'걸림':>6}{'적용률':>9}{'정확도':>10}{'기준선':>9}{'향상':>9}")
+        print("   " + line("학습", on_train))
+        print("   " + line("평가", on_test))
+        if passes and not holds:
+            print("   → 학습에서만 좋다. 기준이 아니라 우연이다")
+        elif not passes:
+            print("   → 학습에서 못 넘었다")
+        print()
+
+    print(f"살아남은 규칙 {len(kept)} / {len(rules)}")
+    for rule in kept:
+        print(f"   {rule}")
+    if not kept:
+        print("   (없다 — 그것도 결과다)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
