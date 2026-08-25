@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""arm 전체를 한 표로 낸다. **LLM 이 넘어야 할 선.**
+
+    ./scripts/run-report [--split 15_13] [--only target|direction|effect]
+
+세 과제를 한자리에서 본다 — 누가 조정되나(①), 어느 쪽인가(②), 먹혔나(③).
+셋이 서로 다른 질문이고, **같은 피처가 ① 과 ② 에서 반대로 움직인다.**
+
+결과는 `runs/` 에 남긴다. 커밋하지 않는다 — 같은 시드·같은 패널이면 다시
+만들어지므로.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import Result, direction_arms, target_arms  # noqa: E402
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.effect import outcomes  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE, PanelRow  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+RUNS = ROOT / "runs"
+
+Columns = list[tuple[str, str, str]]
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def table(results: list[Result], columns: Columns) -> None:
+    print(f"{'arm':6}{'방법':30}" + "".join(f"{title:>10}" for title, _, _ in columns))
+    print("-" * (36 + 10 * len(columns)))
+    for row in results:
+        line = f"{row.arm:6}{row.label:30}"
+        for _, key, fmt in columns:
+            value = row.scores.get(key)
+            shown = "—" if value is None or np.isnan(value) else format(value, fmt)
+            line += f"{shown:>10}"
+        print(line)
+
+
+def show_target(rows: tuple[PanelRow, ...], at: str, seed: int) -> list[Result]:
+    results, meta = target_arms(rows, at, seed)
+    print("① 대상 — 누가 조정되나  (패치 안에서 줄 세우기)")
+    print(
+        f"   학습 {meta['학습']:,.0f}행 · 평가 {meta['평가']:,.0f}행 "
+        f"· 기준선 {meta['기준선']:.1%}"
+    )
+    table(
+        results,
+        [
+            ("R-정확도", "r_precision", ".1%"),
+            ("P@10", "p_at_10", ".1%"),
+            ("AUC", "auc", ".3f"),
+        ],
+    )
+    return results
+
+
+def show_direction(rows: tuple[PanelRow, ...], at: str, seed: int) -> list[Result]:
+    results, meta = direction_arms(rows, at, seed)
+    print("\n② 방향 — 너프냐 버프냐  (조정된 챔피언만)")
+    print(
+        f"   학습 {meta['학습']:,.0f}건 · 평가 {meta['평가']:,.0f}건 "
+        f"· 손 라벨 {meta['손 라벨']:,.0f}건 · 기준선 {meta['기준선']:.1%}"
+    )
+    table(results, [("AUC", "auc", ".3f"), ("정확도", "accuracy", ".1%")])
+    return results
+
+
+def show_effect(rows: tuple[PanelRow, ...]) -> dict[str, dict[str, float]]:
+    by_patch: dict[str, list[PanelRow]] = {}
+    for row in rows:
+        by_patch.setdefault(row.patch, []).append(row)
+
+    found = []
+    for i in range(len(PATCH_SEQUENCE) - 1):
+        a, b = PATCH_SEQUENCE[i], PATCH_SEQUENCE[i + 1]
+        if a in by_patch and b in by_patch:
+            found.extend(outcomes(tuple(by_patch[a]), tuple(by_patch[b])))
+
+    print("\n③ 효과 — 먹혔나  (측정이지 예측이 아니다)")
+    print(f"{'':8}{'n':>6}{'대조군 뺀 뒤':>14}{'의도대로':>10}")
+    out: dict[str, dict[str, float]] = {}
+    for name in ("nerf", "buff"):
+        part = [o for o in found if o.direction == name]
+        if not part:
+            continue
+        shift = float(np.mean([o.adjusted_shift for o in part]) * 100)
+        worked = sum(1 for o in part if o.worked) / len(part)
+        out[name] = {"n": float(len(part)), "shift_pp": shift, "worked": worked}
+        print(f"{name:8}{len(part):>6}{shift:>+13.3f}%p{worked:>10.1%}")
+    return out
+
+
+def main() -> int:
+    at = arg("--split", "15_13")
+    only = arg("--only", "")
+    seed = load_settings().seed
+    rows = read_panel(PANEL)
+    if not rows:
+        print("패널이 비었다. ./scripts/build-panel 을 먼저 돌린다.")
+        return 1
+
+    print(f"시드 {seed} · 시간순 분할 {at} 앞뒤 · 패널 {len(rows):,}행\n")
+
+    target = show_target(rows, at, seed) if only in ("", "target") else []
+    direction = show_direction(rows, at, seed) if only in ("", "direction") else []
+    effect = show_effect(rows) if only in ("", "effect") else {}
+
+    RUNS.mkdir(exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    path = RUNS / f"report-{stamp}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "stamp": stamp,
+                "seed": seed,
+                "split": at,
+                "panel_rows": len(rows),
+                "target": {r.arm: r.scores for r in target},
+                "direction": {r.arm: r.scores for r in direction},
+                "effect": effect,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    print(f"\n저장: {path.relative_to(ROOT)}")
+    print("\n지금은 전부 통계 베이스라인이다. LLM arm 이 붙으면 이 표에 함께 선다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
