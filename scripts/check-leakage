@@ -27,7 +27,11 @@ from lol_balance.panel import PanelRow  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
-# 무너졌다고 볼 폭. 기준선에서 이만큼 안쪽이면 통과다.
+# 기준선을 이만큼 **넘게 웃돌면** 실패다.
+#
+# **한쪽만 본다.** 누출은 라벨을 섞어도 성능이 **남는** 것이고, 기준선 아래로
+# 내려가는 것은 그냥 잡음이다. 양쪽으로 보다가 AUC 0.432 (기준선 0.5, 평가
+# 135건이면 표준오차 약 0.05)를 누출로 잡아 헛경보를 냈다.
 TOLERANCE = 0.06
 
 
@@ -90,7 +94,7 @@ def main() -> int:
     failed = []
     for key, floor in floors.items():
         broken = swapped_target[key] if key.startswith("A") else swapped_direction[key]
-        mark = "✅" if abs(broken - floor) <= TOLERANCE else "❌"
+        mark = "✅" if broken - floor <= TOLERANCE else "❌"
         if mark == "❌":
             failed.append(key)
         print(
@@ -100,10 +104,11 @@ def main() -> int:
 
     print("\n대상을 섞으면 A 만, 방향을 섞으면 B 만 무너져야 한다 — 교차로 무너지면")
     print("두 과제가 어딘가에서 섞여 있다는 뜻이다.")
+    print("기준선 아래로 내려간 것은 잡음이므로 통과다. 누출은 성능이 남는 것이다.")
     if failed:
         print(f"\n❌ 기준선으로 안 돌아온 지표: {', '.join(failed)}")
         return 1
-    print(f"\n✅ 전부 기준선 ±{TOLERANCE} 안으로 무너졌다. 누출 징후 없음.")
+    print(f"\n✅ 전부 기준선 +{TOLERANCE} 아래로 무너졌다. 누출 징후 없음.")
     return 0
 
 
