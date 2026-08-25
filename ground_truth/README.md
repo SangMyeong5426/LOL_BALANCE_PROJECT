@@ -9,7 +9,7 @@
 | | |
 | --- | --- |
 | 규모 | **242종 · 11패치** |
-| 분포 | `buff` 60 · `adjust` 48 · `nerf` 33 · `mixed` 22 (+ 자동 판정 344) |
+| 분포 | `buff` 81 · `adjust` 76 · `nerf` 49 · `mixed` 36 (+ 자동 판정 344) |
 | 만든 방법 | **대화 중 Claude 가 패치 노트를 읽고 붙였다** |
 | **API 호출** | **없다.** `ANTHROPIC_API_KEY` 를 쓴 적이 없다 |
 | 채점 | Data Dragon diff 와 대조 — **충돌 0** ([`score-labels`](../scripts/score-labels)) |
