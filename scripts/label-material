@@ -2,6 +2,7 @@
 """방향 라벨을 붙일 재료를 뽑는다.
 
     ./scripts/label-material 16_15          한 패치의 재료
+    ./scripts/label-material --sample 10    아직 안 붙인 패치에서 무작위로 뽑기
     ./scripts/label-material --coverage     패치별 자동 판정 비율
 
 챔피언마다 노트 문장을 모아 보여 주고, Data Dragon 이 방향을 아는 경우 그것을
@@ -12,17 +13,21 @@
 from __future__ import annotations
 
 import json
+import random
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction  # noqa: E402
 from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
+
+LABELS = ROOT / "ground_truth" / "directions"
 
 DDRAGON = ROOT / "data" / "ddragon"
 NOTES = ROOT / "data" / "patchnotes"
@@ -52,12 +57,42 @@ def automatic(patch: str) -> dict[str, str]:
     return out
 
 
-def show_coverage() -> None:
+def targets() -> list[str]:
+    """예측 대상 패치 — 통계가 있는 패치의 **다음** 패치."""
     rows = read_panel(ROOT / "data" / "panel.sqlite")
     predicted = sorted({r.patch for r in rows}, key=PATCH_SEQUENCE.index)
-    targets = [PATCH_SEQUENCE[PATCH_SEQUENCE.index(p) + 1] for p in predicted]
+    return [PATCH_SEQUENCE[PATCH_SEQUENCE.index(p) + 1] for p in predicted]
+
+
+def show_sample(count: int) -> None:
+    """아직 안 붙인 패치에서 무작위로 뽑는다.
+
+    **크기나 시대로 고르지 않는다.** 라벨링이 편한 패치를 고르면 그 편함이
+    결과에 들어온다 — 실제로 작은 패치만 골랐다가 표본을 편향시켰다.
+    근거는 `docs/spec/labeling-guide.md`.
+    """
+    done = {f.stem for f in LABELS.glob("*.jsonl")}
+    pool = sorted(p for p in targets() if p not in done)
+    seed = load_settings().seed
+    picked = sorted(
+        random.Random(seed).sample(pool, min(count, len(pool))),
+        key=PATCH_SEQUENCE.index,
+    )
+    print(f"시드 {seed} · 남은 {len(pool)}패치에서 {len(picked)}개\n")
+    for patch in picked:
+        blocks = champion_changes((NOTES / f"{version(patch)}.html").read_bytes())
+        champions = {b.champion for b in blocks}
+        auto = automatic(patch)
+        print(
+            f"  {patch:8} 챔피언 {len(champions):3}종 · 문장 "
+            f"{sum(len(b.lines) for b in blocks):4} · 자동 {len(champions & set(auto)):3}"
+        )
+    print(f"\n합계 {sum(1 for _ in picked)}패치")
+
+
+def show_coverage() -> None:
     print(f"{'패치':8}{'챔피언':>7}{'자동':>6}{'비율':>8}")
-    for patch in targets:
+    for patch in targets():
         blocks = champion_changes((NOTES / f"{version(patch)}.html").read_bytes())
         champions = {b.champion for b in blocks}
         auto = automatic(patch)
@@ -88,6 +123,9 @@ def show_patch(patch: str) -> None:
 def main() -> int:
     if "--coverage" in sys.argv:
         show_coverage()
+        return 0
+    if "--sample" in sys.argv:
+        show_sample(int(sys.argv[sys.argv.index("--sample") + 1]))
         return 0
     if len(sys.argv) < 2:
         print(__doc__)
