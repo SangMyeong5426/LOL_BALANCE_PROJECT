@@ -19,6 +19,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
+from lol_balance.direction import (  # noqa: E402
+    Direction,
+    champion_direction,
+    drop_mass_changes,
+)
+from lol_balance.groundtruth import read_labels  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
     PATCH_SEQUENCE,
     PanelRow,
@@ -32,6 +39,7 @@ from lol_balance.ugg import parse_champion_ranking  # noqa: E402
 RANKING = ROOT / "data" / "ugg" / "champion_ranking"
 DDRAGON = ROOT / "data" / "ddragon"
 NOTES = ROOT / "data" / "patchnotes"
+LABELS = ROOT / "ground_truth" / "directions"
 OUT = ROOT / "data" / "panel.sqlite"
 
 
@@ -46,6 +54,32 @@ def adjusted_in(patch: str) -> frozenset[str]:
     if not path.exists():
         return frozenset()
     return frozenset(b.champion for b in champion_changes(path.read_bytes()))
+
+
+def directions_in(patch: str, previous: str) -> dict[str, tuple[Direction, str]]:
+    """그 패치의 챔피언별 방향. **손 라벨이 자동 판정을 이긴다.**
+
+    자동 판정은 Data Dragon 이 보는 스탯·쿨다운 조정만 안다. 손으로 붙인
+    라벨은 노트 전체를 읽은 것이므로 더 정확하고, 라벨이 쌓일수록 패널이
+    좋아진다. 어느 쪽에서 왔는지는 `direction_source` 에 남긴다.
+    """
+    after = json.loads((DDRAGON / f"{version(patch)}.json").read_bytes())["data"]
+    before = json.loads((DDRAGON / f"{version(previous)}.json").read_bytes())["data"]
+    standard = standard_champions(after)
+    names = {k: v.get("name", k) for k, v in standard.items()}
+
+    grouped: dict[str, list] = {}
+    for change in drop_mass_changes(diff_versions(before, after), len(standard)):
+        grouped.setdefault(change.champion, []).append(change)
+
+    out: dict[str, tuple[Direction, str]] = {}
+    for champion_id, changes in grouped.items():
+        direction = champion_direction(changes)
+        if direction:
+            out[names.get(champion_id, champion_id)] = (direction, "auto")
+    for label in read_labels(LABELS / f"{patch}.jsonl"):
+        out[label.champion] = (label.direction, "label")
+    return out
 
 
 def main() -> int:
@@ -76,7 +110,9 @@ def main() -> int:
         # 직전 패치가 **바로 앞**일 때만 추세를 붙인다. 사이에 결측이 있으면
         # 「직전 대비」가 아니라 「두세 패치 전 대비」가 된다.
         prior = previous if previous_patch == PATCH_SEQUENCE[i - 1] else None
-        made = patch_rows(patch, ranking, names, adjusted, prior)
+        made = patch_rows(
+            patch, ranking, names, adjusted, prior, directions=directions_in(nxt, patch)
+        )
         rows.extend(made)
 
         n_adj = sum(1 for r in made if r.adjusted_next)
@@ -88,12 +124,19 @@ def main() -> int:
 
     write_panel(OUT, tuple(rows))
 
+    by_source = {
+        s: sum(1 for r in rows if r.direction_source == s) for s in ("label", "auto")
+    }
     points = len({r.patch for r in rows})
     trend_points = len({r.patch for r in rows if r.has_trend})
     positives = sum(1 for r in rows if r.adjusted_next)
     print(
         f"\n예측 지점 {points} (추세 가능 {trend_points}) · 행 {len(rows):,} "
         f"· 양성 {positives:,} ({positives / len(rows):.1%})"
+    )
+    print(
+        f"방향 라벨 {sum(by_source.values()):,} "
+        f"(손 {by_source['label']:,} · 자동 {by_source['auto']:,})"
     )
     if skipped_no_next:
         print(f"제외: 마지막 패치 {skipped_no_next}개 — 다음 패치가 없어 라벨이 없다")

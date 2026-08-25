@@ -39,6 +39,8 @@ _COLUMNS = (
     "d_pick_rate REAL",
     "d_ban_rate REAL",
     "adjusted_next INTEGER NOT NULL",
+    "direction_next TEXT",
+    "direction_source TEXT",
 )
 _FIELDS = tuple(c.split()[0] for c in _COLUMNS)
 
@@ -87,12 +89,17 @@ def read_panel(
 
     with sqlite3.connect(path) as conn:
         cursor = conn.execute(sql, args)
-        return tuple(
-            PanelRow(
-                **{
-                    **dict(zip(_FIELDS, row, strict=True)),
-                    "adjusted_next": bool(row[-1]),
-                }
-            )
-            for row in cursor
-        )
+        return tuple(_row(record) for record in cursor)
+
+
+def _row(record: tuple[object, ...]) -> PanelRow:
+    """한 줄을 `PanelRow` 로 되돌린다.
+
+    **위치가 아니라 이름으로 집는다.** 열을 하나 추가했더니 마지막 열이
+    `adjusted_next` 에서 `direction_source` 로 바뀌었는데, `row[-1]` 로 읽고
+    있어서 조정 여부가 통째로 틀렸다. 파싱은 성공하고 타입도 맞아서 조용히
+    지나갔고, 왕복 테스트가 잡았다.
+    """
+    values = dict(zip(_FIELDS, record, strict=True))
+    values["adjusted_next"] = bool(values["adjusted_next"])
+    return PanelRow(**values)  # type: ignore[arg-type]

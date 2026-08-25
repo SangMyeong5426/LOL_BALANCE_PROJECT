@@ -41,6 +41,8 @@ def make_row() -> PanelRowFactory:
             d_pick_rate=None,
             d_ban_rate=None,
             adjusted_next=False,
+            direction_next=None,
+            direction_source=None,
         )
         values.update(overrides)
         return PanelRow(**values)  # type: ignore[arg-type]
