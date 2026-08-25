@@ -36,8 +36,11 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 no_implicit_optional = true
 
-# 타입 스텁이 없는 서드파티용 [[tool.mypy.overrides]] 는 실제로 import 할 때 추가한다.
-# 미리 적어 두면 warn_unused_configs 가 매번 note 를 뱉는다.
+# 타입 스텁이 없는 서드파티용 override. 미리 적어 두면 warn_unused_configs 가
+# note 를 뱉으므로 실제로 import 할 때만 추가한다.
+[[tool.mypy.overrides]]
+module = ["sklearn.*"]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 source = ["src"]
