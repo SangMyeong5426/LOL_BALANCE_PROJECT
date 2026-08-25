@@ -21,7 +21,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from lol_balance.fetch import Retryable, get_with_retry, save  # noqa: E402
+from lol_balance.fetch import (  # noqa: E402
+    Retryable,
+    get_archived,
+    get_with_retry,
+    save,
+)
 from lol_balance.ugg import (  # noqa: E402
     check_games_identity,
     check_win_rate_identity,
@@ -56,7 +61,7 @@ def main() -> int:
             continue
         ts, url = by_patch[patch]
         try:
-            body = get_with_retry(f"https://web.archive.org/web/{ts}id_/{url}")
+            body = get_archived(ts, url)
             ranking = parse_champion_ranking(json.loads(body))
             check_win_rate_identity(ranking)
             check_games_identity(ranking)

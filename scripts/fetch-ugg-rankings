@@ -23,7 +23,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from lol_balance.fetch import Retryable, get_with_retry, save  # noqa: E402
+from lol_balance.fetch import (  # noqa: E402
+    Retryable,
+    get_archived,
+    get_with_retry,
+    save,
+)
 
 OUT = Path(__file__).resolve().parents[1] / "data" / "ugg" / "rankings"
 CDX = (
@@ -79,7 +84,7 @@ def main() -> int:
             continue
         ts, url = targets[(patch, champ)]
         try:
-            body = get_with_retry(f"https://web.archive.org/web/{ts}id_/{url}")
+            body = get_archived(ts, url)
             json.loads(body)  # 온전한 JSON 인지만 본다. 해독은 나중에
             save(path, body)
             done += 1
