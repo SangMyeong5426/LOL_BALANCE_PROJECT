@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""수치 변경 기록을 저장하고 Data Dragon 으로 채점한다.
+
+    ./scripts/save-records 13.15.1 < records.jsonl
+
+입력은 `extract.ChangeRecord` 한 줄씩. **저장 즉시 채점한다** — 스탯·쿨다운·
+코스트·사거리는 Data Dragon 에 완전하므로 기계적으로 대조된다.
+
+「대조 불가」를 환각으로 세지 않는다. 대부분 스킬의 피해량이 Data Dragon 에
+없어서 노트에만 있는 것이 정상이고, 그것을 뽑으라고 사람·LLM 이 읽는다.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.crosscheck import cross_check  # noqa: E402
+from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
+from lol_balance.direction import drop_mass_changes  # noqa: E402
+from lol_balance.extract import ChangeRecord  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+
+OUT = ROOT / "ground_truth" / "records"
+DDRAGON = ROOT / "data" / "ddragon"
+NOTES = ROOT / "data" / "patchnotes"
+
+
+def previous(version: str) -> str:
+    key = "_".join(version.split(".")[:2])
+    return PATCH_SEQUENCE[PATCH_SEQUENCE.index(key) - 1].replace("_", ".") + ".1"
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 1
+    version = sys.argv[1]
+
+    records = tuple(
+        ChangeRecord(**json.loads(line)) for line in sys.stdin if line.strip()
+    )
+    if not records:
+        print("입력이 비었다.")
+        return 1
+
+    after = json.loads((DDRAGON / f"{version}.json").read_bytes())["data"]
+    before = json.loads((DDRAGON / f"{previous(version)}.json").read_bytes())["data"]
+    standard = standard_champions(after)
+    names = {k: v.get("name", k) for k, v in standard.items()}
+    changes = drop_mass_changes(diff_versions(before, after), len(standard))
+
+    result = cross_check(changes, records, names)
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    path = OUT / f"{version}.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(r.model_dump(), ensure_ascii=False, sort_keys=True)
+            for r in sorted(records, key=lambda r: (r.champion, r.field))
+        )
+        + "\n"
+    )
+
+    print(f"{version}: 기록 {len(records)}건 저장 → {path.relative_to(ROOT)}")
+    print(
+        f"  채점 대상 {result.scored}건 (Data Dragon 이 아는 변경) — "
+        f"맞음 {len(result.matched)} · 놓침 {len(result.missed)}"
+    )
+    if result.scored:
+        print(f"  재현율 {result.recall:.1%}")
+    print(f"  대조 불가 {len(result.unverifiable)}건 — 대부분 피해량이다")
+    # **「놓쳤다」와 「노트에 없다」는 다르다.** Data Dragon 이 잡았는데 노트에
+    # 그 챔피언 얘기가 아예 없으면 라이엇이 안 적고 바꾼 것이다 — 읽는 사람의
+    # 실수가 아니다. 갈라 놓지 않으면 추출 품질이 부당하게 낮게 보인다.
+    # 챔피언 이름만 보면 안 된다 — 노트에 나오지만 **버그 수정뿐**인 챔피언이
+    # 있다. 그 챔피언의 수치 변경은 어디에도 안 적힌 것이다.
+    numeric = re.compile(r"\b(reduced|increased|changed|lowered|raised)\b[^.]*\d")
+    noted = {
+        b.champion
+        for b in champion_changes((NOTES / f"{version}.html").read_bytes())
+        if any(numeric.search(line) for line in b.lines)
+    }
+    mine = [c for c in result.missed if names.get(c.champion, c.champion) in noted]
+    silent = [
+        c for c in result.missed if names.get(c.champion, c.champion) not in noted
+    ]
+
+    if mine:
+        print(f"  놓친 것 {len(mine)}건 — 노트에 있는데 내가 못 뽑았다")
+        for change in mine:
+            print(f"    ⚠ {change}")
+    if silent:
+        print(f"  조용한 변경 {len(silent)}건 — 노트에 없다. 라이엇이 안 적고 바꿨다")
+        for change in silent:
+            print(f"    · {change}")
+    if result.scored and not mine:
+        print("  → 노트에 적힌 것은 전부 뽑았다")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
