@@ -89,3 +89,21 @@ def test_metrics_are_finite_where_they_are_defined(make_row: PanelRowFactory) ->
     auc = [r.scores["auc"] for r in results]
     assert all(0.0 <= value <= 1.0 for value in auc)
     assert pytest.approx(0.0, abs=1.0) == auc[0]
+
+
+def test_retrieval_arms_appear_in_both_tables(make_row: PanelRowFactory) -> None:
+    """A5·B5 는 사례 검색만으로 예측한다 — 모델 없이 이웃의 다수결이다."""
+    rows = _panel(make_row)
+
+    target, _ = target_arms(rows, "15_13", SEED)
+    direction, _ = direction_arms(rows, "15_13", SEED)
+
+    assert {r.arm for r in target} >= {"A5", "A5b"}
+    assert {r.arm for r in direction} >= {"B5", "B5b"}
+
+
+def test_retrieval_arms_are_not_marked_as_llm(make_row: PanelRowFactory) -> None:
+    """검색은 통계다. LLM 이 관여하지 않는다."""
+    target, _ = target_arms(_panel(make_row), "15_13", SEED)
+
+    assert all(not r.uses_llm for r in target if r.arm.startswith("A5"))

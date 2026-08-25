@@ -34,6 +34,7 @@ from lol_balance.baseline import (
     roc_auc,
 )
 from lol_balance.panel import PanelRow, patch_index
+from lol_balance.retrieval import CaseSearch
 from lol_balance.rules import Rule, RulePredictor
 
 
@@ -75,6 +76,47 @@ def split(rows: tuple[PanelRow, ...], at: str) -> tuple[tuple[PanelRow, ...], ..
         tuple(r for r in rows if r.patch_index < cut),
         tuple(r for r in rows if r.patch_index >= cut),
     )
+
+
+def _retrieved(
+    rows: tuple[PanelRow, ...],
+    test: tuple[PanelRow, ...],
+    at: str,
+    k: int,
+    expanding: bool,
+) -> tuple[list[float], list[float]]:
+    """사례 검색만으로 두 과제를 예측한다. **모델이 없다 — 이웃의 다수결이다.**
+
+    `expanding` 이면 참고 범위를 **각 행의 패치 직전까지** 넓힌다. 실제 시스템은
+    그렇게 돌므로 더 현실적인데, 그러면 A3(k-NN)와 참고 범위가 달라져 직접
+    비교가 안 된다. 그래서 둘 다 낸다.
+
+    검색기가 `as_of` 를 생성자에서 받으므로 **경계는 도구가 지킨다.** 여기서
+    빠뜨려도 경계 밖 사례가 섞이지 않는다.
+    """
+    fixed = None if expanding else CaseSearch(rows, at)
+    adjusted: list[float] = []
+    nerf: list[float] = []
+    cache: dict[str, CaseSearch] = {}
+
+    for row in test:
+        if fixed is not None:
+            search = fixed
+        else:
+            search = cache.setdefault(row.patch, CaseSearch(rows, row.patch))
+        cases = search.similar(row, k=k)
+        if not cases:
+            adjusted.append(0.0)
+            nerf.append(0.5)
+            continue
+        adjusted.append(sum(1 for c in cases if c.row.adjusted_next) / len(cases))
+        directed = [c for c in cases if c.row.direction_next in ("nerf", "buff")]
+        nerf.append(
+            sum(1 for c in directed if c.row.direction_next == "nerf") / len(directed)
+            if directed
+            else 0.5
+        )
+    return adjusted, nerf
 
 
 # --- ① 대상 -----------------------------------------------------------
@@ -143,6 +185,13 @@ def target_arms(
         out.append(
             Result("A4", "규칙 엔진 — 대화 중 제안", True, _rank_scores(te, scores))
         )
+
+    for arm, label, expanding in (
+        ("A5", "사례 검색만 (RAG 검색부)", False),
+        ("A5b", "사례 검색만 — 매 패치 갱신", True),
+    ):
+        found, _ = _retrieved(rows, test, at, k=25, expanding=expanding)
+        out.append(Result(arm, label, False, _rank_scores(te, np.array(found))))
 
     base = sum(r.adjusted_next for r in test) / len(test)
     return out, {"기준선": base, "학습": len(train), "평가": len(test)}
@@ -230,6 +279,13 @@ def direction_arms(
                 },
             )
         )
+
+    for arm, label, expanding in (
+        ("B5", "사례 검색만 (RAG 검색부)", False),
+        ("B5b", "사례 검색만 — 매 패치 갱신", True),
+    ):
+        _, found = _retrieved(pool, test, at, k=25, expanding=expanding)
+        out.append(Result(arm, label, False, scored(np.array(found), True)))
 
     nerf = sum(1 for r in test if r.direction_next == "nerf")
     return out, {
