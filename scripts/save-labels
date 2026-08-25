@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""방향 라벨을 저장하고 그 자리에서 채점한다.
+
+    ./scripts/save-labels 16_5 < labels.tsv
+
+입력은 `챔피언<탭>방향` 한 줄씩. 근거 문장은 노트에서 자동으로 끌어온다 —
+나중에 이 라벨을 의심하게 됐을 때 되짚을 수 있어야 한다.
+
+저장 즉시 Data Dragon 자동 판정과 대조한다. **충돌이 나면 그 자리에서 보인다.**
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
+from lol_balance.direction import champion_direction, drop_mass_changes  # noqa: E402
+from lol_balance.groundtruth import DirectionLabel, compare, write_labels  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+
+OUT = ROOT / "ground_truth" / "directions"
+VALID = ("nerf", "buff", "mixed", "adjust")
+
+
+def version(patch: str) -> str:
+    return patch.replace("_", ".") + ".1"
+
+
+def automatic(patch: str) -> dict[str, str]:
+    i = PATCH_SEQUENCE.index(patch)
+    after = json.loads((ROOT / f"data/ddragon/{version(patch)}.json").read_bytes())[
+        "data"
+    ]
+    before = json.loads(
+        (ROOT / f"data/ddragon/{version(PATCH_SEQUENCE[i - 1])}.json").read_bytes()
+    )["data"]
+    standard = standard_champions(after)
+    names = {k: v.get("name", k) for k, v in standard.items()}
+    grouped: dict[str, list] = {}
+    for change in drop_mass_changes(diff_versions(before, after), len(standard)):
+        grouped.setdefault(change.champion, []).append(change)
+    out = {}
+    for champion_id, changes in grouped.items():
+        direction = champion_direction(changes)
+        if direction:
+            out[names.get(champion_id, champion_id)] = direction
+    return out
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 1
+    patch = sys.argv[1]
+
+    blocks = champion_changes(
+        (ROOT / f"data/patchnotes/{version(patch)}.html").read_bytes()
+    )
+    evidence: dict[str, list[str]] = {}
+    for block in blocks:
+        evidence.setdefault(block.champion, []).extend(block.lines)
+
+    given: dict[str, str] = {}
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        champion, _, direction = line.rstrip("\n").partition("\t")
+        if direction not in VALID:
+            print(f"알 수 없는 방향: {champion!r} → {direction!r}")
+            return 1
+        given[champion] = direction
+
+    missing = set(evidence) - set(given)
+    extra = set(given) - set(evidence)
+    if missing:
+        print(f"라벨이 빠진 챔피언 {len(missing)}종: {sorted(missing)}")
+        return 1
+    if extra:
+        print(f"노트에 없는 챔피언 {len(extra)}종: {sorted(extra)}")
+        return 1
+
+    labels = tuple(
+        DirectionLabel(patch, champion, direction, tuple(evidence[champion]))  # type: ignore[arg-type]
+        for champion, direction in given.items()
+    )
+    write_labels(OUT / f"{patch}.jsonl", labels)
+
+    auto = automatic(patch)
+    verdicts = {
+        champion: compare(direction, auto[champion])  # type: ignore[arg-type]
+        for champion, direction in given.items()
+        if champion in auto
+    }
+    counts = {
+        v: sum(1 for x in verdicts.values() if x == v)
+        for v in ("agree", "extends", "conflict")
+    }
+
+    print(f"{patch}: 라벨 {len(labels)}종 저장 → ground_truth/directions/{patch}.jsonl")
+    print(
+        "  분포: "
+        + " · ".join(f"{d} {sum(1 for x in given.values() if x == d)}" for d in VALID)
+    )
+    print(
+        f"  채점 대상 {len(verdicts)}종 — 일치 {counts['agree']} · 확장 {counts['extends']} · 충돌 {counts['conflict']}"
+    )
+    for champion, verdict in sorted(verdicts.items()):
+        if verdict == "conflict":
+            print(f"    ⚠ {champion}: 라벨 {given[champion]} vs 자동 {auto[champion]}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -22,7 +22,10 @@ from typing import Literal
 
 from lol_balance.ddragon import Change
 
-Direction = Literal["nerf", "buff", "mixed"]
+# `adjust` 는 **조정은 됐는데 강해진 것도 약해진 것도 아닌 경우**다. 버그 수정,
+# 조작감 변경, 판정 로직 손질이 여기 들어간다. 노트에 실리지만 승률을 어느
+# 방향으로 밀지 알 수 없으므로 너프·버프와 섞으면 안 된다.
+Direction = Literal["nerf", "buff", "mixed", "adjust"]
 
 # 값이 **오르면** 버프인가 너프인가. 실제 diff 에 나온 필드만 적는다 —
 # 추측으로 채우지 않는다. 모르는 필드는 채점하지 않고 넘어간다.
