@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from patchlens.patchnotes import wiki_url, wiki_version
+from lol_balance.patchnotes import wiki_url, wiki_version
 
 
 @pytest.mark.parametrize(

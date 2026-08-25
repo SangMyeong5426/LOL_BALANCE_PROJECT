@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from patchlens.ugg import (
+from lol_balance.ugg import (
     check_games_identity,
     check_win_rate_identity,
     parse_champion_ranking,
