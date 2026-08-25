@@ -22,3 +22,4 @@
 - [ADR 0001: Python 환경과 코드 품질 도구](0001-python-environment-and-tooling.md)
 - [ADR 0002: 예측 지점으로 인정할 패치 커버리지 기준](0002-prediction-point-coverage-criterion.md)
 - [ADR 0003: LLM 제공자와 호출 방식](0003-llm-provider-and-calling-convention.md)
+- [ADR 0004: 정리한 결과를 어떤 형식으로 남기는가](0004-processed-data-storage-format.md)
