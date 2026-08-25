@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""패치 노트 추출 파일럿 — **ADR 에 쓸 숫자를 만든다.**
+
+다섯 패치를 뽑아 LLM 으로 구조화하고 Data Dragon diff 로 채점한다. 표기가
+시대마다 다르므로 **각 시대에서 하나씩** 고른다.
+
+    ./scripts/pilot-extract [--model claude-opus-5] [--effort medium]
+
+`ANTHROPIC_API_KEY` 가 필요하다. 없으면 `--dry-run` 으로 프롬프트와 크기만 본다.
+결과는 `data/pilot/` 에 남긴다 — 커밋하지 않는다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.crosscheck import cross_check  # noqa: E402
+from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
+from lol_balance.extract import Effort, build_prompt, extract_patch  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+
+# 표기 시대를 고르게 덮는다. 산문 → 시즌 표기 → 화살표.
+# 13.14 는 쓰지 않는다 — 우리 범위의 첫 버전이라 직전 diff 가 없어 채점이 안 된다.
+PILOT = ["13.15.1", "14.10.1", "15.3.1", "16.1.1", "16.15.1"]
+
+NOTES = ROOT / "data" / "patchnotes"
+DDRAGON = ROOT / "data" / "ddragon"
+OUT = ROOT / "data" / "pilot"
+
+ALL = (
+    [f"13.{i}.1" for i in range(14, 25)]
+    + [f"14.{i}.1" for i in range(1, 25)]
+    + [f"15.{i}.1" for i in range(1, 25)]
+    + [f"16.{i}.1" for i in range(1, 16)]
+)
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def previous(version: str) -> str | None:
+    i = ALL.index(version)
+    return ALL[i - 1] if i else None
+
+
+def ddragon_changes(version: str) -> tuple[list, dict[str, str]]:
+    """직전 버전과의 diff, 그리고 id → 표시 이름 사전."""
+    prev = previous(version)
+    after = json.loads((DDRAGON / f"{version}.json").read_bytes())["data"]
+    names = {k: v.get("name", k) for k, v in standard_champions(after).items()}
+    if prev is None or not (DDRAGON / f"{prev}.json").exists():
+        return [], names
+    before = json.loads((DDRAGON / f"{prev}.json").read_bytes())["data"]
+    return diff_versions(before, after), names
+
+
+def main() -> int:
+    dry = "--dry-run" in sys.argv
+    model = arg("--model", load_settings().llm_model)
+    effort: Effort = arg("--effort", "medium")  # type: ignore[assignment]
+
+    settings = load_settings()
+    if not dry and not settings.llm_available:
+        print("ANTHROPIC_API_KEY 가 없다. .env 에 넣거나 --dry-run 으로 확인한다.")
+        return 1
+
+    client = None
+    if not dry:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+    print(f"모델 {model} · effort {effort}" + ("  (드라이런)" if dry else ""))
+    print(
+        f"{'패치':10}{'묶음':>6}{'문장':>6}{'글자':>8}{'DD변경':>8}{'추출':>6}{'맞음':>6}{'놓침':>6}{'재현율':>8}"
+    )
+
+    totals = {"scored": 0, "matched": 0, "records": 0, "unverifiable": 0}
+    for version in PILOT:
+        blocks = champion_changes((NOTES / f"{version}.html").read_bytes())
+        chars = sum(len(line) for b in blocks for line in b.lines)
+        changes, names = ddragon_changes(version)
+        scored_changes = [c for c in changes if c.kind in ("stat", "spell")]
+
+        if dry:
+            print(
+                f"{version:10}{len(blocks):>6}{sum(len(b.lines) for b in blocks):>6}"
+                f"{chars:>8,}{len(scored_changes):>8}{'-':>6}{'-':>6}{'-':>6}{'-':>8}"
+            )
+            (OUT / "prompts").mkdir(parents=True, exist_ok=True)
+            (OUT / "prompts" / f"{version}.txt").write_text(build_prompt(blocks))
+            continue
+
+        assert client is not None
+        records = extract_patch(client, blocks, model=model, effort=effort)
+        result = cross_check(changes, records, names)
+        totals["scored"] += result.scored
+        totals["matched"] += len(result.matched)
+        totals["records"] += len(records)
+        totals["unverifiable"] += len(result.unverifiable)
+
+        rate = f"{result.recall:.1%}" if result.scored else "—"
+        print(
+            f"{version:10}{len(blocks):>6}{sum(len(b.lines) for b in blocks):>6}"
+            f"{chars:>8,}{result.scored:>8}{len(records):>6}"
+            f"{len(result.matched):>6}{len(result.missed):>6}{rate:>8}"
+        )
+        OUT.mkdir(parents=True, exist_ok=True)
+        (OUT / f"{version}.json").write_text(
+            json.dumps([r.model_dump() for r in records], ensure_ascii=False, indent=2)
+        )
+
+    if not dry and totals["scored"]:
+        print(
+            f"\n합계: 채점 대상 {totals['scored']} · 맞음 {totals['matched']} "
+            f"· 재현율 {totals['matched'] / totals['scored']:.1%}"
+        )
+        print(
+            f"추출 기록 {totals['records']}건 중 대조 불가 {totals['unverifiable']}건 "
+            "— 대부분 Data Dragon 에 없는 피해량이다. 표본으로 확인할 것."
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
