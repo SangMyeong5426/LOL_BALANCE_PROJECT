@@ -1,0 +1,154 @@
+"""통계 베이스라인 — **LLM 이 값을 하는지 비교할 대상.**
+
+[CLAUDE.md](../../CLAUDE.md) 가 요구하는 순서다. 단순한 방법을 먼저 만들고,
+LLM 이 그것을 못 이기면 못 이겼다고 적는다.
+
+과제는 **줄 세우기**다. 한 패치에 챔피언 약 172종이 있고 그중 평균 29.7종이
+다음 패치에서 조정된다. 각 챔피언에 「조정될 확률」을 매겨 정렬하고, 위쪽에
+실제 조정된 챔피언이 얼마나 모이는지를 본다.
+
+**결측을 값으로 채우되 채웠다는 사실을 피처로 남긴다.** 선형 모델은 빈 칸을
+못 받으므로 채워야 하는데, 그냥 채우면 「모름」이 「그 값이었음」으로 바뀐다.
+표시 열을 함께 넣으면 모델이 그 둘을 구분할 수 있다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+from numpy.typing import NDArray
+
+from lol_balance.panel import PanelRow
+
+# 수준 피처 — 그 패치의 상태
+LEVEL_FEATURES = (
+    "win_rate",
+    "wr_gap",
+    "pick_rate",
+    "ban_rate",
+    "matches",
+    "kills",
+    "deaths",
+    "assists",
+    "cs",
+    "gold",
+    "damage",
+    "role_count",
+)
+# 추세 피처 — 직전 패치 대비 변화
+TREND_FEATURES = ("d_win_rate", "d_pick_rate", "d_ban_rate")
+
+
+# 값이 없을 수 있는 피처. **부분집합에 결측이 있든 없든 표시 열을 항상 만든다.**
+# 「이번 데이터에 결측이 있을 때만」 열을 만들면 학습과 평가의 열 개수가 달라진다.
+NULLABLE = ("ban_rate", "d_win_rate", "d_pick_rate", "d_ban_rate")
+
+
+@dataclass(frozen=True)
+class Matrix:
+    """모델에 넣을 형태로 편 패널."""
+
+    x: NDArray[np.float64]
+    y: NDArray[np.int_]
+    patches: NDArray[np.str_]
+    champions: NDArray[np.str_]
+    columns: tuple[str, ...]
+
+    def __len__(self) -> int:
+        return len(self.y)
+
+
+@dataclass(frozen=True)
+class Encoder:
+    """열 구성과 채움값. **학습 구간에서만 만든다.**
+
+    평가 구간의 중앙값으로 평가 구간을 채우면 평가 정보가 모델 입력에 섞인다.
+    금액이 작아 보여도 이런 것이 시간순 분할을 무력화한다.
+    """
+
+    names: tuple[str, ...]
+    columns: tuple[str, ...]
+    fill: tuple[float, ...]
+
+
+def feature_names(with_trend: bool) -> tuple[str, ...]:
+    return LEVEL_FEATURES + (TREND_FEATURES if with_trend else ())
+
+
+def fit_encoder(rows: tuple[PanelRow, ...], with_trend: bool) -> Encoder:
+    """학습 구간에서 열 구성과 채움값을 정한다."""
+    names = feature_names(with_trend)
+    fill: list[float] = []
+    columns: list[str] = []
+    for name in names:
+        values = [getattr(r, name) for r in rows]
+        present = [float(v) for v in values if v is not None]
+        fill.append(float(np.median(present)) if present else 0.0)
+        if name in NULLABLE:
+            columns.append(f"{name}_missing")
+        columns.append(name)
+    return Encoder(names, tuple(columns), tuple(fill))
+
+
+def encode(rows: tuple[PanelRow, ...], encoder: Encoder) -> Matrix:
+    """행을 인코더가 정한 열 구성으로 편다."""
+    blocks: list[NDArray[np.float64]] = []
+    for name, fill in zip(encoder.names, encoder.fill, strict=True):
+        raw = [getattr(r, name) for r in rows]
+        missing = np.array([v is None for v in raw], dtype=float)
+        values = np.array([fill if v is None else float(v) for v in raw], dtype=float)
+        if name in NULLABLE:
+            blocks.append(missing)
+        blocks.append(values)
+    return Matrix(
+        x=np.column_stack(blocks).astype(np.float64),
+        y=np.array([int(r.adjusted_next) for r in rows], dtype=int),
+        patches=np.array([r.patch for r in rows]),
+        champions=np.array([r.champion for r in rows]),
+        columns=encoder.columns,
+    )
+
+
+# --- 지표 -------------------------------------------------------------
+
+
+def r_precision(y: NDArray[np.int_], score: NDArray[np.float64]) -> float:
+    """실제 조정된 수만큼 뽑았을 때의 정확도.
+
+    **K 를 고정하지 않는다.** 패치당 조정 수가 11~68 종으로 크게 다르므로
+    고정 K 는 패치마다 뜻이 달라진다. 실제 수를 K 로 쓰면 패치 간 비교가 된다.
+    이것은 평가 쪽 선택이고 모델에 알려 주는 정보가 아니다 — 모든 arm 이 같은
+    K 로 채점된다.
+    """
+    k = int(y.sum())
+    if k == 0:
+        return float("nan")
+    top = np.argsort(-score, kind="stable")[:k]
+    return float(y[top].sum() / k)
+
+
+def precision_at(y: NDArray[np.int_], score: NDArray[np.float64], k: int) -> float:
+    """상위 k 종 중 실제 조정된 비율. 목록 맨 위의 품질을 본다."""
+    if len(y) < k:
+        return float("nan")
+    top = np.argsort(-score, kind="stable")[:k]
+    return float(y[top].sum() / k)
+
+
+def roc_auc(y: NDArray[np.int_], score: NDArray[np.float64]) -> float:
+    """무작위로 고른 양성이 무작위 음성보다 위에 올 확률. 문턱값이 필요 없다."""
+    positive, negative = int(y.sum()), int((1 - y).sum())
+    if positive == 0 or negative == 0:
+        return float("nan")
+    rank = np.empty(len(score), dtype=float)
+    order = np.argsort(score, kind="stable")
+    rank[order] = np.arange(1, len(score) + 1)
+    # 동점은 평균 순위로. 안 그러면 상수 예측기가 0.5 가 아닌 값을 받는다.
+    for value in np.unique(score):
+        tie = score == value
+        if tie.sum() > 1:
+            rank[tie] = rank[tie].mean()
+    return float(
+        (rank[y == 1].sum() - positive * (positive + 1) / 2) / (positive * negative)
+    )
