@@ -59,10 +59,12 @@ def test_target_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
         "A0d",
         "A1",
         "A2",
+        "A2h",
         "A3",
         "A5",
         "A5b",
         "A7",
+        "A7h",
     ]
     assert all(not r.uses_llm for r in results)  # A4 는 규칙을 넘겨야 나온다
     assert 0.0 < meta["기준선"] < 1.0

@@ -23,6 +23,12 @@ from lol_balance.ugg import ChampionRanking, ChampionRow
 # 판수가 너무 적은 챔피언은 승률이 요동친다. 그 패치·그 챔피언 전체 판수 기준.
 MIN_MATCHES = 200
 
+# 이력을 몇 개까지 거슬러 보나. **연속이 아니라 「있는 것 중 최근 N개」** 다 —
+# 결측이 섞여 있어 연속을 요구하면 이력이 거의 안 만들어진다.
+HISTORY = 5
+# 「고승률」로 볼 문턱. 학습 구간에서 조정률이 뚜렷이 오르는 지점이다.
+HIGH_WIN_RATE = 0.52
+
 # 확정한 범위. 에메랄드 티어가 13.13 무렵 도입돼 그 전과 모집단이 다르므로
 # 13_14 부터다. 근거는 `docs/spec/data-sources.md`.
 PATCH_SEQUENCE: tuple[str, ...] = tuple(
@@ -69,6 +75,17 @@ class PanelRow:
     d_win_rate: float | None
     d_pick_rate: float | None
     d_ban_rate: float | None
+
+    # 이력 피처 — **예측 시점에 알 수 있는 것만 담는다.**
+    #
+    # 패치 t 행의 `adjusted_next` 는 「t+1 에서 조정됨」이고 그것이 맞히려는
+    # 답이다. t 를 보고 t+1 을 예측하는 시점에 t−1 행의 `adjusted_next`
+    # (= t 에서 조정됨)는 이미 일어난 일이므로 써도 된다.
+    #
+    # **자기 자신의 행은 이력에 절대 안 들어간다.** 들어가면 답을 그대로 본다.
+    history_len: int
+    recent_adjustments: int | None
+    high_wr_streak: int
 
     # 라벨 — 다음 패치에서 조정됐는가
     adjusted_next: bool
@@ -129,12 +146,16 @@ def patch_rows(
     previous: dict[int, PanelRow] | None = None,
     min_matches: int = MIN_MATCHES,
     directions: dict[str, tuple[Direction, str]] | None = None,
+    history: dict[int, list[PanelRow]] | None = None,
 ) -> tuple[PanelRow, ...]:
     """한 패치의 표를 만든다.
 
     `adjusted` 는 **다음 패치** 노트에 나온 챔피언 이름 집합이다. `previous` 는
     직전 패치의 행(챔피언 id 로 색인)이고, 없으면 추세 피처가 None 으로 남는다.
     `directions` 는 챔피언 이름 → (방향, 출처) 다.
+
+    `history` 는 챔피언 id → **이 패치보다 앞선 행들**이다. 부르는 쪽이 현재
+    패치의 행을 넣지 않아야 한다 — 넣으면 답이 피처로 들어간다.
     """
     by_champion: dict[int, list[ChampionRow]] = {}
     for row in ranking.rows:
@@ -157,6 +178,12 @@ def patch_rows(
         # 이 모듈의 다른 비율들과 같은 규약이다 — 호출 전에 부르는 쪽이 거른다.
         ban_rate = ranking.ban_rate(champion_id) if ranking.ban_denominator else None
         prior = (previous or {}).get(champion_id)
+        past = ((history or {}).get(champion_id) or [])[-HISTORY:]
+        streak = 0
+        for earlier in reversed(past):
+            if earlier.win_rate < HIGH_WIN_RATE:
+                break
+            streak += 1
 
         out.append(
             PanelRow(
@@ -183,6 +210,12 @@ def patch_rows(
                     if prior is None or ban_rate is None or prior.ban_rate is None
                     else ban_rate - prior.ban_rate
                 ),
+                history_len=len(past),
+                # 이력이 없으면 「조정 0회」가 아니라 「모름」이다
+                recent_adjustments=(
+                    sum(1 for x in past if x.adjusted_next) if past else None
+                ),
+                high_wr_streak=streak,
                 adjusted_next=name in adjusted,
                 direction_next=(directions or {}).get(name, (None, None))[0],
                 direction_source=(directions or {}).get(name, (None, None))[1],

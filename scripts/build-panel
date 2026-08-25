@@ -85,6 +85,9 @@ def directions_in(patch: str, previous: str) -> dict[str, tuple[Direction, str]]
 def main() -> int:
     have = {p.stem for p in RANKING.glob("*.json")}
     rows: list[PanelRow] = []
+    # 챔피언별 지난 행. **현재 패치 행은 만든 뒤에 넣는다** — 먼저 넣으면
+    # 그 행의 라벨(다음 패치에서 조정됨)이 자기 피처로 들어간다.
+    history: dict[int, list[PanelRow]] = {}
     previous: dict[int, PanelRow] | None = None
     previous_patch: str | None = None
     skipped_no_next = 0
@@ -111,8 +114,16 @@ def main() -> int:
         # 「직전 대비」가 아니라 「두세 패치 전 대비」가 된다.
         prior = previous if previous_patch == PATCH_SEQUENCE[i - 1] else None
         made = patch_rows(
-            patch, ranking, names, adjusted, prior, directions=directions_in(nxt, patch)
+            patch,
+            ranking,
+            names,
+            adjusted,
+            prior,
+            directions=directions_in(nxt, patch),
+            history=history,
         )
+        for row in made:
+            history.setdefault(row.champion_id, []).append(row)
         rows.extend(made)
 
         n_adj = sum(1 for r in made if r.adjusted_next)
@@ -124,6 +135,7 @@ def main() -> int:
 
     write_panel(OUT, tuple(rows))
 
+    with_history = sum(1 for r in rows if r.history_len > 0)
     by_source = {
         s: sum(1 for r in rows if r.direction_source == s) for s in ("label", "auto")
     }
@@ -133,6 +145,9 @@ def main() -> int:
     print(
         f"\n예측 지점 {points} (추세 가능 {trend_points}) · 행 {len(rows):,} "
         f"· 양성 {positives:,} ({positives / len(rows):.1%})"
+    )
+    print(
+        f"이력 피처 붙은 행 {with_history:,} / {len(rows):,} ({with_history / len(rows):.1%})"
     )
     print(
         f"방향 라벨 {sum(by_source.values()):,} "

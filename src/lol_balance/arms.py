@@ -181,11 +181,12 @@ def target_arms(
         column_scores = te.x[:, te.columns.index(column)]
         out.append(Result(arm, label, False, _rank_scores(te, column_scores)))
 
-    for arm, label, trend in (
-        ("A1", "로지스틱 회귀 — 수준", False),
-        ("A2", "로지스틱 회귀 — 수준 + 추세", True),
+    for arm, label, trend, history in (
+        ("A1", "로지스틱 회귀 — 수준", False, False),
+        ("A2", "로지스틱 회귀 — 수준 + 추세", True, False),
+        ("A2h", "로지스틱 회귀 — + 이력·역할", True, True),
     ):
-        enc = fit_encoder(train, with_trend=trend)
+        enc = fit_encoder(train, with_trend=trend, with_history=history)
         tr, ts = encode(train, enc), encode(test, enc)
         model = _model(seed).fit(tr.x, tr.y)
         out.append(
@@ -220,17 +221,16 @@ def target_arms(
         found, _ = _retrieved(rows, test, at, k=25, expanding=expanding)
         out.append(Result(arm, label, False, _rank_scores(te, np.array(found))))
 
-    enc = fit_encoder(train, with_trend=True)
-    tr, ts = encode(train, enc), encode(test, enc)
-    boost = _boosting(seed).fit(tr.x, tr.y)
-    out.append(
-        Result(
-            "A7",
-            "부스팅 트리",
-            False,
-            _rank_scores(ts, boost.predict_proba(ts.x)[:, 1]),
+    for arm, label, history in (
+        ("A7", "부스팅 트리 — 수준 + 추세", False),
+        ("A7h", "부스팅 트리 — + 이력·역할", True),
+    ):
+        enc = fit_encoder(train, with_trend=True, with_history=history)
+        tr, ts = encode(train, enc), encode(test, enc)
+        boost = _boosting(seed).fit(tr.x, tr.y)
+        out.append(
+            Result(arm, label, False, _rank_scores(ts, boost.predict_proba(ts.x)[:, 1]))
         )
-    )
 
     base = sum(r.adjusted_next for r in test) / len(test)
     return out, {"기준선": base, "학습": len(train), "평가": len(test)}
@@ -268,11 +268,12 @@ def direction_arms(
             Result(arm, label, False, scored(te.x[:, te.columns.index(column)], False))
         )
 
-    for arm, label, trend in (
-        ("B1", "로지스틱 회귀 — 수준", False),
-        ("B2", "로지스틱 회귀 — 수준 + 추세", True),
+    for arm, label, trend, history in (
+        ("B1", "로지스틱 회귀 — 수준", False, False),
+        ("B2", "로지스틱 회귀 — 수준 + 추세", True, False),
+        ("B2h", "로지스틱 회귀 — + 이력·역할", True, True),
     ):
-        enc = fit_encoder(train, with_trend=trend)
+        enc = fit_encoder(train, with_trend=trend, with_history=history)
         tr = encode(train, enc, target="direction")
         ts = encode(test, enc, target="direction")
         model = _model(seed).fit(tr.x, tr.y)
@@ -326,24 +327,28 @@ def direction_arms(
         _, found = _retrieved(pool, test, at, k=25, expanding=expanding)
         out.append(Result(arm, label, False, scored(np.array(found), True)))
 
-    enc = fit_encoder(train, with_trend=True)
-    tr, ts = (
-        encode(train, enc, target="direction"),
-        encode(test, enc, target="direction"),
-    )
-    boost = _boosting(seed).fit(tr.x, tr.y)
-    probability = boost.predict_proba(ts.x)[:, 1]
-    out.append(
-        Result(
-            "B7",
-            "부스팅 트리",
-            False,
-            {
-                "auc": roc_auc(ts.y, probability),
-                "accuracy": float(((probability >= 0.5).astype(int) == ts.y).mean()),
-            },
+    for arm, label, history in (
+        ("B7", "부스팅 트리 — 수준 + 추세", False),
+        ("B7h", "부스팅 트리 — + 이력·역할", True),
+    ):
+        enc = fit_encoder(train, with_trend=True, with_history=history)
+        tr = encode(train, enc, target="direction")
+        ts = encode(test, enc, target="direction")
+        boost = _boosting(seed).fit(tr.x, tr.y)
+        probability = boost.predict_proba(ts.x)[:, 1]
+        out.append(
+            Result(
+                arm,
+                label,
+                False,
+                {
+                    "auc": roc_auc(ts.y, probability),
+                    "accuracy": float(
+                        ((probability >= 0.5).astype(int) == ts.y).mean()
+                    ),
+                },
+            )
         )
-    )
 
     nerf = sum(1 for r in test if r.direction_next == "nerf")
     return out, {
