@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""라이엇 공식 위키에서 패치 노트를 받는다.
+
+**이것이 정답지다.** 정확한 변경 전/후 수치가 본문에 있다 — Data Dragon 에는
+대부분 스킬의 피해량이 없다(`docs/spec/ddragon-format.md`).
+
+    ./scripts/fetch-patchnotes
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from patchlens.fetch import Retryable, get_with_retry, save  # noqa: E402
+from patchlens.patchnotes import wiki_url, wiki_version  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "data" / "patchnotes"
+DDRAGON = ROOT / "data" / "ddragon"
+
+# 실제 변경이 담긴 페이지인지 보는 최소 기준. 위키의 안내·리다이렉트 페이지는
+# 훨씬 작다 (실측 404 페이지가 22 KB, 정상 패치 페이지는 260 KB 이상).
+MIN_BYTES = 100_000
+
+# 변경을 나타내는 말. **시대마다 표기가 다르다** — 2023~2024 는 "reduced to X
+# from Y" 같은 산문이고, 2026 은 화살표(⇒)를 쓴다. 둘 다 센다.
+CHANGE_MARKS = ("⇒", " to ", "increased", "reduced", "decreased")
+
+
+def main() -> int:
+    versions = sorted(
+        (p.stem for p in DDRAGON.glob("*.json")),
+        key=lambda v: tuple(int(x) for x in v.split(".")),
+    )
+    if not versions:
+        print("data/ddragon 이 비어 있다. 먼저 ./scripts/fetch-ddragon 을 돌린다.")
+        return 1
+    print(f"대상 {len(versions)}개 패치", flush=True)
+
+    done = skipped = failed = 0
+    for i, v in enumerate(versions, 1):
+        path = OUT / f"{v}.html"
+        if path.exists():
+            skipped += 1
+            continue
+        try:
+            body = get_with_retry(wiki_url(v), attempts=3, base_delay=10.0)
+            if len(body) < MIN_BYTES:
+                raise ValueError(f"본문이 너무 짧다: {len(body):,}B")
+            text = body.decode("utf-8", "ignore")
+            marks = sum(text.count(m) for m in CHANGE_MARKS)
+            save(path, body)
+            done += 1
+            print(
+                f"[{i}/{len(versions)}] {v} → {wiki_version(v)}  "
+                f"{len(body):,}B  변경표시 {marks}개",
+                flush=True,
+            )
+        except (Retryable, ValueError) as exc:
+            failed += 1
+            print(
+                f"[{i}/{len(versions)}] {v} → {wiki_version(v)}  실패: {exc}",
+                flush=True,
+            )
+        time.sleep(2)
+
+    print(f"\n완료: 새로 받음 {done} · 건너뜀 {skipped} · 실패 {failed}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

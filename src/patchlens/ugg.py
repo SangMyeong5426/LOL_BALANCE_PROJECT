@@ -107,12 +107,19 @@ def parse_champion_ranking(payload: list[Any]) -> ChampionRanking:
     )
 
 
-def check_win_rate_identity(ranking: ChampionRanking, tolerance: float = 1e-4) -> None:
-    """전체 승률이 50% 인지 확인한다.
+def check_win_rate_identity(ranking: ChampionRanking, tolerance: float = 2e-3) -> None:
+    """전체 승률이 50% 근처인지 확인한다.
 
-    한 게임에 승자와 패자가 다섯 명씩이므로 **반드시** 50% 여야 한다.
-    어긋나면 자리 해석이 틀렸거나 응답이 잘린 것이다. 수집할 때마다 돌린다 —
-    형식이 조용히 바뀌면 이 검사가 먼저 걸린다.
+    한 게임에 승자와 패자가 다섯 명씩이므로 50% 여야 한다. 어긋나면 자리
+    해석이 틀렸거나 응답이 잘린 것이다. 수집할 때마다 돌린다 — 형식이 조용히
+    바뀌면 이 검사가 먼저 걸린다.
+
+    **정확히 50% 는 아니다.** 실제 수집물에서 0.01~0.04% 어긋나는 패치가
+    나왔다(14_10 49.9899%, 14_14 49.9619%, 16_4 49.9871%). 리메이크나 조기
+    종료처럼 승패가 대칭이 아닌 판이 섞이면 그만큼 벌어진다.
+
+    허용오차를 0.2% 로 둔다 — 관측된 최대 어긋남의 다섯 배이고, **자리가 밀리면
+    이보다 훨씬 크게 어긋나므로** 잡아내는 능력은 그대로다.
     """
     wins = sum(r.wins for r in ranking.rows)
     matches = sum(r.matches for r in ranking.rows)
