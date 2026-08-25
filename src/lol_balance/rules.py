@@ -54,6 +54,14 @@ class Condition:
         return f"{self.metric} {self.op} {self.value:g}"
 
 
+# 규칙을 누가 냈는가. **이것을 안 적으면 자동화된 파이프라인이 돈 것처럼 읽힌다.**
+#
+#   conversation  대화 중 Claude 가 학습 구간을 읽고 제안했다. API 호출 없음
+#   api           `scripts/` 가 Anthropic API 를 불러 받았다
+#   human         사람이 직접 적었다
+Provenance = Literal["conversation", "api", "human"]
+
+
 @dataclass(frozen=True)
 class Rule:
     """조건이 **모두** 맞으면 행동을 예측한다."""
@@ -62,6 +70,7 @@ class Rule:
     when: tuple[Condition, ...]
     then: Action
     rationale: str = ""
+    proposed_by: Provenance = "conversation"
 
     def fires(self, row: PanelRow) -> bool:
         return all(c.holds(row) for c in self.when)
@@ -155,6 +164,7 @@ def read_rules(path: Path) -> tuple[Rule, ...]:
                 when=tuple(Condition(**c) for c in raw["when"]),
                 then=raw["then"],
                 rationale=raw.get("rationale", ""),
+                proposed_by=raw.get("proposed_by", "conversation"),
             )
         )
     return tuple(out)
