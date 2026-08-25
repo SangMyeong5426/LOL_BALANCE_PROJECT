@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""CommunityDragon 에서 스킬 피해량을 받는다.
+
+    ./scripts/fetch-cdragon --pilot        파일럿 5패치분
+    ./scripts/fetch-cdragon                노트에 나온 것 전부
+
+**Data Dragon 에 없는 것을 받는다.** 툴팁의 `{{ totaldamage }}` 가 여기서 풀린다.
+
+    Ahri Q   BaseDamage [40, 65, 90, 115, 140] · TotalDamage = BaseDamage + 0.45×AP
+
+**노트에 나온 챔피언만 받는다.** 전량은 12,508쌍인데 채점에 필요한 것은 각
+대상 패치에서 노트에 이름이 오른 챔피언의 그 버전과 직전 버전뿐이라 22% 다.
+
+라이엇 공식이 아니라 커뮤니티 미러다. 도입 여부는 ADR 로 정한다 —
+지금은 **채점이 실제로 되는지 확인할 만큼만** 받는다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.ddragon import standard_champions  # noqa: E402
+from lol_balance.fetch import Retryable, get_with_retry, save  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+OUT = ROOT / "data" / "cdragon"
+DDRAGON = ROOT / "data" / "ddragon"
+NOTES = ROOT / "data" / "patchnotes"
+BASE = "https://raw.communitydragon.org"
+
+# 표기 시대를 고르게 덮는 파일럿. `pilot-extract` 와 같은 패치를 쓴다.
+PILOT = ("13_15", "14_10", "15_3", "16_1", "16_15")
+
+
+def version(patch: str) -> str:
+    """`13_15` → `13.15`. CommunityDragon 은 패치 번호만 쓴다(빌드 번호 없음)."""
+    return patch.replace("_", ".")
+
+
+def slug(champion_id: str) -> str:
+    """`Kaisa` → `kaisa`. CommunityDragon 경로는 전부 소문자다."""
+    return champion_id.lower()
+
+
+def wanted(patches: tuple[str, ...]) -> dict[tuple[str, str], str]:
+    """(패치, 챔피언 slug) → 표시 이름.
+
+    채점에 필요한 것은 **대상 패치에서 노트에 이름이 오른 챔피언**의 그 버전과
+    직전 버전이다. 전량을 받을 이유가 없다.
+    """
+    out: dict[tuple[str, str], str] = {}
+    for patch in patches:
+        index = PATCH_SEQUENCE.index(patch)
+        note = NOTES / f"{version(patch)}.1.html"
+        data = DDRAGON / f"{version(patch)}.1.json"
+        if not (note.exists() and data.exists()):
+            continue
+        named = {
+            entry.get("name", key): key
+            for key, entry in standard_champions(
+                json.loads(data.read_bytes())["data"]
+            ).items()
+        }
+        for block in champion_changes(note.read_bytes()):
+            champion_id = named.get(block.champion)
+            if champion_id is None:
+                continue
+            for other in (PATCH_SEQUENCE[index - 1], patch):
+                out[(other, slug(champion_id))] = block.champion
+    return out
+
+
+def main() -> int:
+    rows = read_panel(ROOT / "data" / "panel.sqlite")
+    predicted = sorted({r.patch for r in rows}, key=PATCH_SEQUENCE.index)
+    targets = tuple(PATCH_SEQUENCE[PATCH_SEQUENCE.index(p) + 1] for p in predicted)
+    if "--pilot" in sys.argv:
+        targets = tuple(p for p in targets if p in PILOT)
+
+    items = sorted(wanted(targets))
+    print(f"대상 패치 {len(targets)}종 · 받을 것 {len(items):,}쌍")
+
+    done = skipped = failed = 0
+    for i, (patch, champion) in enumerate(items, 1):
+        path = OUT / version(patch) / f"{champion}.json"
+        if path.exists():
+            skipped += 1
+            continue
+        url = f"{BASE}/{version(patch)}/game/data/characters/{champion}/{champion}.bin.json"
+        try:
+            body = get_with_retry(url, attempts=3, base_delay=5.0)
+            json.loads(body)  # 온전한 JSON 인지만 본다
+            save(path, body)
+            done += 1
+        except (Retryable, ValueError) as exc:
+            failed += 1
+            print(f"  {patch}/{champion} 실패: {str(exc)[:70]}", flush=True)
+        if i % 100 == 0:
+            print(
+                f"[{i}/{len(items)}] 받음 {done} · 건너뜀 {skipped} · 실패 {failed}",
+                flush=True,
+            )
+        time.sleep(0.15)
+
+    print(f"\n완료: 새로 받음 {done} · 건너뜀 {skipped} · 실패 {failed}")
+    if OUT.exists():
+        size = sum(f.stat().st_size for f in OUT.rglob("*.json"))
+        print(f"용량 {size / 1024 / 1024:.0f} MB")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
