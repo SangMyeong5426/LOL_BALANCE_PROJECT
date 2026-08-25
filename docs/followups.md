@@ -12,10 +12,11 @@
 | ~~2c~~ | ~~패치 노트 수집~~ | **완료 (2026-08-25)** — 74/74, 실패 0 | [ddragon-format](spec/ddragon-format.md) |
 | ~~2d~~ | ~~부분 커버리지 패치를 예측 지점으로 쓸 것인가~~ | **결정 (2026-08-25)** — 안 쓴다 | [ADR-0002](adr/0002-prediction-point-coverage-criterion.md) |
 | **2e** | **추출 모델 등급 확정** | **파일럿 실행 직후** | `ANTHROPIC_API_KEY` 대기. [ADR-0003](adr/0003-llm-provider-and-calling-convention.md) |
-| 3 | Oracle's Elixir 2021~2026 주소 | 아무 때나 | 새 사이트가 SPA |
+| **3** | **Oracle's Elixir 2023~2026 내려받기** | **사용자 대기** — 주소는 찾았다 | 구글 드라이브 익명 할당량 초과. 아래 3 참조 |
 | 4 | op.gg 아카이브가 KR 인지 검증 | 실제 수집할 때 | 지금은 정황 증거뿐 |
 | ~~5~~ | ~~국제 대회 일정표~~ | **닫음 (2026-08-25)** — 만들어도 못 쓴다 | [prediction-signals](spec/prediction-signals.md) |
-| **8** | **CommunityDragon 도입 검토** | **다음** — 파일럿 먼저 | 아래 8 참조 |
+| **8** | **CommunityDragon 도입 검토** | **다음** — 전량 확보 끝났고 ADR 만 남았다 | 아래 8 참조 |
+| **9** | **잘린 응답이 재시도를 안 탄다** | **다음 수집 전에** | 아래 9 참조 |
 | 7 | 강의 자료 4종 본문 | 아무 때나 | 아래 |
 
 ### 2b · 2d. `rankings` 해독이 커버리지 결정을 가로막고 있다
@@ -89,7 +90,59 @@ Ahri Q   BaseDamage [40, 65, 90, 115, 140]
 
 **얻는 것**: 채점 범위가 25% → 대부분으로 늘어난다. 지금은 13.15 기록 52건 중 13건만 검증된다.
 
-**아직 도입하지 않는다.** 새 데이터 출처는 [ADR](adr/README.md) 대상이고, 먼저 파일럿 5패치(약 850 요청 · 200 MB)로 「피해량 채점이 실제로 되는가」를 확인해야 한다. 되면 ADR 을 쓰고, 안 되면 그 사실을 적는다.
+**전량 확보 완료 (2026-08-25).** 전량 12,580 요청이 아니라 **노트에 이름이 오른 챔피언의 그 버전 + 직전 버전**만 받아 2,795쌍으로 줄였다.
+
+| | |
+| --- | --- |
+| 받음 | **2,788 / 2,788** · 360 MB · 68분 |
+| 못 받은 7건 | **전부 신규 챔피언 출시** — briar · hwei · smolder · aurora · mel · yunara · locke |
+| 깨진 파일 | **0** (2,788개 전부 파싱 확인) |
+
+**「직전 버전이 없다」는 실패가 아니라 출시 이벤트다.** 일곱 건 모두 그 버전 Data Dragon 에 없고 다음 버전에 있는 것을 확인했다. **채점기가 이 둘을 구분해야 한다** — 지금 코드는 「파일 없음」을 한 가지로만 본다.
+
+**아직 도입하지 않는다.** 새 데이터 출처는 [ADR](adr/README.md) 대상이다. 파일은 다 받았지만 읽는 코드는 아직 없다 — `fetch-cdragon` 이 저장소에서 cdragon 을 언급하는 유일한 곳이다.
+
+### 3. Oracle's Elixir — 주소는 찾았고 할당량에 막혔다
+
+새 사이트가 SPA 라 주소가 화면에 없다. 번들(`static/js/main.503d2102.js`, 1,988,169 B)을 받아 뜯으니 **구글 드라이브 폴더**로 배포하고 있었다.
+
+```
+폴더  https://drive.google.com/drive/folders/1gLSw0RLjBbtaNy0dgnGQDAZOHIgCe-HH
+파일  {year}_LoL_esports_match_data_from_OraclesElixir.csv
+```
+
+| 연도 | 파일 ID |
+| --- | --- |
+| 2023 | `1XXk2LO0CsNADBB1LRGOV5rUpyZdEZ8s2` |
+| 2024 | `1IjIEhLc9n8eLKeY-yh_YigKVWbhgGBsN` |
+| 2025 | `1v6LRphp2kYciU4SXp0PCjEMuev1bDejc` |
+| 2026 | `1hnpbrUpBMS1TZI7IovfpKeZfWJH1Aptm` |
+
+**익명 다운로드가 막혀 있다.** `drive.usercontent.google.com/download?…&confirm=t` 로 받으면 CSV 가 아니라 **2,009 B 짜리 HTML(`Quota exceeded`)** 이 온다. 크기로 구분된다 — 아카이브의 11,832 B 와 같은 종류의 함정이다.
+
+**로그인한 계정으로 받으면 풀린다.** 사용자에게 요청해 둔 상태이고, 받으면 `data/oracle/{year}.csv` 에 놓는다.
+
+구 사이트(`lol.timsevenhuysen.com/gamedata/{season}/`)는 2020 까지만 살아 있다 — 2021 이후는 404 다. **우리 범위(2023~2026)는 이쪽으로 못 받는다.**
+
+### 9. 잘린 응답이 재시도를 안 탄다
+
+CommunityDragon 전량 수집(2,795쌍)에서 `15_19/sivir` 하나가 실패했는데, 없는 파일이 아니라 **HTTP 200 으로 오다가 중간에 끊긴 응답**이었다.
+
+```
+1차   84,469 B 에서 끊김  →  json.loads 실패
+재시도 149,054 B 정상
+```
+
+**구조가 이렇게 돼 있다.**
+
+```python
+body = get_with_retry(url, attempts=3)   # HTTP 실패만 재시도한다
+json.loads(body)                         # ← 여기서 깨져도 재시도가 안 붙는다
+```
+
+잘린 응답은 HTTP 로는 성공이라 `get_with_retry` 를 그냥 통과하고, 바깥의 `json.loads` 에서 `ValueError` 로 죽는다. **한 번 더 부르면 멀쩡히 온다.** `fetch-ugg-rankings` 도 같은 모양이다.
+
+**고칠 자리는 `fetch.py`** — `get_with_retry` 에 검증 콜백을 받아 「검증 실패도 재시도 사유」로 만든다. 지금 데이터는 수동 재시도로 메웠으므로(2,788/2,788 정상) 급하지 않지만, **다음 수집 전에 고쳐야 같은 것을 또 손으로 줍지 않는다.**
 
 ### 7. 강의 자료 4종의 본문을 아직 읽지 못했다
 
