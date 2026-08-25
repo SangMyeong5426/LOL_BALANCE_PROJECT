@@ -1,0 +1,19 @@
+{"champion": "Brand", "direction": "nerf", "evidence": ["Base armor reduced to 24 from 27."], "patch": "16_11"}
+{"champion": "Diana", "direction": "buff", "evidence": ["Monster damage increased to 270% from 230%.", "Shield health ratio increased to 11% bonus health from 9% ."], "patch": "16_11"}
+{"champion": "Ekko", "direction": "buff", "evidence": ["On-target cooldown reduced to 4 seconds from 5."], "patch": "16_11"}
+{"champion": "Elise", "direction": "nerf", "evidence": ["Bug Fix: Fixed a bug where she would retain the Rappel ability if she died during the ability cast."], "patch": "16_11"}
+{"champion": "Heimerdinger", "direction": "buff", "evidence": ["Turret attack range increased to 550 from 530.", "New Effect: Turrets now gain 50 bonus range against minions if nothing else is in range.", "Turret vision range increased to 650 from 585.", "Vision duration increased to 1.25 seconds from 1."], "patch": "16_11"}
+{"champion": "Kassadin", "direction": "buff", "evidence": ["Cooldown reduced to 9 / 8.5 / 8 / 7.5 / 7 seconds from 10 / 9.5 / 9 / 8.5 / 8.", "Passive base damage increased to 25 from 20."], "patch": "16_11"}
+{"champion": "Kindred", "direction": "adjust", "evidence": ["Bug Fix: Fixed a bug where her unique run animation would not play while slowed."], "patch": "16_11"}
+{"champion": "Lucian", "direction": "adjust", "evidence": ["Bug Fix: Fixed a bug where his unique high attack animations were failing to play."], "patch": "16_11"}
+{"champion": "Milio", "direction": "adjust", "evidence": ["Bug Fix: Fixed a bug where the extended range indicator was missing."], "patch": "16_11"}
+{"champion": "Mordekaiser", "direction": "nerf", "evidence": ["Undocumented / Removed: No longer has the Trait_ImmobilizingCCSpell tag."], "patch": "16_11"}
+{"champion": "Nami", "direction": "nerf", "evidence": ["Bug Fix: Fixed a bug where it dealt double damage to targets right next to her."], "patch": "16_11"}
+{"champion": "Neeko", "direction": "buff", "evidence": ["Undocumented / Bug Fix: The most recent clone created is no longer destroyed at the start of the cast time."], "patch": "16_11"}
+{"champion": "Quinn", "direction": "buff", "evidence": ["Bonus monster damage increased to 75 from 50.", "Mark renamed to Harrier from Vulnerable .", "Monster damage increased to 200% from 150%."], "patch": "16_11"}
+{"champion": "Seraphine", "direction": "buff", "evidence": ["Radius increased back to 350.", "Once again uses a center range check instead of an edge range check."], "patch": "16_11"}
+{"champion": "Shaco", "direction": "buff", "evidence": ["Bug Fix: Fixed a bug where he would break stealth after cancelling a basic attack during Deceive ."], "patch": "16_11"}
+{"champion": "Smolder", "direction": "mixed", "evidence": ["Super Scorcher Breath base critical strike chance scaling reduced to 25% – 55% (based on critical strike chance) from 40% – 60% .", "Infinity Edge scaling increased to 0% – 9% (based on critical strike chance) from 0% – 6% .", "Flap, Flap, Flap bonus magic damage reduced to 8% – 12.8 % (based on critical strike chance) from 12%.", "New Effect: Flap, Flap, Flap bonus magic damage with Infinity Edge now also scales with 0% – 1.44 % (based on critical strike chance) ."], "patch": "16_11"}
+{"champion": "Sylas", "direction": "adjust", "evidence": ["Bug Fix: Fixed a bug where he respawns as Shyvana in Dragon Form when dying while polymorphed."], "patch": "16_11"}
+{"champion": "Teemo", "direction": "nerf", "evidence": ["Armor growth reduced to 4.5 from 4.95 .", "On-hit damage bonus AD ratio reduced to 5% bonus AD from 10% bonus AD .", "Poison damage per tick bonus AD ratio reduced to 2.5 % bonus AD from 5% bonus AD ."], "patch": "16_11"}
+{"champion": "Xin Zhao", "direction": "mixed", "evidence": ["New Effect: Damage now scales with 5% / 10% / 15% / 20% (based on level) AP .", "Heal AP ratio reduced to 45% / 55% / 80% (based on level) AP from 50% / 65% / 90% (based on level) AP ."], "patch": "16_11"}
