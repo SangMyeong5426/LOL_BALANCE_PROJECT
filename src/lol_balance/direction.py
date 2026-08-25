@@ -59,6 +59,33 @@ _BUFF_WHEN_UP_SPELL = frozenset({"range"})
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
+# 한 필드가 전 챔피언의 이만큼을 한꺼번에 바꾸면 밸런스 조정이 아니다.
+MASS_CHANGE_SHARE = 0.5
+
+
+def drop_mass_changes(
+    changes: tuple[Change, ...] | list[Change],
+    champion_count: int,
+    share: float = MASS_CHANGE_SHARE,
+) -> tuple[Change, ...]:
+    """전 챔피언이 한꺼번에 바뀐 필드를 걷어낸다.
+
+    **밸런스 조정으로 세면 안 된다.** 16.5 에서 `attackdamageperlevel` 이
+    171종 전부 5 → 0 이 됐고 16.15 까지 0 으로 남아 있다. 스키마가 바뀐 것이지
+    라이엇이 전 챔피언을 너프한 것이 아니다.
+
+    걸러내지 않으면 그 패치의 방향 라벨이 통째로 `nerf` 가 된다. 실제로
+    노트에 버그 수정 한 줄뿐인 챔피언까지 너프로 잡혔다.
+    """
+    if champion_count <= 0:
+        return tuple(changes)
+    counts: dict[tuple[str, str], int] = {}
+    for change in changes:
+        key = (change.kind, change.field)
+        counts[key] = counts.get(key, 0) + 1
+    limit = champion_count * share
+    return tuple(c for c in changes if counts[(c.kind, c.field)] <= limit)
+
 
 def _values(raw: object) -> tuple[float, ...]:
     return tuple(float(m) for m in _NUMBER.findall(str(raw)))

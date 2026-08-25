@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""방향 라벨을 붙일 재료를 뽑는다.
+
+    ./scripts/label-material 16_15          한 패치의 재료
+    ./scripts/label-material --coverage     패치별 자동 판정 비율
+
+챔피언마다 노트 문장을 모아 보여 주고, Data Dragon 이 방향을 아는 경우 그것을
+함께 적는다. **자동 판정은 참고이지 정답이 아니다** — diff 가 본 것의 방향일
+뿐이라 피해량이 반대로 움직였으면 실제로는 mixed 다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
+from lol_balance.direction import champion_direction  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+DDRAGON = ROOT / "data" / "ddragon"
+NOTES = ROOT / "data" / "patchnotes"
+
+
+def version(patch: str) -> str:
+    return patch.replace("_", ".") + ".1"
+
+
+def automatic(patch: str) -> dict[str, str]:
+    """그 패치에서 Data Dragon 이 방향을 아는 챔피언."""
+    i = PATCH_SEQUENCE.index(patch)
+    before = DDRAGON / f"{version(PATCH_SEQUENCE[i - 1])}.json"
+    after = DDRAGON / f"{version(patch)}.json"
+    if not (before.exists() and after.exists()):
+        return {}
+    data_after = json.loads(after.read_bytes())["data"]
+    names = {k: v.get("name", k) for k, v in standard_champions(data_after).items()}
+    grouped: dict[str, list] = {}
+    for change in diff_versions(json.loads(before.read_bytes())["data"], data_after):
+        grouped.setdefault(change.champion, []).append(change)
+    out = {}
+    for champion_id, changes in grouped.items():
+        direction = champion_direction(changes)
+        if direction:
+            out[names.get(champion_id, champion_id)] = direction
+    return out
+
+
+def show_coverage() -> None:
+    rows = read_panel(ROOT / "data" / "panel.sqlite")
+    predicted = sorted({r.patch for r in rows}, key=PATCH_SEQUENCE.index)
+    targets = [PATCH_SEQUENCE[PATCH_SEQUENCE.index(p) + 1] for p in predicted]
+    print(f"{'패치':8}{'챔피언':>7}{'자동':>6}{'비율':>8}")
+    for patch in targets:
+        blocks = champion_changes((NOTES / f"{version(patch)}.html").read_bytes())
+        champions = {b.champion for b in blocks}
+        auto = automatic(patch)
+        hit = len(champions & set(auto))
+        print(f"{patch:8}{len(champions):>7}{hit:>6}{hit / len(champions):>8.0%}")
+
+
+def show_patch(patch: str) -> None:
+    blocks = champion_changes((NOTES / f"{version(patch)}.html").read_bytes())
+    auto = automatic(patch)
+    by_champion: dict[str, list] = {}
+    for block in blocks:
+        by_champion.setdefault(block.champion, []).append(block)
+
+    print(
+        f"# {patch} — 챔피언 {len(by_champion)}종 · 자동 판정 {len(set(by_champion) & set(auto))}종\n"
+    )
+    for champion in sorted(by_champion):
+        tag = f"  [자동: {auto[champion]}]" if champion in auto else ""
+        print(f"## {champion}{tag}")
+        for block in by_champion[champion]:
+            print(f"  [{block.section}]")
+            for line in block.lines:
+                print(f"    - {line}")
+        print()
+
+
+def main() -> int:
+    if "--coverage" in sys.argv:
+        show_coverage()
+        return 0
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 1
+    show_patch(sys.argv[1])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
