@@ -49,10 +49,21 @@ def test_split_is_by_time_not_string_order(make_row: PanelRowFactory) -> None:
 
 
 def test_target_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
+    """arm 이 추가되면 여기서 걸린다 — 표에 조용히 끼거나 빠지면 안 된다."""
     results, meta = target_arms(_panel(make_row), "15_13", SEED)
 
-    assert [r.arm for r in results] == ["A0", "A0b", "A0c", "A0d", "A1", "A2", "A3"]
-    assert all(not r.uses_llm for r in results)
+    assert [r.arm for r in results] == [
+        "A0",
+        "A0b",
+        "A0c",
+        "A0d",
+        "A1",
+        "A2",
+        "A3",
+        "A5",
+        "A5b",
+    ]
+    assert all(not r.uses_llm for r in results)  # A4 는 규칙을 넘겨야 나온다
     assert 0.0 < meta["기준선"] < 1.0
 
 
