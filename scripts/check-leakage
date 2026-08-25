@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""누출 검사 — **라벨을 섞으면 성능이 무너져야 한다.**
+
+    ./scripts/check-leakage [--split 15_13]
+
+성능이 남으면 피처 어딘가가 답을 보고 있다는 뜻이다. 이 프로젝트에서 가장
+위험한 실수가 그것이고, 에러를 내지 않고 조용히 지나간다.
+
+단위 테스트가 아니라 스크립트인 이유는 **진짜 패널이 있어야 뜻이 있기**
+때문이다. 합성 데이터 몇십 행으로는 통계가 흔들려 아무것도 못 가린다.
+"""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import direction_arms, target_arms  # noqa: E402
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.panel import PanelRow  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+# 무너졌다고 볼 폭. 기준선에서 이만큼 안쪽이면 통과다.
+TOLERANCE = 0.06
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def shuffled(
+    rows: tuple[PanelRow, ...], field: str, rng: np.random.Generator
+) -> tuple[PanelRow, ...]:
+    """패치 **안에서만** 섞는다.
+
+    패치를 넘나들며 섞으면 패치별 조정 건수까지 흐트러져 과제 자체가 달라진다.
+    안에서 섞으면 「누가」만 무작위가 되고 나머지 구조는 그대로 남는다.
+    """
+    grouped: dict[str, list[PanelRow]] = {}
+    for row in rows:
+        grouped.setdefault(row.patch, []).append(row)
+    out: list[PanelRow] = []
+    for part in grouped.values():
+        values = [getattr(r, field) for r in part]
+        rng.shuffle(values)
+        out += [replace(r, **{field: v}) for r, v in zip(part, values, strict=True)]
+    return tuple(out)
+
+
+def main() -> int:
+    at = arg("--split", "15_13")
+    seed = load_settings().seed
+    rows = read_panel(PANEL)
+    if not rows:
+        print("패널이 비었다. ./scripts/build-panel 을 먼저 돌린다.")
+        return 1
+    rng = np.random.default_rng(seed)
+
+    def measure(data: tuple[PanelRow, ...]) -> dict[str, float]:
+        target, meta = target_arms(data, at, seed)
+        direction, _ = direction_arms(data, at, seed)
+        by = {r.arm: r.scores for r in target} | {r.arm: r.scores for r in direction}
+        return {
+            "A1 R-정확도": by["A1"]["r_precision"],
+            "A3 AUC": by["A3"]["auc"],
+            "B0b AUC": by["B0b"]["auc"],
+            "B1 AUC": by["B1"]["auc"],
+            "_기준선": meta["기준선"],
+        }
+
+    real = measure(rows)
+    swapped_target = measure(shuffled(rows, "adjusted_next", rng))
+    swapped_direction = measure(shuffled(rows, "direction_next", rng))
+
+    print(f"시드 {seed} · 분할 {at}\n")
+    print(f"{'':14}{'원본':>10}{'대상 섞음':>12}{'방향 섞음':>12}{'기준선':>10}")
+    floors = {
+        "A1 R-정확도": real["_기준선"],
+        "A3 AUC": 0.5,
+        "B0b AUC": 0.5,
+        "B1 AUC": 0.5,
+    }
+    failed = []
+    for key, floor in floors.items():
+        broken = swapped_target[key] if key.startswith("A") else swapped_direction[key]
+        mark = "✅" if abs(broken - floor) <= TOLERANCE else "❌"
+        if mark == "❌":
+            failed.append(key)
+        print(
+            f"{key:14}{real[key]:>10.3f}{swapped_target[key]:>12.3f}"
+            f"{swapped_direction[key]:>12.3f}{floor:>10.3f}  {mark}"
+        )
+
+    print("\n대상을 섞으면 A 만, 방향을 섞으면 B 만 무너져야 한다 — 교차로 무너지면")
+    print("두 과제가 어딘가에서 섞여 있다는 뜻이다.")
+    if failed:
+        print(f"\n❌ 기준선으로 안 돌아온 지표: {', '.join(failed)}")
+        return 1
+    print(f"\n✅ 전부 기준선 ±{TOLERANCE} 안으로 무너졌다. 누출 징후 없음.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
