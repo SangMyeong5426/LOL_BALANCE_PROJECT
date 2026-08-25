@@ -91,8 +91,28 @@ def fit_encoder(rows: tuple[PanelRow, ...], with_trend: bool) -> Encoder:
     return Encoder(names, tuple(columns), tuple(fill))
 
 
-def encode(rows: tuple[PanelRow, ...], encoder: Encoder) -> Matrix:
-    """행을 인코더가 정한 열 구성으로 편다."""
+# 방향 예측에 쓸 행. `mixed` 와 `adjust` 는 뺀다 — 한쪽으로 뭉개면 그 사실이
+# 사라지고, 「어느 쪽도 아니다」를 억지로 이진 분류에 넣는 셈이 된다.
+DIRECTION_CLASSES = ("nerf", "buff")
+
+
+def direction_rows(rows: tuple[PanelRow, ...]) -> tuple[PanelRow, ...]:
+    """방향 예측 과제의 표본. **조정된 것 중 방향이 분명한 것만.**
+
+    이 과제는 「조정될까」를 이미 맞혔다고 치고 「어느 쪽인가」를 묻는다.
+    조정 안 된 챔피언을 넣으면 두 과제가 뒤섞인다.
+    """
+    return tuple(r for r in rows if r.direction_next in DIRECTION_CLASSES)
+
+
+def encode(
+    rows: tuple[PanelRow, ...], encoder: Encoder, target: str = "adjusted"
+) -> Matrix:
+    """행을 인코더가 정한 열 구성으로 편다.
+
+    `target` 이 `direction` 이면 라벨이 **너프인가(1) 버프인가(0)** 가 된다.
+    `direction_rows` 로 거른 행을 넘겨야 한다.
+    """
     blocks: list[NDArray[np.float64]] = []
     for name, fill in zip(encoder.names, encoder.fill, strict=True):
         raw = [getattr(r, name) for r in rows]
@@ -101,9 +121,13 @@ def encode(rows: tuple[PanelRow, ...], encoder: Encoder) -> Matrix:
         if name in NULLABLE:
             blocks.append(missing)
         blocks.append(values)
+    if target == "direction":
+        y = np.array([int(r.direction_next == "nerf") for r in rows], dtype=int)
+    else:
+        y = np.array([int(r.adjusted_next) for r in rows], dtype=int)
     return Matrix(
         x=np.column_stack(blocks).astype(np.float64),
-        y=np.array([int(r.adjusted_next) for r in rows], dtype=int),
+        y=y,
         patches=np.array([r.patch for r in rows]),
         champions=np.array([r.champion for r in rows]),
         columns=encoder.columns,
