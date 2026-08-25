@@ -152,7 +152,8 @@ def main() -> int:
     print("\nA0~A3 · B0~B3 은 통계 베이스라인이다.")
     print("A4 · B4 는 **대화 중 Claude 가 제안한 규칙**을 코드가 채점한 것이다 —")
     print("실행할 때 API 를 부르지 않는다. 근거는 ground_truth/README.md.")
-    print("에이전트(A5 · A6)와 수치 추출은 아직 없다.")
+    print("A5 · B5 는 사례 검색만 쓴 것이고 LLM 이 아니다 — k-NN 다수결이다.")
+    print("A6(에이전트)와 수치 추출은 아직 없다.")
     return 0
 
 

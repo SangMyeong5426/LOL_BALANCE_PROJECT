@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline, make_pipeline
@@ -51,6 +52,32 @@ class Result:
     label: str
     uses_llm: bool
     scores: dict[str, float]
+
+
+# 부스팅 트리 설정. **학습 구간 안에서 시간순 3겹 교차검증으로 골랐다** —
+# 평가 구간을 보고 고르면 그것이 곧 누출이다.
+#
+#   ① 대상(학습 5,334행)  기본값 0.567 → 규제 0.587. 규제가 확실히 낫다
+#   ② 방향(학습   296건)  기본값 0.831 · 규제 0.830. 구분되지 않는 차이라
+#                        표본이 작은 쪽을 감안해 안전한 규제를 택했다
+_BOOST = {
+    "max_depth": 2,
+    "max_iter": 300,
+    "learning_rate": 0.05,
+    "l2_regularization": 1.0,
+}
+
+
+def _boosting(seed: int) -> HistGradientBoostingClassifier:
+    """선형 모델이 못 잡는 것을 잡으라고 넣는다.
+
+    회귀는 피처를 더해서 쓰므로 **「승률이 높고 동시에 픽률도 높을 때만」** 같은
+    조건을 표현하지 못한다. 규칙 엔진이 회귀를 이긴 것이 그 증거였다. 트리는
+    그 상호작용을 나눠 담을 수 있다.
+    """
+    return HistGradientBoostingClassifier(
+        random_state=seed, class_weight="balanced", **_BOOST
+    )
 
 
 def _neighbours(wanted: int, available: int) -> int:
@@ -193,6 +220,18 @@ def target_arms(
         found, _ = _retrieved(rows, test, at, k=25, expanding=expanding)
         out.append(Result(arm, label, False, _rank_scores(te, np.array(found))))
 
+    enc = fit_encoder(train, with_trend=True)
+    tr, ts = encode(train, enc), encode(test, enc)
+    boost = _boosting(seed).fit(tr.x, tr.y)
+    out.append(
+        Result(
+            "A7",
+            "부스팅 트리",
+            False,
+            _rank_scores(ts, boost.predict_proba(ts.x)[:, 1]),
+        )
+    )
+
     base = sum(r.adjusted_next for r in test) / len(test)
     return out, {"기준선": base, "학습": len(train), "평가": len(test)}
 
@@ -286,6 +325,25 @@ def direction_arms(
     ):
         _, found = _retrieved(pool, test, at, k=25, expanding=expanding)
         out.append(Result(arm, label, False, scored(np.array(found), True)))
+
+    enc = fit_encoder(train, with_trend=True)
+    tr, ts = (
+        encode(train, enc, target="direction"),
+        encode(test, enc, target="direction"),
+    )
+    boost = _boosting(seed).fit(tr.x, tr.y)
+    probability = boost.predict_proba(ts.x)[:, 1]
+    out.append(
+        Result(
+            "B7",
+            "부스팅 트리",
+            False,
+            {
+                "auc": roc_auc(ts.y, probability),
+                "accuracy": float(((probability >= 0.5).astype(int) == ts.y).mean()),
+            },
+        )
+    )
 
     nerf = sum(1 for r in test if r.direction_next == "nerf")
     return out, {
