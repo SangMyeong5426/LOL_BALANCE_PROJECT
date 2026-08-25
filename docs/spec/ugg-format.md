@@ -2,7 +2,7 @@
 
 **문서가 없는 형식이다.** 필드 이름이 없는 위치 기반 배열이라 각 숫자가 무엇인지 직접 알아냈다. 이 문서는 그 근거를 남긴다 — 근거가 없으면 다음에 형식이 바뀌었을 때 무엇이 틀어진 것인지 알 수 없다.
 
-구현은 [`src/patchlens/ugg.py`](../../src/patchlens/ugg.py), 검사는 [`tests/test_ugg.py`](../../tests/test_ugg.py).
+구현은 [`src/lol_balance/ugg.py`](../../src/lol_balance/ugg.py), 검사는 [`tests/test_ugg.py`](../../tests/test_ugg.py).
 
 ## 받는 법
 

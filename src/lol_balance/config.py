@@ -43,14 +43,14 @@ def _read_seed(raw: str | None) -> int:
         return int(raw)
     except ValueError as exc:
         # 시드가 조용히 기본값으로 떨어지면 학습·평가 분할이 바뀐 것을 아무도 모른다.
-        raise ValueError(f"PATCHLENS_SEED 는 정수여야 한다: {raw!r}") from exc
+        raise ValueError(f"LOL_BALANCE_SEED 는 정수여야 한다: {raw!r}") from exc
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
     """`.env` 를 읽어 설정을 만든다.
 
     이미 셸에 있는 환경변수를 덮어쓰지 않는다(`override=False`). CI 나 일회성
-    실행에서 `PATCHLENS_SEED=1 python ...` 이 파일보다 우선하게 하기 위해서다.
+    실행에서 `LOL_BALANCE_SEED=1 python ...` 이 파일보다 우선하게 하기 위해서다.
     """
     load_dotenv(
         env_file if env_file is not None else PROJECT_ROOT / ".env", override=False
@@ -58,8 +58,8 @@ def load_settings(env_file: Path | None = None) -> Settings:
 
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     return Settings(
-        seed=_read_seed(os.environ.get("PATCHLENS_SEED")),
-        llm_model=os.environ.get("PATCHLENS_LLM_MODEL", "").strip()
+        seed=_read_seed(os.environ.get("LOL_BALANCE_SEED")),
+        llm_model=os.environ.get("LOL_BALANCE_LLM_MODEL", "").strip()
         or DEFAULT_LLM_MODEL,
         anthropic_api_key=key or None,
     )

@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from patchlens.config import DEFAULT_LLM_MODEL, DEFAULT_SEED, load_settings
+from lol_balance.config import DEFAULT_LLM_MODEL, DEFAULT_SEED, load_settings
 
-_ENV_KEYS = ("PATCHLENS_SEED", "PATCHLENS_LLM_MODEL", "ANTHROPIC_API_KEY")
+_ENV_KEYS = ("LOL_BALANCE_SEED", "LOL_BALANCE_LLM_MODEL", "ANTHROPIC_API_KEY")
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +38,8 @@ def test_llm_is_not_required_to_run(clean_env: Path) -> None:
 def test_env_overrides_defaults(
     clean_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("PATCHLENS_SEED", "7")
-    monkeypatch.setenv("PATCHLENS_LLM_MODEL", "claude-sonnet-5")
+    monkeypatch.setenv("LOL_BALANCE_SEED", "7")
+    monkeypatch.setenv("LOL_BALANCE_LLM_MODEL", "claude-sonnet-5")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
 
     settings = load_settings(env_file=clean_env)
@@ -53,8 +53,8 @@ def test_blank_values_fall_back(
     clean_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`.env.example` 을 그대로 복사해 빈 값이 남은 흔한 경우."""
-    monkeypatch.setenv("PATCHLENS_SEED", "")
-    monkeypatch.setenv("PATCHLENS_LLM_MODEL", "")
+    monkeypatch.setenv("LOL_BALANCE_SEED", "")
+    monkeypatch.setenv("LOL_BALANCE_LLM_MODEL", "")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
 
     settings = load_settings(env_file=clean_env)
@@ -68,9 +68,9 @@ def test_non_numeric_seed_raises(
     clean_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """조용히 기본값으로 떨어지면 분할이 바뀐 것을 아무도 모른다."""
-    monkeypatch.setenv("PATCHLENS_SEED", "abc")
+    monkeypatch.setenv("LOL_BALANCE_SEED", "abc")
 
-    with pytest.raises(ValueError, match="PATCHLENS_SEED"):
+    with pytest.raises(ValueError, match="LOL_BALANCE_SEED"):
         load_settings(env_file=clean_env)
 
 

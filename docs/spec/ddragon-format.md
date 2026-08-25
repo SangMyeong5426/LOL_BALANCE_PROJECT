@@ -2,7 +2,7 @@
 
 버전 스냅샷 두 개를 비교하면 수치 변경이 나온다. **그런데 정답지로 쓰기에는 구멍이 있다.** 이 문서는 그 경계를 적는다.
 
-구현은 [`src/patchlens/ddragon.py`](../../src/patchlens/ddragon.py), 검사는 [`tests/test_ddragon.py`](../../tests/test_ddragon.py).
+구현은 [`src/lol_balance/ddragon.py`](../../src/lol_balance/ddragon.py), 검사는 [`tests/test_ddragon.py`](../../tests/test_ddragon.py).
 
 ## 받는 법
 
@@ -136,7 +136,7 @@ https://wiki.leagueoflegends.com/en-us/{위키버전}
 | `15.3.1` | `V25.03` — **+10 하고 0 채움** |
 | `16.15.1` | `V26.15` |
 
-**2025년부터 라이엇이 연도 기반 번호로 바꿨는데 Data Dragon 은 옛 번호를 유지한다.** 변환은 [`src/patchlens/patchnotes.py`](../../src/patchlens/patchnotes.py) 에 있다.
+**2025년부터 라이엇이 연도 기반 번호로 바꿨는데 Data Dragon 은 옛 번호를 유지한다.** 변환은 [`src/lol_balance/patchnotes.py`](../../src/lol_balance/patchnotes.py) 에 있다.
 
 ## 내용에 정확한 수치가 있다
 

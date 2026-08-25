@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from patchlens.ddragon import (
+from lol_balance.ddragon import (
     added_champions,
     diff_versions,
     is_standard_champion,

@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from patchlens.fetch import Retryable, get_with_retry, save  # noqa: E402
-from patchlens.patchnotes import wiki_url, wiki_version  # noqa: E402
+from lol_balance.fetch import Retryable, get_with_retry, save  # noqa: E402
+from lol_balance.patchnotes import wiki_url, wiki_version  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "patchnotes"
