@@ -37,12 +37,26 @@ LEVEL_FEATURES = (
     "role_count",
 )
 # 추세 피처 — 직전 패치 대비 변화
+# 이력 피처 — 과거 몇 패치의 조정 이력과 승률 흐름.
+# **따로 켜고 끌 수 있어야 기여를 잴 수 있다.** 수준 피처에 섞어 넣으면 모든
+# arm 이 한꺼번에 바뀌어 「이력이 도움이 됐나」에 답할 수 없다.
+HISTORY_FEATURES = ("history_len", "recent_adjustments", "high_wr_streak")
+
+# 범주형. 원핫으로 편다. **범주 목록은 학습 구간에서만 정한다** — 평가에만
+# 있는 값이 열을 만들면 학습·평가의 열 구성이 달라진다.
+CATEGORICAL = ("main_role",)
 TREND_FEATURES = ("d_win_rate", "d_pick_rate", "d_ban_rate")
 
 
 # 값이 없을 수 있는 피처. **부분집합에 결측이 있든 없든 표시 열을 항상 만든다.**
 # 「이번 데이터에 결측이 있을 때만」 열을 만들면 학습과 평가의 열 개수가 달라진다.
-NULLABLE = ("ban_rate", "d_win_rate", "d_pick_rate", "d_ban_rate")
+NULLABLE = (
+    "ban_rate",
+    "recent_adjustments",
+    "d_win_rate",
+    "d_pick_rate",
+    "d_ban_rate",
+)
 
 
 @dataclass(frozen=True)
@@ -70,15 +84,26 @@ class Encoder:
     names: tuple[str, ...]
     columns: tuple[str, ...]
     fill: tuple[float, ...]
+    levels: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
-def feature_names(with_trend: bool) -> tuple[str, ...]:
-    return LEVEL_FEATURES + (TREND_FEATURES if with_trend else ())
+def feature_names(with_trend: bool, with_history: bool = False) -> tuple[str, ...]:
+    return (
+        LEVEL_FEATURES
+        + (TREND_FEATURES if with_trend else ())
+        + (HISTORY_FEATURES if with_history else ())
+    )
 
 
-def fit_encoder(rows: tuple[PanelRow, ...], with_trend: bool) -> Encoder:
-    """학습 구간에서 열 구성과 채움값을 정한다."""
-    names = feature_names(with_trend)
+def fit_encoder(
+    rows: tuple[PanelRow, ...], with_trend: bool, with_history: bool = False
+) -> Encoder:
+    """학습 구간에서 열 구성과 채움값을 정한다.
+
+    `with_history` 일 때만 범주형(`main_role`)도 함께 편다 — 역할과 이력은
+    「그 챔피언이 어떤 자리에서 어떻게 다뤄져 왔나」라는 같은 갈래다.
+    """
+    names = feature_names(with_trend, with_history)
     fill: list[float] = []
     columns: list[str] = []
     for name in names:
@@ -88,7 +113,13 @@ def fit_encoder(rows: tuple[PanelRow, ...], with_trend: bool) -> Encoder:
         if name in NULLABLE:
             columns.append(f"{name}_missing")
         columns.append(name)
-    return Encoder(names, tuple(columns), tuple(fill))
+
+    levels = []
+    for name in CATEGORICAL if with_history else ():
+        seen = tuple(sorted({str(getattr(r, name)) for r in rows}))
+        levels.append((name, seen))
+        columns += [f"{name}={value}" for value in seen]
+    return Encoder(names, tuple(columns), tuple(fill), tuple(levels))
 
 
 # 방향 예측에 쓸 행. `mixed` 와 `adjust` 는 뺀다 — 한쪽으로 뭉개면 그 사실이
@@ -121,6 +152,13 @@ def encode(
         if name in NULLABLE:
             blocks.append(missing)
         blocks.append(values)
+
+    for name, seen in encoder.levels:
+        actual = [str(getattr(r, name)) for r in rows]
+        # 학습에 없던 값은 어느 열에도 1 이 안 붙는다. 그것이 정직하다.
+        for value in seen:
+            blocks.append(np.array([1.0 if a == value else 0.0 for a in actual]))
+
     if target == "direction":
         y = np.array([int(r.direction_next == "nerf") for r in rows], dtype=int)
     else:

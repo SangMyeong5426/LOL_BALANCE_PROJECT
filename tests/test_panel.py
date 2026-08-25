@@ -10,7 +10,14 @@ from typing import Any
 
 import pytest
 
-from lol_balance.panel import PATCH_SEQUENCE, champion_names, patch_index, patch_rows
+from conftest import PanelRowFactory
+from lol_balance.panel import (
+    HISTORY,
+    PATCH_SEQUENCE,
+    champion_names,
+    patch_index,
+    patch_rows,
+)
 from lol_balance.ugg import parse_champion_ranking
 
 ROLES = ("top", "jungle", "mid", "adc", "supp")
@@ -124,3 +131,58 @@ def test_champion_names_filters_game_mode_variants() -> None:
         "Jade_Ahri": {"key": "60103", "name": "Jade Ahri"},
     }
     assert champion_names(data) == {103: "Ahri"}
+
+
+def test_history_never_contains_the_row_itself(make_row: PanelRowFactory) -> None:
+    """**가장 위험한 자리다.** 자기 행이 이력에 들어가면 답을 그대로 본다.
+
+    패치 t 행의 `adjusted_next` 는 「t+1 에서 조정됨」이고 그것이 맞히려는
+    답이다. 이력에는 t−1 행까지만 들어가야 한다.
+    """
+    earlier = make_row("13_14", 103, win_rate=0.55, adjusted_next=True)
+    rows = patch_rows(
+        "13_15",
+        _ranking(),
+        NAMES,
+        frozenset({"Ahri"}),
+        history={103: [earlier]},
+    )
+
+    ahri = next(r for r in rows if r.champion == "Ahri")
+    assert ahri.adjusted_next is True  # 자기 라벨
+    assert ahri.history_len == 1
+    assert ahri.recent_adjustments == 1  # 자기 것이 아니라 earlier 의 것
+
+
+def test_no_history_means_unknown_not_zero(make_row: PanelRowFactory) -> None:
+    rows = patch_rows("13_14", _ranking(), NAMES, frozenset())
+
+    assert all(r.history_len == 0 for r in rows)
+    assert all(r.recent_adjustments is None for r in rows)
+
+
+def test_history_is_capped_at_the_window(make_row: PanelRowFactory) -> None:
+    """결측이 섞여 있으므로 「연속」이 아니라 「있는 것 중 최근 N개」다."""
+    past = [make_row(f"13_1{i}", 103, adjusted_next=True) for i in range(4, 9)]
+    past.append(make_row("13_19", 103, adjusted_next=False))
+
+    rows = patch_rows("13_20", _ranking(), NAMES, frozenset(), history={103: past})
+
+    ahri = next(r for r in rows if r.champion == "Ahri")
+    assert ahri.history_len == HISTORY
+    assert ahri.recent_adjustments == HISTORY - 1  # 가장 최근 하나는 False
+
+
+def test_high_win_rate_streak_counts_back_from_the_most_recent(
+    make_row: PanelRowFactory,
+) -> None:
+    """「한 번 튀었다」와 「계속 세다」를 가르려는 피처다."""
+    past = [
+        make_row("13_14", 103, win_rate=0.60),
+        make_row("13_15", 103, win_rate=0.40),  # 여기서 끊긴다
+        make_row("13_16", 103, win_rate=0.55),
+        make_row("13_17", 103, win_rate=0.55),
+    ]
+    rows = patch_rows("13_18", _ranking(), NAMES, frozenset(), history={103: past})
+
+    assert next(r for r in rows if r.champion == "Ahri").high_wr_streak == 2
