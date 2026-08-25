@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from lol_balance.ddragon import standard_champions
+from lol_balance.direction import Direction
 from lol_balance.ugg import ChampionRanking, ChampionRow
 
 # 판수가 너무 적은 챔피언은 승률이 요동친다. 그 패치·그 챔피언 전체 판수 기준.
@@ -71,6 +72,12 @@ class PanelRow:
 
     # 라벨 — 다음 패치에서 조정됐는가
     adjusted_next: bool
+    # 조정됐다면 어느 방향인가. 조정 안 됐거나 방향을 모르면 None.
+    direction_next: Direction | None
+    # 그 방향이 어디서 왔나 — `label`(손으로 붙임) · `auto`(Data Dragon 판정).
+    # **둘을 섞어 놓고 구분을 잃으면 안 된다.** 자동 판정은 스탯·쿨다운 조정만
+    # 보므로 치우쳐 있고, 그 치우침이 결과에 얼마나 섞였는지 알 수 있어야 한다.
+    direction_source: str | None
 
     @property
     def wr_gap(self) -> float:
@@ -121,11 +128,13 @@ def patch_rows(
     adjusted: frozenset[str],
     previous: dict[int, PanelRow] | None = None,
     min_matches: int = MIN_MATCHES,
+    directions: dict[str, tuple[Direction, str]] | None = None,
 ) -> tuple[PanelRow, ...]:
     """한 패치의 표를 만든다.
 
     `adjusted` 는 **다음 패치** 노트에 나온 챔피언 이름 집합이다. `previous` 는
     직전 패치의 행(챔피언 id 로 색인)이고, 없으면 추세 피처가 None 으로 남는다.
+    `directions` 는 챔피언 이름 → (방향, 출처) 다.
     """
     by_champion: dict[int, list[ChampionRow]] = {}
     for row in ranking.rows:
@@ -175,6 +184,8 @@ def patch_rows(
                     else ban_rate - prior.ban_rate
                 ),
                 adjusted_next=name in adjusted,
+                direction_next=(directions or {}).get(name, (None, None))[0],
+                direction_source=(directions or {}).get(name, (None, None))[1],
             )
         )
 

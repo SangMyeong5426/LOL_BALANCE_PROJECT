@@ -31,11 +31,19 @@ def panel(tmp_path: Path, make_row: PanelRowFactory) -> Path:
 
 
 def test_round_trip_preserves_values_and_types(panel: Path) -> None:
+    """열을 이름이 아니라 위치로 집으면 여기서 걸린다.
+
+    실제로 방향 열 두 개를 추가했을 때 마지막 열이 `adjusted_next` 에서
+    `direction_source` 로 바뀌었고, 조정 여부가 통째로 틀렸다. 파싱도 타입도
+    멀쩡해서 조용히 지나갔다.
+    """
     rows = read_panel(panel)
 
     assert [r.patch for r in rows] == ["13_14", "13_15", "15_1", "16_1"]
     assert rows[1].adjusted_next is True
     assert rows[0].adjusted_next is False
+    assert rows[1].champion_id == 1
+    assert rows[1].win_rate == pytest.approx(0.51)
 
 
 def test_missing_ban_rate_survives_as_none(panel: Path) -> None:
