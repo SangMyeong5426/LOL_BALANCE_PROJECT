@@ -11,7 +11,14 @@ from pathlib import Path
 import pytest
 
 from conftest import PanelRowFactory
-from lol_balance.rules import Condition, Rule, read_rules, score, write_rules
+from lol_balance.rules import (
+    Condition,
+    Rule,
+    RulePredictor,
+    read_rules,
+    score,
+    write_rules,
+)
 
 
 def test_all_conditions_must_hold(make_row: PanelRowFactory) -> None:
@@ -96,3 +103,76 @@ def test_rules_survive_a_round_trip(tmp_path: Path) -> None:
 
 def test_reading_an_absent_file_gives_nothing(tmp_path: Path) -> None:
     assert read_rules(tmp_path / "none.jsonl") == ()
+
+
+# --- 규칙 예측기 -------------------------------------------------------
+
+
+def _fitted(make_row: PanelRowFactory, rules: tuple[Rule, ...]) -> RulePredictor:
+    train = tuple(
+        make_row(
+            "13_14",
+            i,
+            win_rate=0.52 if i <= 10 else 0.48,
+            adjusted_next=i <= 8,
+            direction_next=("nerf" if i <= 10 else "buff")
+            if i <= 8 or i > 12
+            else None,
+        )
+        for i in range(1, 21)
+    )
+    return RulePredictor.fit(rules, train)
+
+
+def test_weights_come_from_the_training_rows(make_row: PanelRowFactory) -> None:
+    """평가 성적을 가중치로 쓰면 그것이 곧 누출이다."""
+    rule = Rule("r", (Condition("win_rate", ">=", 0.5),), "adjusted")
+    predictor = _fitted(make_row, (rule,))
+
+    # 학습에서 승률 0.52 인 10종 중 8종이 조정됐다
+    assert predictor.weights["r"] == pytest.approx(0.8)
+
+
+def test_a_rule_that_never_fires_gets_no_weight(make_row: PanelRowFactory) -> None:
+    """걸리지 않으면 정확도를 못 재므로 가중치가 없다."""
+    rule = Rule("r", (Condition("win_rate", ">=", 0.99),), "adjusted")
+
+    assert _fitted(make_row, (rule,)).weights["r"] == 0.0
+
+
+def test_more_matching_rules_give_a_higher_score(make_row: PanelRowFactory) -> None:
+    """단순히 걸린 규칙 수를 세면 동점이 너무 많아 표를 못 세운다."""
+    rules = (
+        Rule("a", (Condition("win_rate", ">=", 0.5),), "adjusted"),
+        Rule("b", (Condition("pick_rate", ">=", 0.04),), "adjusted"),
+    )
+    predictor = _fitted(make_row, rules)
+
+    both = predictor.adjusted_score(make_row("15_1", 1, win_rate=0.52, pick_rate=0.05))
+    one = predictor.adjusted_score(make_row("15_1", 2, win_rate=0.52, pick_rate=0.01))
+    assert both > one
+
+
+def test_no_matching_rule_falls_back_to_the_training_base_rate(
+    make_row: PanelRowFactory,
+) -> None:
+    rule = Rule("r", (Condition("win_rate", ">=", 0.9),), "adjusted")
+    predictor = _fitted(make_row, (rule,))
+
+    assert predictor.adjusted_score(make_row("15_1", 1, win_rate=0.5)) == pytest.approx(
+        predictor.fallback["adjusted"]
+    )
+
+
+def test_direction_score_weighs_both_sides(make_row: PanelRowFactory) -> None:
+    """너프 근거와 버프 근거를 견줘 비율로 만든다."""
+    rules = (
+        Rule("n", (Condition("win_rate", ">=", 0.51),), "nerf"),
+        Rule("b", (Condition("win_rate", "<", 0.49),), "buff"),
+    )
+    predictor = _fitted(make_row, rules)
+
+    assert predictor.nerf_score(make_row("15_1", 1, win_rate=0.55)) == 1.0
+    assert predictor.nerf_score(make_row("15_1", 2, win_rate=0.45)) == 0.0
+    middle = predictor.nerf_score(make_row("15_1", 3, win_rate=0.50))
+    assert middle == pytest.approx(predictor.fallback["nerf"])

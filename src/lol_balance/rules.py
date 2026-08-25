@@ -158,3 +158,54 @@ def read_rules(path: Path) -> tuple[Rule, ...]:
             )
         )
     return tuple(out)
+
+
+@dataclass(frozen=True)
+class RulePredictor:
+    """규칙 묶음을 점수 하나로 바꾼다.
+
+    **가중치는 학습 구간 정확도다.** 평가 성적을 가중치로 쓰면 그것이 곧 누출이다.
+    `fit` 은 학습 행만 받는다.
+
+    여러 규칙이 걸리면 **noisy-OR** 로 합친다 — `1 − Π(1 − pᵢ)`. 규칙끼리
+    독립이라고 가정하는 것이고 실제로는 겹치지만, 「많이 걸릴수록 확신이 높다」를
+    표현하면서 [0, 1] 안에 머무는 가장 단순한 방법이다. 표를 세우려면 연속
+    점수가 필요한데 단순히 걸린 규칙 수를 세면 동점이 너무 많다.
+    """
+
+    weights: dict[str, float]
+    rules: tuple[Rule, ...]
+    fallback: dict[str, float]
+
+    @staticmethod
+    def fit(rules: tuple[Rule, ...], train: tuple[PanelRow, ...]) -> RulePredictor:
+        weights: dict[str, float] = {}
+        for rule in rules:
+            result = score(rule, train)
+            # 걸리지 않은 규칙은 가중치가 없다. 정확도를 못 재기 때문이다.
+            weights[rule.id] = result.precision if result.fired else 0.0
+        fallback: dict[str, float] = {}
+        for action in ("adjusted", "nerf"):
+            pool = _population(train, action)
+            positives = sum(1 for r in pool if _matches(r, action))
+            fallback[action] = positives / len(pool) if pool else 0.0
+        return RulePredictor(weights, rules, fallback)
+
+    def _evidence(self, row: PanelRow, action: Action) -> float:
+        product = 1.0
+        for rule in self.rules:
+            if rule.then == action and rule.fires(row):
+                product *= 1.0 - self.weights.get(rule.id, 0.0)
+        return 1.0 - product
+
+    def adjusted_score(self, row: PanelRow) -> float:
+        """조정될 가능성. 걸리는 규칙이 없으면 학습 구간 기준선."""
+        evidence = self._evidence(row, "adjusted")
+        return evidence if evidence > 0 else self.fallback["adjusted"]
+
+    def nerf_score(self, row: PanelRow) -> float:
+        """너프일 가능성. 양쪽 근거를 견줘 비율로 만든다."""
+        nerf, buff = self._evidence(row, "nerf"), self._evidence(row, "buff")
+        if nerf == 0 and buff == 0:
+            return self.fallback["nerf"]
+        return nerf / (nerf + buff)

@@ -26,9 +26,11 @@ from lol_balance.arms import Result, direction_arms, target_arms  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.effect import outcomes  # noqa: E402
 from lol_balance.panel import PATCH_SEQUENCE, PanelRow  # noqa: E402
+from lol_balance.rules import Rule, read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
+RULES = ROOT / "rules" / "proposed.jsonl"
 RUNS = ROOT / "runs"
 
 Columns = list[tuple[str, str, str]]
@@ -50,8 +52,10 @@ def table(results: list[Result], columns: Columns) -> None:
         print(line)
 
 
-def show_target(rows: tuple[PanelRow, ...], at: str, seed: int) -> list[Result]:
-    results, meta = target_arms(rows, at, seed)
+def show_target(
+    rows: tuple[PanelRow, ...], at: str, seed: int, rules: tuple[Rule, ...]
+) -> list[Result]:
+    results, meta = target_arms(rows, at, seed, rules)
     print("① 대상 — 누가 조정되나  (패치 안에서 줄 세우기)")
     print(
         f"   학습 {meta['학습']:,.0f}행 · 평가 {meta['평가']:,.0f}행 "
@@ -68,8 +72,10 @@ def show_target(rows: tuple[PanelRow, ...], at: str, seed: int) -> list[Result]:
     return results
 
 
-def show_direction(rows: tuple[PanelRow, ...], at: str, seed: int) -> list[Result]:
-    results, meta = direction_arms(rows, at, seed)
+def show_direction(
+    rows: tuple[PanelRow, ...], at: str, seed: int, rules: tuple[Rule, ...]
+) -> list[Result]:
+    results, meta = direction_arms(rows, at, seed, rules)
     print("\n② 방향 — 너프냐 버프냐  (조정된 챔피언만)")
     print(
         f"   학습 {meta['학습']:,.0f}건 · 평가 {meta['평가']:,.0f}건 "
@@ -113,10 +119,15 @@ def main() -> int:
         print("패널이 비었다. ./scripts/build-panel 을 먼저 돌린다.")
         return 1
 
-    print(f"시드 {seed} · 시간순 분할 {at} 앞뒤 · 패널 {len(rows):,}행\n")
+    print(f"시드 {seed} · 시간순 분할 {at} 앞뒤 · 패널 {len(rows):,}행")
 
-    target = show_target(rows, at, seed) if only in ("", "target") else []
-    direction = show_direction(rows, at, seed) if only in ("", "direction") else []
+    rules = read_rules(RULES)
+    hand = len({r.patch for r in rows if r.direction_source == "label"})
+    print(f"규칙 {len(rules)}개 · 손 라벨 붙인 패치 {hand}개\n")
+    target = show_target(rows, at, seed, rules) if only in ("", "target") else []
+    direction = (
+        show_direction(rows, at, seed, rules) if only in ("", "direction") else []
+    )
     effect = show_effect(rows) if only in ("", "effect") else {}
 
     RUNS.mkdir(exist_ok=True)
@@ -138,7 +149,12 @@ def main() -> int:
         )
     )
     print(f"\n저장: {path.relative_to(ROOT)}")
-    print("\n지금은 전부 통계 베이스라인이다. LLM arm 이 붙으면 이 표에 함께 선다.")
+    llm = sum(1 for r in [*target, *direction] if r.uses_llm)
+    print(
+        f"\nA0~A3 · B0~B3 은 통계 베이스라인이고, A4 · B4 는 LLM 이 제안한 규칙이다"
+        f" ({llm}개)."
+    )
+    print("에이전트(A5 · A6)는 아직 없다.")
     return 0
 
 

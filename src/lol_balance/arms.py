@@ -34,6 +34,7 @@ from lol_balance.baseline import (
     roc_auc,
 )
 from lol_balance.panel import PanelRow, patch_index
+from lol_balance.rules import Rule, RulePredictor
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,10 @@ def _rank_scores(matrix: Matrix, score: NDArray[np.float64]) -> dict[str, float]
 
 
 def target_arms(
-    rows: tuple[PanelRow, ...], at: str, seed: int
+    rows: tuple[PanelRow, ...],
+    at: str,
+    seed: int,
+    rules: tuple[Rule, ...] = (),
 ) -> tuple[list[Result], dict[str, float]]:
     """누가 조정될 것인가. 패치 안에서 챔피언을 줄 세운다."""
     train, test = split(rows, at)
@@ -127,6 +131,12 @@ def target_arms(
         )
     )
 
+    if rules:
+        # **가중치는 학습 구간에서만 뽑는다.** 규칙 자체도 학습만 보고 제안했다.
+        predictor = RulePredictor.fit(rules, train)
+        scores = np.array([predictor.adjusted_score(r) for r in test])
+        out.append(Result("A4", "규칙 엔진 (LLM 제안)", True, _rank_scores(te, scores)))
+
     base = sum(r.adjusted_next for r in test) / len(test)
     return out, {"기준선": base, "학습": len(train), "평가": len(test)}
 
@@ -135,7 +145,10 @@ def target_arms(
 
 
 def direction_arms(
-    rows: tuple[PanelRow, ...], at: str, seed: int
+    rows: tuple[PanelRow, ...],
+    at: str,
+    seed: int,
+    rules: tuple[Rule, ...] = (),
 ) -> tuple[list[Result], dict[str, float]]:
     """조정된다면 어느 쪽인가. 조정된 챔피언만 본다."""
     pool = direction_rows(rows)
@@ -195,6 +208,21 @@ def direction_arms(
             scored(knn.predict_proba(te.x)[:, 1], True),
         )
     )
+
+    if rules:
+        predictor = RulePredictor.fit(rules, train)
+        scores = np.array([predictor.nerf_score(r) for r in test])
+        out.append(
+            Result(
+                "B4",
+                "규칙 엔진 (LLM 제안)",
+                True,
+                {
+                    "auc": roc_auc(te.y, scores),
+                    "accuracy": float(((scores >= 0.5).astype(int) == te.y).mean()),
+                },
+            )
+        )
 
     nerf = sum(1 for r in test if r.direction_next == "nerf")
     return out, {
