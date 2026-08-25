@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""패치 × 챔피언 표를 만든다.
+
+    ./scripts/build-panel
+
+**LLM 도 API 키도 필요 없다.** 라벨(누가 조정됐나)은 위키가 `data-champion`
+속성에 넣어 둔 이름을 파서가 읽어서 준다.
+
+같은 원자료에서 항상 같은 결과가 나와야 한다 — 그래야 커밋하지 않아도 된다.
+정렬 순서까지 고정한다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.panel import (  # noqa: E402
+    PATCH_SEQUENCE,
+    PanelRow,
+    champion_names,
+    patch_rows,
+)
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+from lol_balance.store import write_panel  # noqa: E402
+from lol_balance.ugg import parse_champion_ranking  # noqa: E402
+
+RANKING = ROOT / "data" / "ugg" / "champion_ranking"
+DDRAGON = ROOT / "data" / "ddragon"
+NOTES = ROOT / "data" / "patchnotes"
+OUT = ROOT / "data" / "panel.sqlite"
+
+
+def version(patch: str) -> str:
+    """`16_9` → `16.9.1`. Data Dragon 과 노트 파일명이 이 형태다."""
+    return patch.replace("_", ".") + ".1"
+
+
+def adjusted_in(patch: str) -> frozenset[str]:
+    """그 패치 노트에 나온 챔피언 이름."""
+    path = NOTES / f"{version(patch)}.html"
+    if not path.exists():
+        return frozenset()
+    return frozenset(b.champion for b in champion_changes(path.read_bytes()))
+
+
+def main() -> int:
+    have = {p.stem for p in RANKING.glob("*.json")}
+    rows: list[PanelRow] = []
+    previous: dict[int, PanelRow] | None = None
+    previous_patch: str | None = None
+    skipped_no_next = 0
+
+    print(f"{'패치':8}{'챔피언':>7}{'조정':>6}{'추세':>6}   다음 패치")
+    for i, patch in enumerate(PATCH_SEQUENCE):
+        if patch not in have:
+            previous, previous_patch = None, None
+            continue
+        nxt = PATCH_SEQUENCE[i + 1] if i + 1 < len(PATCH_SEQUENCE) else None
+        if nxt is None:
+            skipped_no_next += 1
+            continue  # 라벨을 만들 수 없다 — 예측 지점이 못 된다
+
+        ranking = parse_champion_ranking(
+            json.loads((RANKING / f"{patch}.json").read_bytes())
+        )
+        names = champion_names(
+            json.loads((DDRAGON / f"{version(patch)}.json").read_bytes())["data"]
+        )
+        adjusted = adjusted_in(nxt)
+
+        # 직전 패치가 **바로 앞**일 때만 추세를 붙인다. 사이에 결측이 있으면
+        # 「직전 대비」가 아니라 「두세 패치 전 대비」가 된다.
+        prior = previous if previous_patch == PATCH_SEQUENCE[i - 1] else None
+        made = patch_rows(patch, ranking, names, adjusted, prior)
+        rows.extend(made)
+
+        n_adj = sum(1 for r in made if r.adjusted_next)
+        n_trend = sum(1 for r in made if r.has_trend)
+        print(f"{patch:8}{len(made):>7}{n_adj:>6}{n_trend:>6}   {nxt}")
+
+        previous = {r.champion_id: r for r in made}
+        previous_patch = patch
+
+    write_panel(OUT, tuple(rows))
+
+    points = len({r.patch for r in rows})
+    trend_points = len({r.patch for r in rows if r.has_trend})
+    positives = sum(1 for r in rows if r.adjusted_next)
+    print(
+        f"\n예측 지점 {points} (추세 가능 {trend_points}) · 행 {len(rows):,} "
+        f"· 양성 {positives:,} ({positives / len(rows):.1%})"
+    )
+    if skipped_no_next:
+        print(f"제외: 마지막 패치 {skipped_no_next}개 — 다음 패치가 없어 라벨이 없다")
+    print(f"저장: {OUT.relative_to(ROOT)}  ({OUT.stat().st_size:,} B)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

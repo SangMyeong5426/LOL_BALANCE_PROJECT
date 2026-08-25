@@ -22,7 +22,8 @@ indent-style = "space"
 minversion = "8.0"
 testpaths = ["tests"]
 # 패키지를 설치하지 않으므로 src 를 import 경로에 넣는다.
-pythonpath = ["src"]
+# tests 도 넣는다 — 여러 테스트가 conftest 의 공용 도구를 import 한다.
+pythonpath = ["src", "tests"]
 addopts = "-ra --strict-markers"
 
 [tool.mypy]
