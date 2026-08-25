@@ -35,7 +35,7 @@
 
 **용도**: 버전 간 diff 로 **기본 스탯·쿨다운·코스트·사거리** 변경을 정확히 뽑는다. 노트에 안 적히는 조용한 변경까지 잡힌다.
 
-> **2026-08-24 정정.** 한때 「패치 노트를 긁을 필요가 없다」고 적었으나 **틀렸다.** 대부분 스킬의 피해량이 Data Dragon 에 없다 — 툴팁이 `{{ totaldamage }}` 플레이스홀더이고 `datavalues` 는 932개 스킬 전부 비어 있다. **정답지는 패치 노트여야 하고 Data Dragon diff 는 그 추출을 검증하는 수단이다.** 근거와 한계는 [`ddragon-format.md`](ddragon-format.md).
+> **2026-08-24 정정.** 한때 「패치 노트를 긁을 필요가 없다」고 적었으나 **틀렸다.** 대부분 스킬의 피해량이 Data Dragon 에 없다 — 툴팁이 `{{ totaldamage }}` 플레이스홀더이고 `datavalues` 는 모든 스킬에서 비어 있다. **정답지는 패치 노트여야 하고 Data Dragon diff 는 그 추출을 검증하는 수단이다.** 근거와 한계는 [`ddragon-format.md`](ddragon-format.md).
 
 ---
 

@@ -27,9 +27,19 @@ from dataclasses import dataclass
 from lol_balance.ddragon import Change
 from lol_balance.extract import ChangeRecord
 
-# Data Dragon 이 완전한 종류만 채점한다. `tooltip` 은 대부분 변수명 정리이고
-# `effect` 는 스킬 932개 중 306개만 값이 살아 있다 — 채점 기준이 못 된다.
-SCORED_KINDS = ("stat", "spell")
+# 채점에 쓰는 종류.
+#
+# `stat` 과 `spell`(쿨다운·코스트·사거리)은 Data Dragon 에 **완전하다** — 여기서
+# 안 잡히면 놓친 것이 맞다.
+#
+# `effect` 는 **절반만 살아 있다**(13.15 기준 스킬 656개 중 322개). 그래서
+# 「안 잡혔으니 놓쳤다」로는 못 쓰지만, **잡힌 것은 진짜 피해량 변경이다.**
+# 빼 두면 대조 가능한 범위가 부당하게 좁아진다 — 13.15 에서 이것만으로 3건이
+# 더 확인됐다.
+#
+# `tooltip` 은 뺀다. 대부분 `{{ e1 }}` → `{{ stackduration }}` 같은 변수명
+# 정리라 수치 변경이 아니다.
+SCORED_KINDS = ("stat", "spell", "effect")
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
