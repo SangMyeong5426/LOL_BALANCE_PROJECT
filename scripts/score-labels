@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""붙인 방향 라벨을 Data Dragon 자동 판정과 대조한다.
+
+    ./scripts/score-labels
+
+**「확장」을 어긋남으로 세지 않는다.** 자동 판정은 diff 가 본 것의 방향일 뿐이라,
+노트에서 반대 방향을 더 찾아 mixed 로 붙였다면 오히려 맞은 것이다.
+「충돌」만 문제다 — 둘 중 하나가 틀렸다는 뜻이다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
+from lol_balance.direction import champion_direction, drop_mass_changes  # noqa: E402
+from lol_balance.groundtruth import compare, read_labels  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+
+LABELS = ROOT / "ground_truth" / "directions"
+
+
+def automatic(patch: str) -> dict[str, str]:
+    i = PATCH_SEQUENCE.index(patch)
+    version = patch.replace("_", ".") + ".1"
+    previous = PATCH_SEQUENCE[i - 1].replace("_", ".") + ".1"
+    after = json.loads((ROOT / f"data/ddragon/{version}.json").read_bytes())["data"]
+    before = json.loads((ROOT / f"data/ddragon/{previous}.json").read_bytes())["data"]
+    standard = standard_champions(after)
+    names = {k: v.get("name", k) for k, v in standard.items()}
+    grouped: dict[str, list] = {}
+    for change in drop_mass_changes(diff_versions(before, after), len(standard)):
+        grouped.setdefault(change.champion, []).append(change)
+    return {
+        names.get(cid, cid): direction
+        for cid, changes in grouped.items()
+        if (direction := champion_direction(changes))
+    }
+
+
+def main() -> int:
+    files = sorted(LABELS.glob("*.jsonl"))
+    if not files:
+        print("라벨이 없다. ./scripts/save-labels 로 먼저 붙인다.")
+        return 1
+
+    total: Counter[str] = Counter()
+    spread: Counter[str] = Counter()
+    conflicts: list[str] = []
+    labelled = 0
+
+    print(f"{'패치':8}{'라벨':>6}{'채점':>6}{'일치':>6}{'확장':>6}{'충돌':>6}")
+    for path in files:
+        labels = read_labels(path)
+        labelled += len(labels)
+        for label in labels:
+            spread[label.direction] += 1
+        auto = automatic(labels[0].patch)
+        verdicts = Counter(
+            compare(x.direction, auto[x.champion])  # type: ignore[arg-type]
+            for x in labels
+            if x.champion in auto
+        )
+        conflicts += [
+            f"{x.patch} {x.champion}: 라벨 {x.direction} vs 자동 {auto[x.champion]}"
+            for x in labels
+            if x.champion in auto
+            and compare(x.direction, auto[x.champion]) == "conflict"  # type: ignore[arg-type]
+        ]
+        total += verdicts
+        scored = sum(verdicts.values())
+        print(
+            f"{labels[0].patch:8}{len(labels):>6}{scored:>6}"
+            f"{verdicts['agree']:>6}{verdicts['extends']:>6}{verdicts['conflict']:>6}"
+        )
+
+    scored = sum(total.values())
+    print(f"\n라벨 {labelled}종 · 채점 대상 {scored}종")
+    print(
+        f"  일치 {total['agree']} · 확장 {total['extends']} · 충돌 {total['conflict']}"
+        f"  →  모순 없음 {(scored - total['conflict']) / scored:.1%}"
+    )
+    print("  분포: " + " · ".join(f"{k} {v}" for k, v in spread.most_common()))
+    for line in conflicts:
+        print(f"  ⚠ {line}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

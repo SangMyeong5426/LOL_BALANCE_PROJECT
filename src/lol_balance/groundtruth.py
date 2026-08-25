@@ -74,7 +74,7 @@ def compare(label: Direction, automatic: Direction) -> Verdict:
     if label == automatic:
         return "agree"
     if label == "mixed":
+        # 자동이 본 방향에 더해 노트에서 반대 방향을 찾았다는 뜻이다.
         return "extends"
-    if automatic == "mixed":
-        return "conflict"
+    # `adjust` 로 붙였는데 자동이 방향을 봤다면 수치 변경을 놓친 것이다.
     return "conflict"
