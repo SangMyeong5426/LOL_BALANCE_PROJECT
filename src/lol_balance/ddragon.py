@@ -89,16 +89,18 @@ def diff_champion(
         if old_lit != new_lit:
             changes.append(Change(name, "tooltip", f"{slot}.numbers", old_lit, new_lit))
 
-        if sa.get("effectBurn") != sb.get("effectBurn"):
-            changes.append(
-                Change(
-                    name,
-                    "effect",
-                    f"{slot}.effect",
-                    sa.get("effectBurn"),
-                    sb.get("effectBurn"),
+        # **원소별로 쪼갠다.** 배열을 통째로 비교하면 안 바뀐 원소까지 값에
+        # 섞여 「무엇이 몇에서 몇으로」와 맞대 볼 수 없다. 실제로 Sejuani W 의
+        # 피해량 변경이 배열 비교 때문에 안 잡혔다.
+        old_effect = sa.get("effectBurn") or []
+        new_effect = sb.get("effectBurn") or []
+        for index in range(max(len(old_effect), len(new_effect))):
+            old = old_effect[index] if index < len(old_effect) else None
+            new = new_effect[index] if index < len(new_effect) else None
+            if old != new:
+                changes.append(
+                    Change(name, "effect", f"{slot}.effect[{index}]", old, new)
                 )
-            )
 
     return changes
 
