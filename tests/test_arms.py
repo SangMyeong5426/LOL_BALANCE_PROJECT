@@ -62,6 +62,7 @@ def test_target_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
         "A3",
         "A5",
         "A5b",
+        "A7",
     ]
     assert all(not r.uses_llm for r in results)  # A4 는 규칙을 넘겨야 나온다
     assert 0.0 < meta["기준선"] < 1.0
@@ -118,3 +119,30 @@ def test_retrieval_arms_are_not_marked_as_llm(make_row: PanelRowFactory) -> None
     target, _ = target_arms(_panel(make_row), "15_13", SEED)
 
     assert all(not r.uses_llm for r in target if r.arm.startswith("A5"))
+
+
+def test_boosting_arms_are_on_both_tables(make_row: PanelRowFactory) -> None:
+    """선형 모델이 못 잡는 상호작용을 잡으라고 넣은 arm 이다."""
+    rows = _panel(make_row)
+
+    target, _ = target_arms(rows, "15_13", SEED)
+    direction, _ = direction_arms(rows, "15_13", SEED)
+
+    assert "A7" in {r.arm for r in target}
+    assert "B7" in {r.arm for r in direction}
+
+
+def test_boosting_hyperparameters_are_fixed_not_tuned_per_run() -> None:
+    """평가 구간을 보고 고르면 그것이 곧 누출이다.
+
+    학습 구간 안에서 시간순 교차검증으로 한 번 골라 상수로 박아 뒀다.
+    실행할 때마다 다시 고르지 않는다.
+    """
+    from lol_balance.arms import _BOOST
+
+    assert _BOOST == {
+        "max_depth": 2,
+        "max_iter": 300,
+        "learning_rate": 0.05,
+        "l2_regularization": 1.0,
+    }
