@@ -18,6 +18,10 @@ league-of-legends-patch-26-9-notes    16.4 이후
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+
+from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 WIKI_BASE = "https://wiki.leagueoflegends.com/en-us"
 
@@ -50,3 +54,118 @@ def wiki_version(ddragon_version: str) -> str:
 
 def wiki_url(ddragon_version: str) -> str:
     return f"{WIKI_BASE}/{wiki_version(ddragon_version)}"
+
+
+# 챔피언 절의 제목. 다른 절(Items·Runes 등)은 이 프로젝트의 대상이 아니다.
+_CHAMPION_HEADING = "champion"
+
+
+@dataclass(frozen=True)
+class ChangeBlock:
+    """한 챔피언의 한 묶음에 딸린 변경 문장들.
+
+    묶음은 `Stats`·`General` 이거나 스킬 하나다. 스킬이면 `ability` 가 채워진다.
+    """
+
+    champion: str
+    section: str
+    ability: str | None
+    lines: tuple[str, ...]
+
+
+# 텍스트 조각 사이에 넣는 표식. 소수점 처리 때문에 필요하다 — 아래 참조.
+_JOINT = "\x00"
+
+
+def _leaf_text(node: Tag) -> str:
+    """리스트 항목 하나를 한 줄로 읽는다.
+
+    조각 사이를 그냥 공백으로 이으면 **소수가 깨진다.** 위키가 소수부를
+    `0.<small>67</small>` 로 감싸기 때문에 `0. 67` 이 되고, 그러면 12.5 가
+    12 과 5 로 읽힌다. 반대로 아무것도 안 넣으면 `reduced to<span>60% AD</span>`
+    가 `reduced to60% AD` 로 붙는다. **둘 다 실제로 겪었다.**
+
+    그래서 표식을 넣어 두고 소수 자리에서만 지운 뒤 나머지를 공백으로 바꾼다.
+    """
+    text = node.get_text(_JOINT)
+    text = re.sub(rf"(\d){_JOINT}*\.{_JOINT}*(\d)", r"\1.\2", text)
+    return re.sub(r"\s+", " ", text.replace(_JOINT, " ")).strip()
+
+
+def _own_text(item: Tag) -> str:
+    """중첩 목록을 뺀, **그 항목 자신의 문장.**
+
+    중간 노드가 자기 문장을 가진다. Aatrox 는 `First cast ...` 항목 안에
+    `Second cast` · `Third cast` 가 중첩돼 있어서, 잎만 모으면 **First 계열
+    네 줄이 통째로 사라진다.** 실제로 그렇게 빠뜨렸다.
+    """
+    nested = item.find_all("ul", recursive=False)
+    for node in nested:
+        node.extract()
+    text = _leaf_text(item)
+    for node in nested:
+        item.append(node)
+    return text
+
+
+def _label(item: Tag) -> tuple[str, str | None]:
+    """상위 항목의 묶음 이름. 스킬이면 `data-ability` 에 정확한 이름이 있다."""
+    icon = item.find("span", attrs={"data-ability": True})
+    if isinstance(icon, Tag):
+        ability = str(icon["data-ability"])
+        return ability, ability
+    return _own_text(item) or "General", None
+
+
+def _sentences(item: Tag) -> list[str]:
+    """묶음 아래의 모든 변경 문장. **깊이를 가정하지 않는다** — 시대마다 다르다."""
+    lines = [t for t in (_own_text(x) for x in item.find_all("li")) if t]
+    if lines:
+        return lines
+    # 중첩이 없으면 항목 자신이 곧 문장이다.
+    own = _own_text(item)
+    return [own] if own else []
+
+
+def champion_changes(html: bytes) -> tuple[ChangeBlock, ...]:
+    """패치 노트 HTML 에서 챔피언 변경 묶음을 뽑는다.
+
+    **이름을 문자열에서 짐작하지 않는다.** 위키가 `data-champion` 과
+    `data-ability` 속성에 정확한 이름을 넣어 두므로 그것을 쓴다. 표기가 시대마다
+    달라도(산문 `reduced to X from Y` ↔ 화살표 `A ⇒ B`) 이 골격은 같다.
+
+    문장 자체는 자연어 그대로 둔다. 「무엇이 몇에서 몇으로」를 구조화하는 것은
+    LLM 의 일이고, 여기서는 **어느 챔피언의 어느 묶음인지**까지만 확정한다.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    heading = next(
+        (
+            h
+            for h in soup.select("h3")
+            if h.get_text(strip=True).lower().startswith(_CHAMPION_HEADING)
+        ),
+        None,
+    )
+    if heading is None or heading.parent is None:
+        return ()
+
+    blocks: list[ChangeBlock] = []
+    champion: str | None = None
+    for sib in heading.parent.next_siblings:
+        if not isinstance(sib, Tag):
+            continue
+        if sib.name == "div" and sib.find("h3"):
+            break  # 다음 절로 넘어갔다
+        if sib.name == "dl":
+            icon = sib.find("span", attrs={"data-champion": True})
+            champion = str(icon["data-champion"]) if isinstance(icon, Tag) else None
+        elif sib.name == "ul" and champion:
+            for item in sib.find_all("li", recursive=False):
+                section, ability = _label(item)
+                lines = tuple(_sentences(item))
+                if not lines:
+                    continue
+                if lines == (section,):
+                    section = "General"  # 묶음 없이 문장 하나만 있는 경우
+                blocks.append(ChangeBlock(champion, section, ability, lines))
+    return tuple(blocks)
