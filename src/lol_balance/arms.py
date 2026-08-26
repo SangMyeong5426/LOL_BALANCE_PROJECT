@@ -15,6 +15,7 @@ LLM 이 그것을 못 이기면 못 이겼다고 적는다.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -35,7 +36,7 @@ from lol_balance.baseline import (
     roc_auc,
 )
 from lol_balance.panel import PanelRow, patch_index
-from lol_balance.retrieval import CaseSearch
+from lol_balance.retrieval import CASE_FEATURES, CASE_FEATURES_PRO, CaseSearch
 from lol_balance.rules import Rule, RulePredictor
 
 
@@ -89,6 +90,13 @@ def _neighbours(wanted: int, available: int) -> int:
     return max(1, min(wanted, available))
 
 
+# 거리 0 으로 나누지 않기 위한 값.
+_EPS = 1e-6
+
+# 사례 검색 이웃 수. **학습 구간 3겹 교차검증으로 골랐다** — 25·50·75 중 50.
+_RETRIEVAL_K = 50
+
+
 def _model(seed: int) -> Pipeline:
     return make_pipeline(
         StandardScaler(),
@@ -111,6 +119,8 @@ def _retrieved(
     at: str,
     k: int,
     expanding: bool,
+    features: Sequence[str] = CASE_FEATURES,
+    weighted: bool = False,
 ) -> tuple[list[float], list[float]]:
     """사례 검색만으로 두 과제를 예측한다. **모델이 없다 — 이웃의 다수결이다.**
 
@@ -121,7 +131,7 @@ def _retrieved(
     검색기가 `as_of` 를 생성자에서 받으므로 **경계는 도구가 지킨다.** 여기서
     빠뜨려도 경계 밖 사례가 섞이지 않는다.
     """
-    fixed = None if expanding else CaseSearch(rows, at)
+    fixed = None if expanding else CaseSearch(rows, at, features)
     adjusted: list[float] = []
     nerf: list[float] = []
     cache: dict[str, CaseSearch] = {}
@@ -130,17 +140,29 @@ def _retrieved(
         if fixed is not None:
             search = fixed
         else:
-            search = cache.setdefault(row.patch, CaseSearch(rows, row.patch))
+            search = cache.setdefault(row.patch, CaseSearch(rows, row.patch, features))
         cases = search.similar(row, k=k)
         if not cases:
             adjusted.append(0.0)
             nerf.append(0.5)
             continue
-        adjusted.append(sum(1 for c in cases if c.row.adjusted_next) / len(cases))
-        directed = [c for c in cases if c.row.direction_next in ("nerf", "buff")]
+        # 거리 가중을 쓰면 **가까운 사례가 더 센다.** 단순 다수결은 k 칸짜리
+        # 눈금이라 234행에 점수가 25종밖에 안 나오고, AUC 는 줄 세우기 점수라
+        # 그 동점이 손해다. 가중을 쓰면 200종으로 늘어난다.
+        weights = [1.0 / (c.distance + _EPS) if weighted else 1.0 for c in cases]
+        adjusted.append(
+            sum(w for w, c in zip(weights, cases, strict=True) if c.row.adjusted_next)
+            / sum(weights)
+        )
+        pairs = [
+            (w, c)
+            for w, c in zip(weights, cases, strict=True)
+            if c.row.direction_next in ("nerf", "buff")
+        ]
         nerf.append(
-            sum(1 for c in directed if c.row.direction_next == "nerf") / len(directed)
-            if directed
+            sum(w for w, c in pairs if c.row.direction_next == "nerf")
+            / sum(w for w, _ in pairs)
+            if pairs
             else 0.5
         )
     return adjusted, nerf
@@ -334,6 +356,23 @@ def direction_arms(
     ):
         _, found = _retrieved(pool, test, at, k=25, expanding=expanding)
         out.append(Result(arm, label, False, scored(np.array(found), True)))
+
+    # `B5p` 는 거리에 프로 경기를 넣고 가까운 사례에 가중을 준다.
+    # **셋 다 학습 구간 3겹 교차검증으로 골랐다** — 피처·k·가중 방식.
+    _, found = _retrieved(
+        pool,
+        test,
+        at,
+        k=_RETRIEVAL_K,
+        expanding=False,
+        features=CASE_FEATURES_PRO,
+        weighted=True,
+    )
+    out.append(
+        Result(
+            "B5p", "사례 검색 — + 프로 · 거리가중", False, scored(np.array(found), True)
+        )
+    )
 
     for arm, label, history in (
         ("B7", "부스팅 트리 — 수준 + 추세", False),

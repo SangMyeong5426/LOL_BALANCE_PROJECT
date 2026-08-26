@@ -75,7 +75,7 @@ def test_direction_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
     """대상 쪽과 같은 이유다 — 표에 조용히 끼거나 빠지면 안 된다."""
     results, _ = direction_arms(_panel(make_row), "15_13", SEED)
 
-    assert [r.arm for r in results][:9] == [
+    assert [r.arm for r in results] == [
         "B0",
         "B0b",
         "B0c",
@@ -85,6 +85,13 @@ def test_direction_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
         "B2",
         "B2p",
         "B2h",
+        "B3",
+        # B4(규칙 엔진)는 `rules` 를 넘겨야 나온다. 여기서는 안 넘긴다.
+        "B5",
+        "B5b",
+        "B5p",
+        "B7",
+        "B7h",
     ]
 
 

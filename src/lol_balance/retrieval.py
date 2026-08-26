@@ -39,6 +39,18 @@ from lol_balance.patchnotes import ChangeBlock
 # 사례 검색에 쓰는 피처. 규모가 다르므로 표준화해서 견준다.
 CASE_FEATURES = ("win_rate", "pick_rate", "ban_rate", "wr_gap")
 
+# 프로 경기까지 넣은 거리. **학습 구간 3겹 교차검증으로 골랐다** — 평가 구간을
+# 보고 고르면 그것이 곧 누출이다.
+#
+#     기본        CV AUC 0.885
+#     + 프로      CV AUC 0.932   ← 이것
+#     + 추세      CV AUC 0.882   (도움이 안 된다)
+#     + 둘 다     CV AUC 0.925
+#
+# 회귀에서 프로 피처가 준 향상(+0.04)과 같은 크기다. **솔랭에 없는 신호이고,
+# 그것은 거리를 재는 데도 그대로 유효하다.**
+CASE_FEATURES_PRO = CASE_FEATURES + ("pro_pick_rate", "pro_ban_rate")
+
 
 @dataclass(frozen=True)
 class Case:
@@ -56,11 +68,12 @@ class Case:
 
 def _standardise(
     rows: tuple[PanelRow, ...],
+    features: Sequence[str] = CASE_FEATURES,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """각 피처의 평균과 표준편차. **참고 사례에서만 구한다.**"""
     mean: dict[str, float] = {}
     spread: dict[str, float] = {}
-    for name in CASE_FEATURES:
+    for name in features:
         values = [float(v) for r in rows if (v := getattr(r, name)) is not None]
         mean[name] = sum(values) / len(values) if values else 0.0
         if len(values) > 1:
@@ -77,15 +90,21 @@ class CaseSearch:
     **경계는 생성자에서 박힌다.** `as_of` 이후 행은 참고 목록에 아예 안 들어간다.
     """
 
-    def __init__(self, rows: Sequence[PanelRow], as_of: str) -> None:
+    def __init__(
+        self,
+        rows: Sequence[PanelRow],
+        as_of: str,
+        features: Sequence[str] = CASE_FEATURES,
+    ) -> None:
         limit = patch_index(as_of)
         self.as_of = as_of
+        self.features = tuple(features)
         self.pool = tuple(r for r in rows if r.patch_index < limit)
-        self.mean, self.spread = _standardise(self.pool)
+        self.mean, self.spread = _standardise(self.pool, self.features)
 
     def _vector(self, row: PanelRow) -> tuple[float | None, ...]:
         out = []
-        for name in CASE_FEATURES:
+        for name in self.features:
             value = getattr(row, name)
             out.append(
                 None

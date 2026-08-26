@@ -171,8 +171,33 @@ def test_direction_score_weighs_both_sides(make_row: PanelRowFactory) -> None:
         Rule("b", (Condition("win_rate", "<", 0.49),), "buff"),
     )
     predictor = _fitted(make_row, rules)
-
-    assert predictor.nerf_score(make_row("15_1", 1, win_rate=0.55)) == 1.0
-    assert predictor.nerf_score(make_row("15_1", 2, win_rate=0.45)) == 0.0
     middle = predictor.nerf_score(make_row("15_1", 3, win_rate=0.50))
+
+    assert predictor.nerf_score(make_row("15_1", 1, win_rate=0.55)) > middle
+    assert predictor.nerf_score(make_row("15_1", 2, win_rate=0.45)) < middle
     assert middle == pytest.approx(predictor.fallback["nerf"])
+
+
+def test_one_sided_evidence_does_not_collapse(make_row: PanelRowFactory) -> None:
+    """**한쪽만 걸려도 근거 크기가 점수에 남아야 한다.**
+
+    섞기 전에는 너프 근거만 있으면 그 크기와 무관하게 전부 정확히 `1.0` 이었다.
+    평가 234행에서 점수가 5종밖에 안 나왔고, AUC 는 줄 세우기 점수라 그 동점이
+    그대로 손해였다(0.807 → 섞은 뒤 0.836).
+    """
+    # 가중치를 직접 준다. `fit` 으로 만들면 픽스처의 승률이 두 값뿐이라
+    # 두 규칙 정확도가 모두 1.0 이 되고 noisy-OR 이 포화해 차이가 안 보인다.
+    rules = (
+        Rule("weak", (Condition("win_rate", ">=", 0.51),), "nerf"),
+        Rule("strong", (Condition("win_rate", ">=", 0.53),), "nerf"),
+    )
+    predictor = RulePredictor(
+        weights={"weak": 0.7, "strong": 0.9},
+        rules=rules,
+        fallback={"adjusted": 0.2, "nerf": 0.5},
+    )
+    barely = predictor.nerf_score(make_row("15_1", 1, win_rate=0.515))
+    clearly = predictor.nerf_score(make_row("15_1", 2, win_rate=0.55))
+
+    assert barely < clearly < 1.0
+    assert barely > predictor.fallback["nerf"]
