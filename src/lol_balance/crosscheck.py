@@ -22,10 +22,36 @@ LLM 이 노트에서 뽑은 값과 기계적으로 대조할 수 있다.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 from lol_balance.ddragon import Change
 from lol_balance.extract import ChangeRecord
+
+
+class Changed(Protocol):
+    """「무엇이 몇에서 몇으로」를 말하는 것.
+
+    `ddragon.Change` 와 `cdragon.Change` 를 한 자리에서 받기 위한 것이다. 둘은
+    모양이 같지만 다른 클래스라, **구조로 받지 않으면 한쪽만 쓸 수 있다.**
+    """
+
+    @property
+    def champion(self) -> str: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def field(self) -> str: ...
+
+    @property
+    def before(self) -> Any: ...
+
+    @property
+    def after(self) -> Any: ...
+
 
 # 채점에 쓰는 종류.
 #
@@ -112,3 +138,101 @@ def cross_check(
 
     unverifiable = tuple(r for r in records if id(r) not in used)
     return CrossCheck(tuple(matched), tuple(missed), unverifiable)
+
+
+# ── CommunityDragon 으로 「대조 불가」를 줄인다 ──────────────────────────
+#
+# **cdragon 변경을 `cross_check` 에 그냥 넣으면 안 된다.** 그러면 「놓침」이
+# 폭발한다 — cdragon 은 노트에 한 줄도 없는 내부 값 변경까지 전부 잡는데,
+# 그것을 추출 실패로 세면 재현율이 무너진다. 라이엇이 안 적은 것을 뽑지
+# 못했다고 벌점을 주는 셈이다.
+#
+# 그래서 **2차 통과**로 붙인다. Data Dragon 채점은 그대로 두고, 거기서
+# 「대조 불가」로 남은 기록만 cdragon 과 맞춰 본다. 재현율의 분모는 안 바뀐다.
+
+# 비율 표기 차이를 흡수할 배율.
+#
+# cdragon 은 `0.675` 로, 패치 노트는 `67.5% AD` 로 쓴다. 같은 값이다.
+# **필드 이름을 맞추지 않는다는 원칙은 그대로다** — 배율만 둘 다 시도한다.
+SCALES = (1.0, 100.0)
+
+# 맞출 때 쓰는 자릿수.
+#
+# **diff 는 반올림하지 않는다**(`cdragon.py`). 여기는 다른 일이다 — 저장된
+# float32 값을 사람이 쓴 문장과 맞춰야 한다.
+#
+#     0.6000000238418579 × 100 = 60.00000238418579
+#
+# float32 오차가 ×100 되면서 소수 6자리를 넘는다. 6자리로 자르면 `60.000002`
+# 가 되어 노트의 `60` 과 안 맞는다. **실제로 이것 때문에 일치가 6/41 로
+# 떨어졌다.** 노트가 쓰는 가장 잘은 자리가 3자리(`84.375`)라 거기에 맞춘다.
+MATCH_DIGITS = 3
+
+
+def _scaled(row: tuple[float, ...]) -> tuple[tuple[float, ...], ...]:
+    """한 값에서 나올 수 있는 표기들. 중복은 없앤다."""
+    out: list[tuple[float, ...]] = []
+    for scale in SCALES:
+        key = tuple(round(v * scale, MATCH_DIGITS) for v in row)
+        if key not in out:
+            out.append(key)
+    return tuple(out)
+
+
+def _rounded(row: tuple[float, ...]) -> tuple[float, ...]:
+    """양쪽을 같은 자리로 맞춘다. 한쪽만 반올림하면 그것 때문에 어긋난다."""
+    return tuple(round(v, MATCH_DIGITS) for v in row)
+
+
+@dataclass(frozen=True)
+class ValueCheck:
+    """cdragon 2차 통과 결과."""
+
+    confirmed: tuple[tuple[Changed, ChangeRecord], ...]
+    unverifiable: tuple[ChangeRecord, ...]
+
+    @property
+    def rate(self) -> float:
+        """2차 통과가 확인한 비율. 분모가 0이면 부르지 않는다."""
+        total = len(self.confirmed) + len(self.unverifiable)
+        return len(self.confirmed) / total if total else 0.0
+
+
+def verify_values(
+    records: Sequence[ChangeRecord],
+    changes: Sequence[Changed],
+    champion_names: dict[str, str] | None = None,
+) -> ValueCheck:
+    """「대조 불가」 기록을 cdragon 변경으로 확인한다.
+
+    `changes` 는 `cdragon.field_changes` 가 낸 **필드 단위** 변경이다. 칸별
+    변경을 그대로 넣으면 안 된다 — 노트는 다섯 랭크를 한 문장으로 쓴다.
+
+    **다 맞출 수는 없다.** 노트가 파생값을 쓰는 경우가 있다 — Aatrox Q 는
+    `QTotalADRatio` 하나에서 「first cast」·「sweetspot」·「maximum」 일곱 문장이
+    나온다. 저장된 것은 하나뿐이라 나머지는 원리적으로 안 맞는다.
+    """
+    names = champion_names or {}
+    pool: dict[tuple[str, tuple[float, ...], tuple[float, ...]], list[Changed]] = {}
+    for change in changes:
+        name = names.get(change.champion, change.champion)
+        for before in _scaled(numbers(change.before)):
+            for after in _scaled(numbers(change.after)):
+                pool.setdefault((name, before, after), []).append(change)
+
+    confirmed: list[tuple[Changed, ChangeRecord]] = []
+    left: list[ChangeRecord] = []
+    used: set[int] = set()
+    for record in records:
+        key = (
+            record.champion,
+            _rounded(numbers(record.before)),
+            _rounded(numbers(record.after)),
+        )
+        found = [c for c in pool.get(key, []) if id(c) not in used]
+        if found:
+            used.add(id(found[0]))
+            confirmed.append((found[0], record))
+        else:
+            left.append(record)
+    return ValueCheck(tuple(confirmed), tuple(left))

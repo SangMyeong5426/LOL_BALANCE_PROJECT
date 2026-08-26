@@ -37,7 +37,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -74,8 +74,9 @@ class Change:
     champion: str
     kind: Kind
     field: str
-    before: float | None
-    after: float | None
+    # 칸 하나면 숫자, 필드 단위로 묶으면 배열이다(`field_changes`).
+    before: float | tuple[float, ...] | None
+    after: float | tuple[float, ...] | None
 
 
 def read_champion(root: Path, version: str, champion: str) -> dict[str, Any] | None:
@@ -143,6 +144,94 @@ def values(data: dict[str, Any]) -> dict[tuple[Kind, str], float]:
             for path, value in found.items():
                 out[("spell", path)] = value
     return out
+
+
+def rank_arrays(data: dict[str, Any]) -> dict[tuple[str, str], tuple[float, ...]]:
+    """(스킬, 항목) → 7칸 배열.
+
+    `values()` 가 칸별로 흩어 놓은 것을 **배열 단위로** 되돌린다. 패치 노트가
+    그 단위로 쓰기 때문이다 — 「60 / 67.5 / 75 / 82.5 / 90% AD」는 다섯 칸을
+    한 문장으로 말한다. 채점에서 이 단위로 맞춰야 한다.
+    """
+    out: dict[tuple[str, str], tuple[float, ...]] = {}
+    for name, spell in spells(data).items():
+        for entry in spell.get("mDataValues") or []:
+            if not isinstance(entry, dict):
+                continue
+            row = [
+                float(v)
+                for v in entry.get("mValues") or []
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            ]
+            if row:
+                out[(name, str(entry.get("mName", "?")))] = tuple(row)
+    return out
+
+
+def field_changes(
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+    champion: str,
+    maxranks: Mapping[str, int],
+    default_rank: int = 5,
+) -> tuple[Change, ...]:
+    """칸별 변경을 **필드 단위로 다시 묶는다.** 채점이 이 단위로 이뤄진다.
+
+    `maxranks` 는 스킬 id → 랭크 수다. Data Dragon 에서 가져온다 — 스킬 id 가
+    양쪽에서 같다는 것은 쿨다운 대조 1,971개로 확인했다.
+
+    **외삽 칸만 움직인 것은 걷어낸다.** `[0]` 과 `[6]` 은 게임이 안 쓰므로,
+    그것만 바뀌었다면 실제로는 아무것도 안 바뀐 것이다.
+    """
+    out: list[Change] = []
+
+    old = rank_arrays(before) if before else {}
+    new = rank_arrays(after) if after else {}
+    for key in sorted(old.keys() | new.keys()):
+        a, b = old.get(key), new.get(key)
+        if a == b:
+            continue
+        limit = maxranks.get(key[0], default_rank)
+        cut_a = _flat(ranks(a, limit)) if a is not None else None
+        cut_b = _flat(ranks(b, limit)) if b is not None else None
+        if cut_a == cut_b:
+            continue
+        out.append(Change(champion, "value", f"{key[0]}.{key[1]}", cut_a, cut_b))
+
+    # 공식 안에 박힌 숫자도 낸다. **계수가 여기 있다** — 13.15 한 패치에서
+    # `mCoefficient` 가 364개다. 레벨 보간(`mStartValue`·`mEndValue`)도 여기다.
+    old_parts = _formula_parts(before) if before else {}
+    new_parts = _formula_parts(after) if after else {}
+    for path in sorted(old_parts.keys() | new_parts.keys()):
+        a, b = old_parts.get(path), new_parts.get(path)
+        if a != b:
+            out.append(Change(champion, "formula", path, a, b))
+    return tuple(out)
+
+
+def _flat(row: tuple[float, ...]) -> tuple[float, ...]:
+    """랭크가 전부 같으면 하나로 줄인다.
+
+    **노트가 그렇게 쓴다.** 「75% AP」는 다섯 랭크가 모두 75라는 뜻이지
+    한 랭크만 있다는 뜻이 아니다. 다섯 칸으로 내면 문장과 안 맞는다.
+    """
+    return row[:1] if row and len(set(row)) == 1 else row
+
+
+def _formula_parts(data: dict[str, Any]) -> dict[str, tuple[float, ...]]:
+    """공식 부품 하나가 갖는 숫자들을 묶는다.
+
+    부품 단위로 묶는 이유는 **한 문장이 한 부품에서 나오기 때문**이다 —
+    「1150 – 3500 (based on level)」은 `mStartValue` 와 `mEndValue` 둘을
+    한 번에 말한다. 낱개로 내면 어느 쪽도 그 문장과 안 맞는다.
+    """
+    out: dict[str, list[float]] = {}
+    for name, spell in spells(data).items():
+        found: dict[str, float] = {}
+        _numbers(spell.get("mSpellCalculations") or {}, name, found)
+        for path, value in sorted(found.items()):
+            out.setdefault(path.rsplit(".", 1)[0], []).append(value)
+    return {k: tuple(v) for k, v in out.items()}
 
 
 def diff_versions(

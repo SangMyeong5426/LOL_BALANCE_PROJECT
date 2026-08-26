@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""저장된 수치 기록을 **두 출처로** 채점한다.
+
+    ./scripts/score-records [13.15.1]     생략하면 저장된 것 전부
+
+`save-records` 는 Data Dragon 만 본다. 여기서는 그 뒤에 CommunityDragon 을
+한 번 더 태운다 — [ADR-0005](../docs/adr/0005-skill-damage-data-source.md).
+
+## 왜 두 통과로 나누는가
+
+**cdragon 변경을 1차에 그냥 합치면 안 된다.** 그러면 「놓침」이 폭발한다 —
+cdragon 은 노트에 한 줄도 없는 내부 값 변경까지 전부 잡는데, 그것을 추출
+실패로 세면 **라이엇이 안 적은 것을 못 뽑았다고 벌점을 주는 셈**이다.
+
+    1차  Data Dragon   맞음 · 놓침 · 대조 불가      ← 재현율은 여기서만 나온다
+    2차  cdragon       1차의 「대조 불가」만 다시 본다
+
+**재현율의 분모가 안 바뀐다.** 2차는 「확인됐다」를 늘릴 뿐 추출 품질 점수를
+건드리지 않는다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.cdragon import field_changes, read_champion  # noqa: E402
+from lol_balance.crosscheck import cross_check, verify_values  # noqa: E402
+from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
+from lol_balance.direction import drop_mass_changes  # noqa: E402
+from lol_balance.extract import ChangeRecord  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+
+RECORDS = ROOT / "ground_truth" / "records"
+DDRAGON = ROOT / "data" / "ddragon"
+CDRAGON = ROOT / "data" / "cdragon"
+
+
+def previous(version: str) -> str:
+    key = "_".join(version.split(".")[:2])
+    return PATCH_SEQUENCE[PATCH_SEQUENCE.index(key) - 1].replace("_", ".") + ".1"
+
+
+def maxranks(entry: dict[str, object]) -> dict[str, int]:
+    """스킬 id → 랭크 수. **cdragon 배열을 어디서 자를지 정한다.**
+
+    스킬 id 가 두 출처에서 같다는 것은 쿨다운 대조 1,971개로 확인했다
+    (`scripts/check-cdragon`).
+    """
+    spells = entry.get("spells")
+    if not isinstance(spells, list):
+        return {}
+    return {s["id"]: int(s["maxrank"]) for s in spells if "id" in s}
+
+
+def value_changes(version: str, champions: dict[str, dict]) -> list:
+    """그 패치에서 바뀐 챔피언들의 cdragon 변경을 **필드 단위로** 모은다."""
+    short, before = version.rsplit(".", 1)[0], previous(version).rsplit(".", 1)[0]
+    out = []
+    for cid, entry in champions.items():
+        old = read_champion(CDRAGON, before, cid.lower())
+        new = read_champion(CDRAGON, short, cid.lower())
+        if old is None and new is None:
+            continue  # 그 패치에서 노트에 안 나온 챔피언. 애초에 안 받았다
+        out += field_changes(old, new, cid, maxranks(entry))
+    return out
+
+
+def score(version: str) -> tuple[int, int, int, int]:
+    """(채점 대상, 맞음, cdragon 이 확인, 끝내 대조 불가)."""
+    path = RECORDS / f"{version}.jsonl"
+    records = tuple(
+        ChangeRecord(**json.loads(line))
+        for line in path.read_text().splitlines()
+        if line.strip()
+    )
+    after = json.loads((DDRAGON / f"{version}.json").read_bytes())["data"]
+    before = json.loads((DDRAGON / f"{previous(version)}.json").read_bytes())["data"]
+    standard = standard_champions(after)
+    names = {k: v.get("name", k) for k, v in standard.items()}
+    first = cross_check(
+        drop_mass_changes(diff_versions(before, after), len(standard)), records, names
+    )
+    second = verify_values(first.unverifiable, value_changes(version, standard), names)
+
+    print(f"\n══ {version} · 기록 {len(records)}건 ══")
+    print(
+        f"  1차 Data Dragon   채점 {first.scored}건 · 맞음 {len(first.matched)}", end=""
+    )
+    print(
+        f" · 놓침 {len(first.missed)}"
+        + (f" · 재현율 {first.recall:.1%}" if first.scored else "")
+    )
+    print(
+        f"  2차 cdragon       대조 불가 {len(first.unverifiable)}건 중 확인 {len(second.confirmed)}건",
+        end="",
+    )
+    print(f" ({second.rate:.1%})" if first.unverifiable else "")
+    verified = len(first.matched) + len(second.confirmed)
+    print(
+        f"  → 확인된 기록 {verified}/{len(records)}건 ({verified / len(records):.1%})"
+    )
+    if second.unverifiable:
+        print(f"  끝내 대조 불가 {len(second.unverifiable)}건 (앞 5)")
+        for r in second.unverifiable[:5]:
+            print(f"    · {r.champion:12} {r.field[:30]:32} {str(r.after)[:30]}")
+    return first.scored, len(first.matched), len(second.confirmed), len(records)
+
+
+def main() -> int:
+    wanted = sys.argv[1:] or sorted(p.stem for p in RECORDS.glob("*.jsonl"))
+    if not wanted:
+        print("저장된 기록이 없다. ./scripts/save-records 로 먼저 저장한다.")
+        return 1
+    totals = [0, 0, 0, 0]
+    for version in wanted:
+        for i, v in enumerate(score(version)):
+            totals[i] += v
+    if len(wanted) > 1:
+        verified = totals[1] + totals[2]
+        print(
+            f"\n합계 기록 {totals[3]}건 · 확인 {verified}건 ({verified / totals[3]:.1%})"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
