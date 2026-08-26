@@ -32,6 +32,26 @@ def version(patch: str) -> str:
     return patch.replace("_", ".") + ".1"
 
 
+def released_in(patch: str) -> set[str]:
+    """이 패치에 처음 나온 챔피언.
+
+    **출시는 조정이 아니다.** 직전 버전에 존재하지 않았으므로 「너프됐나
+    버프됐나」에 답할 수 없고, 패널에도 그 행이 없다(직전 패치 지표가 없다).
+
+    빠뜨린 것과 구분해야 한다 — 라벨을 안 붙인 챔피언을 그냥 통과시키면
+    어려운 것을 조용히 건너뛰게 된다.
+    """
+    i = PATCH_SEQUENCE.index(patch)
+    after = json.loads((ROOT / f"data/ddragon/{version(patch)}.json").read_bytes())[
+        "data"
+    ]
+    before = json.loads(
+        (ROOT / f"data/ddragon/{version(PATCH_SEQUENCE[i - 1])}.json").read_bytes()
+    )["data"]
+    fresh = set(standard_champions(after)) - set(standard_champions(before))
+    return {after[cid].get("name", cid) for cid in fresh}
+
+
 def automatic(patch: str) -> dict[str, str]:
     i = PATCH_SEQUENCE.index(patch)
     after = json.loads((ROOT / f"data/ddragon/{version(patch)}.json").read_bytes())[
@@ -76,11 +96,15 @@ def main() -> int:
             return 1
         given[champion] = direction
 
-    missing = set(evidence) - set(given)
+    released = released_in(patch)
+    missing = set(evidence) - set(given) - released
+    skipped = (set(evidence) - set(given)) & released
     extra = set(given) - set(evidence)
     if missing:
         print(f"라벨이 빠진 챔피언 {len(missing)}종: {sorted(missing)}")
         return 1
+    if skipped:
+        print(f"출시라 건너뜀 {len(skipped)}종: {sorted(skipped)}")
     if extra:
         print(f"노트에 없는 챔피언 {len(extra)}종: {sorted(extra)}")
         return 1
