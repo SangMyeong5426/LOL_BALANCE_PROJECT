@@ -18,6 +18,7 @@ from typing import Any
 
 from lol_balance.ddragon import standard_champions
 from lol_balance.direction import Direction
+from lol_balance.oracle import ProRates
 from lol_balance.ugg import ChampionRanking, ChampionRow
 
 # 판수가 너무 적은 챔피언은 승률이 요동친다. 그 패치·그 챔피언 전체 판수 기준.
@@ -70,6 +71,16 @@ class PanelRow:
     gold: float
     damage: float
 
+    # 프로 경기 존재감 — Oracle's Elixir. **솔랭에 없는 신호다.**
+    #
+    # 방향 예측에서 값을 한다(AUC 0.812 → 0.852). **대상 예측에는 안 한다**
+    # (0.597 → 0.597). 어느 쪽인지 아는 데는 쓰이고 누구인지 아는 데는 안 쓰인다.
+    #
+    # 프로 경기가 없는 패치(13_23 · 14_24 — 12월 비시즌)는 None 이다.
+    # **0 으로 채우지 않는다** — 「아무도 안 뽑았다」와 「경기가 없었다」는 다르다.
+    pro_pick_rate: float | None
+    pro_ban_rate: float | None
+
     # 추세 피처 — 직전 패치 대비. 직전이 없으면 None 이고, 0 으로 채우지 않는다.
     # 「변화 없음」과 「모름」이 같아지면 그 사실이 조용히 사라진다.
     d_win_rate: float | None
@@ -95,6 +106,13 @@ class PanelRow:
     # **둘을 섞어 놓고 구분을 잃으면 안 된다.** 자동 판정은 스탯·쿨다운 조정만
     # 보므로 치우쳐 있고, 그 치우침이 결과에 얼마나 섞였는지 알 수 있어야 한다.
     direction_source: str | None
+
+    @property
+    def pro_presence(self) -> float | None:
+        """프로 경기에서 뽑히거나 밴당한 비율. 한쪽이라도 없으면 None."""
+        if self.pro_pick_rate is None or self.pro_ban_rate is None:
+            return None
+        return self.pro_pick_rate + self.pro_ban_rate
 
     @property
     def wr_gap(self) -> float:
@@ -138,6 +156,16 @@ def _fold(rows: tuple[ChampionRow, ...]) -> tuple[ChampionRow, int, str]:
     return main, len(rows), main.role
 
 
+def _pro_pick(pro: dict[str, ProRates], champion: str) -> float:
+    entry = pro.get(champion)
+    return entry.pick_rate if entry else 0.0
+
+
+def _pro_ban(pro: dict[str, ProRates], champion: str) -> float:
+    entry = pro.get(champion)
+    return entry.ban_rate if entry else 0.0
+
+
 def patch_rows(
     patch: str,
     ranking: ChampionRanking,
@@ -147,6 +175,7 @@ def patch_rows(
     min_matches: int = MIN_MATCHES,
     directions: dict[str, tuple[Direction, str]] | None = None,
     history: dict[int, list[PanelRow]] | None = None,
+    pro: dict[str, ProRates] | None = None,
 ) -> tuple[PanelRow, ...]:
     """한 패치의 표를 만든다.
 
@@ -196,6 +225,10 @@ def patch_rows(
                 win_rate=win_rate,
                 pick_rate=pick_rate,
                 ban_rate=ban_rate,
+                # 프로 경기가 없는 패치는 `pro` 가 None 이라 통째로 None 이 된다.
+                # **그 패치에서 안 뽑힌 챔피언은 0 이 맞다** — 경기는 있었다.
+                pro_pick_rate=None if pro is None else _pro_pick(pro, name),
+                pro_ban_rate=None if pro is None else _pro_ban(pro, name),
                 matches=matches,
                 kills=sum(r.kills for r in rows) / matches,
                 deaths=sum(r.deaths for r in rows) / matches,

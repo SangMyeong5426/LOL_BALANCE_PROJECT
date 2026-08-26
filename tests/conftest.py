@@ -37,6 +37,8 @@ def make_row() -> PanelRowFactory:
             cs=150.0,
             gold=900.0,
             damage=1000.0,
+            pro_pick_rate=0.0,
+            pro_ban_rate=0.0,
             d_win_rate=None,
             d_pick_rate=None,
             d_ban_rate=None,

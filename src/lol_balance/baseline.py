@@ -42,6 +42,12 @@ LEVEL_FEATURES = (
 # arm 이 한꺼번에 바뀌어 「이력이 도움이 됐나」에 답할 수 없다.
 HISTORY_FEATURES = ("history_len", "recent_adjustments", "high_wr_streak")
 
+# 프로 경기 피처 — Oracle's Elixir. **따로 켜고 끌 수 있어야 기여를 잴 수 있다.**
+#
+# 방향 예측에서 값을 한다(AUC 0.812 → 0.852). 대상 예측에는 안 한다
+# (0.597 → 0.597). **한쪽에만 듣는 피처라 섞어 넣으면 그 사실이 사라진다.**
+PRO_FEATURES = ("pro_pick_rate", "pro_ban_rate", "pro_presence")
+
 # 범주형. 원핫으로 편다. **범주 목록은 학습 구간에서만 정한다** — 평가에만
 # 있는 값이 열을 만들면 학습·평가의 열 구성이 달라진다.
 CATEGORICAL = ("main_role",)
@@ -56,6 +62,10 @@ NULLABLE = (
     "d_win_rate",
     "d_pick_rate",
     "d_ban_rate",
+    # 프로 경기가 아예 없는 패치가 있다(13_23 · 14_24 — 12월 비시즌).
+    "pro_pick_rate",
+    "pro_ban_rate",
+    "pro_presence",
 )
 
 
@@ -87,23 +97,29 @@ class Encoder:
     levels: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
-def feature_names(with_trend: bool, with_history: bool = False) -> tuple[str, ...]:
+def feature_names(
+    with_trend: bool, with_history: bool = False, with_pro: bool = False
+) -> tuple[str, ...]:
     return (
         LEVEL_FEATURES
         + (TREND_FEATURES if with_trend else ())
         + (HISTORY_FEATURES if with_history else ())
+        + (PRO_FEATURES if with_pro else ())
     )
 
 
 def fit_encoder(
-    rows: tuple[PanelRow, ...], with_trend: bool, with_history: bool = False
+    rows: tuple[PanelRow, ...],
+    with_trend: bool,
+    with_history: bool = False,
+    with_pro: bool = False,
 ) -> Encoder:
     """학습 구간에서 열 구성과 채움값을 정한다.
 
     `with_history` 일 때만 범주형(`main_role`)도 함께 편다 — 역할과 이력은
     「그 챔피언이 어떤 자리에서 어떻게 다뤄져 왔나」라는 같은 갈래다.
     """
-    names = feature_names(with_trend, with_history)
+    names = feature_names(with_trend, with_history, with_pro)
     fill: list[float] = []
     columns: list[str] = []
     for name in names:

@@ -12,7 +12,7 @@
 | ~~2c~~ | ~~패치 노트 수집~~ | **완료 (2026-08-25)** — 74/74, 실패 0 | [ddragon-format](spec/ddragon-format.md) |
 | ~~2d~~ | ~~부분 커버리지 패치를 예측 지점으로 쓸 것인가~~ | **결정 (2026-08-25)** — 안 쓴다 | [ADR-0002](adr/0002-prediction-point-coverage-criterion.md) |
 | **2e** | **추출 모델 등급 확정** | **파일럿 실행 직후** | `ANTHROPIC_API_KEY` 대기. [ADR-0003](adr/0003-llm-provider-and-calling-convention.md) |
-| **3** | **Oracle's Elixir 2023~2026 내려받기** | **사용자 대기** — 주소는 찾았다 | 구글 드라이브 익명 할당량 초과. 아래 3 참조 |
+| ~~3~~ | ~~Oracle's Elixir 2023~2026 내려받기~~ | **완료 (2026-08-26)** — 4파일 319 MB. 방향 AUC +0.04 | [data-sources](spec/data-sources.md) 4장 |
 | 4 | op.gg 아카이브가 KR 인지 검증 | 실제 수집할 때 | 지금은 정황 증거뿐 |
 | ~~5~~ | ~~국제 대회 일정표~~ | **닫음 (2026-08-25)** — 만들어도 못 쓴다 | [prediction-signals](spec/prediction-signals.md) |
 | ~~8~~ | ~~CommunityDragon 도입 검토~~ | **결정 · 측정 완료 (2026-08-26)** — 채점 19% → **50%**(예측은 90%였다) | [ADR-0005](adr/0005-skill-damage-data-source.md) |
@@ -120,7 +120,7 @@ Ahri Q   BaseDamage [40, 65, 90, 115, 140]
 
 **익명 다운로드가 막혀 있다.** `drive.usercontent.google.com/download?…&confirm=t` 로 받으면 CSV 가 아니라 **2,009 B 짜리 HTML(`Quota exceeded`)** 이 온다. 크기로 구분된다 — 아카이브의 11,832 B 와 같은 종류의 함정이다.
 
-**로그인한 계정으로 받으면 풀린다.** 사용자에게 요청해 둔 상태이고, 받으면 `data/oracle/{year}.csv` 에 놓는다.
+**하루 뒤 다시 하니 풀렸다.** 익명 할당량은 일시적이다 — 사용자에게 수동 다운로드를 요청해 뒀다가 재시도로 해결됐다. 받은 것은 `data/oracle/{year}.csv` 에 있다.
 
 구 사이트(`lol.timsevenhuysen.com/gamedata/{season}/`)는 2020 까지만 살아 있다 — 2021 이후는 404 다. **우리 범위(2023~2026)는 이쪽으로 못 받는다.**
 

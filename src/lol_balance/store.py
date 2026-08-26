@@ -35,6 +35,8 @@ _COLUMNS = (
     "cs REAL NOT NULL",
     "gold REAL NOT NULL",
     "damage REAL NOT NULL",
+    "pro_pick_rate REAL",
+    "pro_ban_rate REAL",
     "d_win_rate REAL",
     "d_pick_rate REAL",
     "d_ban_rate REAL",

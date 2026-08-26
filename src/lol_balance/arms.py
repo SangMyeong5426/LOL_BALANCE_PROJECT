@@ -181,12 +181,16 @@ def target_arms(
         column_scores = te.x[:, te.columns.index(column)]
         out.append(Result(arm, label, False, _rank_scores(te, column_scores)))
 
-    for arm, label, trend, history in (
-        ("A1", "로지스틱 회귀 — 수준", False, False),
-        ("A2", "로지스틱 회귀 — 수준 + 추세", True, False),
-        ("A2h", "로지스틱 회귀 — + 이력·역할", True, True),
+    # `A2p` 는 프로 경기 피처를 더한 것이다. **안 늘어난다는 것을 보이려고 둔다** —
+    # 같은 피처가 ② 방향에서는 AUC 를 0.04 올린다. 어느 과제에 듣고 어느 과제에
+    # 안 듣는지가 결과다.
+    for arm, label, trend, history, pro in (
+        ("A1", "로지스틱 회귀 — 수준", False, False, False),
+        ("A2", "로지스틱 회귀 — 수준 + 추세", True, False, False),
+        ("A2p", "로지스틱 회귀 — 수준 + 추세 + 프로", True, False, True),
+        ("A2h", "로지스틱 회귀 — + 이력·역할", True, True, False),
     ):
-        enc = fit_encoder(train, with_trend=trend, with_history=history)
+        enc = fit_encoder(train, with_trend=trend, with_history=history, with_pro=pro)
         tr, ts = encode(train, enc), encode(test, enc)
         model = _model(seed).fit(tr.x, tr.y)
         out.append(
@@ -268,12 +272,16 @@ def direction_arms(
             Result(arm, label, False, scored(te.x[:, te.columns.index(column)], False))
         )
 
-    for arm, label, trend, history in (
-        ("B1", "로지스틱 회귀 — 수준", False, False),
-        ("B2", "로지스틱 회귀 — 수준 + 추세", True, False),
-        ("B2h", "로지스틱 회귀 — + 이력·역할", True, True),
+    # `B1p` · `B2p` 는 프로 경기 피처를 더한 것이다. **같은 모델·같은 분할에서
+    # 피처만 다르게 둬야** 프로 데이터가 값을 하는지 답할 수 있다.
+    for arm, label, trend, history, pro in (
+        ("B1", "로지스틱 회귀 — 수준", False, False, False),
+        ("B1p", "로지스틱 회귀 — 수준 + 프로", False, False, True),
+        ("B2", "로지스틱 회귀 — 수준 + 추세", True, False, False),
+        ("B2p", "로지스틱 회귀 — 수준 + 추세 + 프로", True, False, True),
+        ("B2h", "로지스틱 회귀 — + 이력·역할", True, True, False),
     ):
-        enc = fit_encoder(train, with_trend=trend, with_history=history)
+        enc = fit_encoder(train, with_trend=trend, with_history=history, with_pro=pro)
         tr = encode(train, enc, target="direction")
         ts = encode(test, enc, target="direction")
         model = _model(seed).fit(tr.x, tr.y)
