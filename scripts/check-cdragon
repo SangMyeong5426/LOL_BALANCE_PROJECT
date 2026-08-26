@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""CommunityDragon 값을 Data Dragon 과 대조한다.
+
+    ./scripts/check-cdragon [--patches 8]
+
+**커뮤니티 미러를 그대로 믿지 않기 위한 것이다.** 라이엇 공식이 아니므로 값이
+틀려도 기댈 곳이 없다 — 그래서 두 출처가 **겹치는 자리**(쿨다운)에서
+같은 값을 말하는지 본다. [ADR-0005](../docs/adr/0005-skill-damage-data-source.md)
+가 도입 조건으로 건 대조다.
+
+**오프셋도 같이 검증된다.** cdragon 배열은 랭크 0~6 으로 7칸인데 게임이 쓰는
+것은 `[1:1+maxrank]` 다. 오프셋이 틀리면 하나도 안 맞는다.
+
+어긋남이 나오면 그것이 결과다. **조용히 지나가지 않는다.**
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.cdragon import ranks, read_champion, spells  # noqa: E402
+from lol_balance.ddragon import standard_champions  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+
+CDRAGON = ROOT / "data" / "cdragon"
+DDRAGON = ROOT / "data" / "ddragon"
+
+# 두 출처에 다 있는 항목. (Data Dragon 키, cdragon 키)
+#
+# **쿨다운뿐이다.** 처음에는 사거리(`castRange`)도 넣었는데 10패치에서 64.8%
+# 밖에 안 맞았다. cdragon 의 `castRange` 는 **표시 사거리가 아니라 내부 타게팅
+# 값**이다 — 자기 자신에게 거는 스킬이 `25000`, 전역 스킬이 `10000` 으로 온다.
+#
+#     Ahri AhriR.range   Data Dragon [450, 450, 450]   cdragon [25000, 25000, 25000]
+#
+# **어긋난 것이 아니라 다른 것을 재는 값이다.** 대조에 쓰면 거짓 경보가 난다.
+# 값 자체는 계속 뽑아 둔다 — 바뀌면 실제 변경일 수 있다.
+OVERLAP = (("cooldown", "cooldownTime"),)
+
+
+def patch_count() -> int:
+    if "--patches" in sys.argv:
+        return int(sys.argv[sys.argv.index("--patches") + 1])
+    return 8
+
+
+def compare(patch: str) -> tuple[int, int, int, list[str]]:
+    """한 패치를 대조한다. (일치, 불일치, 대조 못 함, 어긋남 설명)."""
+    version = patch.replace("_", ".")
+    data = DDRAGON / f"{version}.1.json"
+    if not data.exists():
+        return 0, 0, 0, []
+    champions = standard_champions(json.loads(data.read_bytes())["data"])
+
+    agree = differ = absent = 0
+    notes: list[str] = []
+    for cid, entry in champions.items():
+        loaded = read_champion(CDRAGON, version, cid.lower())
+        if loaded is None:
+            continue
+        found = spells(loaded)
+        for spell in entry.get("spells", []):
+            node = found.get(spell["id"])
+            for dd_key, cd_key in OVERLAP:
+                theirs = spell.get(dd_key)
+                mine = node.get(cd_key) if node else None
+                if not isinstance(mine, list) or not isinstance(theirs, list):
+                    absent += 1
+                    continue
+                cut = [round(x, 3) for x in ranks(mine, spell["maxrank"])]
+                want = [round(float(x), 3) for x in theirs]
+                if cut == want:
+                    agree += 1
+                else:
+                    differ += 1
+                    if len(notes) < 8:
+                        name = entry.get("name", cid)
+                        notes.append(
+                            f"    {name} {spell['id']}.{dd_key}  "
+                            f"Data Dragon {want}  cdragon {cut}"
+                        )
+    return agree, differ, absent, notes
+
+
+def main() -> int:
+    patches = [p for p in PATCH_SEQUENCE if (CDRAGON / p.replace("_", ".")).is_dir()]
+    if not patches:
+        print("data/cdragon 이 비어 있다. ./scripts/fetch-cdragon 을 먼저 돌린다.")
+        return 1
+
+    # 시대를 고르게 덮도록 앞뒤에서 고르게 뽑는다. 최신만 보면 옛 표기를 못 본다.
+    want = patch_count()
+    step = max(1, len(patches) // want)
+    sample = patches[::step][:want]
+
+    print(f"확보한 {len(patches)}패치 중 {len(sample)}개를 고르게 뽑아 대조한다\n")
+    print(f"{'패치':9}{'일치':>7}{'불일치':>8}{'대조 불가':>11}")
+    total_agree = total_differ = 0
+    all_notes: list[str] = []
+    for patch in sample:
+        agree, differ, absent, notes = compare(patch)
+        if agree + differ == 0:
+            continue
+        total_agree += agree
+        total_differ += differ
+        all_notes += notes
+        print(f"{patch.replace('_', '.'):9}{agree:7}{differ:8}{absent:11}")
+
+    total = total_agree + total_differ
+    if total == 0:
+        print("\n대조할 것이 없다.")
+        return 1
+    print(f"\n겹치는 항목 {total}개 · 일치 {total_agree / total * 100:.1f}%")
+    if all_notes:
+        print("\n어긋남 (앞 8건):")
+        print("\n".join(all_notes))
+        print(
+            "\n**어느 쪽이 사실인지 여기서 정하지 않는다.** docs/followups.md 에 적는다."
+        )
+        return 1
+    print("어긋남 없음. 오프셋 [1:1+maxrank] 도 함께 확인됐다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
