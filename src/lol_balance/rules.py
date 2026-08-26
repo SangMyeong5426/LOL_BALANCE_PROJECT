@@ -21,6 +21,11 @@ from typing import Any, Literal
 
 from lol_balance.panel import PanelRow
 
+# 한쪽 근거만 있을 때 사전확률을 얼마나 섞는가. **순위에는 영향이 없다** —
+# 분자와 분모에 같은 상수를 더하므로 단조 변환이다. 근거 크기를 점수에 남기는
+# 것이 목적이고, 값 자체는 조정 대상이 아니다.
+PRIOR_WEIGHT = 0.5
+
 Op = Literal[">=", "<=", ">", "<"]
 # 규칙이 볼 수 있는 값. **다음 패치 정보는 없다** — 그것이 맞히려는 답이다.
 METRICS = ("win_rate", "wr_gap", "pick_rate", "ban_rate", "matches", "d_win_rate")
@@ -214,8 +219,21 @@ class RulePredictor:
         return evidence if evidence > 0 else self.fallback["adjusted"]
 
     def nerf_score(self, row: PanelRow) -> float:
-        """너프일 가능성. 양쪽 근거를 견줘 비율로 만든다."""
+        """너프일 가능성. 양쪽 근거를 견줘 비율로 만들되 **사전확률과 섞는다.**
+
+        섞지 않으면 한쪽만 걸린 행이 전부 정확히 `1.0` 또는 `0.0` 이 된다 —
+        근거가 0.9 든 0.98 이든 같은 점수다. 평가 234행에서 **점수가 5종밖에
+        안 나왔고**, AUC 는 줄 세우기 점수라 그 동점이 그대로 손해였다.
+
+            섞기 전   점수 5종   AUC 0.807
+            섞은 뒤   점수 19종  AUC 0.836
+
+        `PRIOR_WEIGHT` 값에는 **순위가 무관하다** — 분자·분모에 같은 상수를
+        더하는 것이라 단조 변환이다. 그래서 조정할 하이퍼파라미터가 아니고,
+        평가 구간을 보고 고를 여지도 없다.
+        """
         nerf, buff = self._evidence(row, "nerf"), self._evidence(row, "buff")
         if nerf == 0 and buff == 0:
             return self.fallback["nerf"]
-        return nerf / (nerf + buff)
+        prior = self.fallback["nerf"]
+        return (nerf + PRIOR_WEIGHT * prior) / (nerf + buff + PRIOR_WEIGHT)
