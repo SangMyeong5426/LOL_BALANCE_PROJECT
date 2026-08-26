@@ -1,0 +1,14 @@
+{"champion": "Cassiopeia", "direction": "buff", "evidence": ["Base mana increased to 480 from 450.", "Bonus base damage increased to 20 / 45 / 70 / 95 / 120 from 20 / 43 / 66 / 89 / 112."], "patch": "16_7"}
+{"champion": "Garen", "direction": "adjust", "evidence": ["Skin re-enabled for the duration of April Fools event."], "patch": "16_7"}
+{"champion": "Graves", "direction": "nerf", "evidence": ["Base attack damage reduced to 66 from 68."], "patch": "16_7"}
+{"champion": "Kalista", "direction": "buff", "evidence": ["AD ratio per subsequent spear increased to 20 / 27.5 / 35 / 42.5 / 50% AD from 20 / 25 / 30 / 35 / 40% AD ."], "patch": "16_7"}
+{"champion": "Karma", "direction": "nerf", "evidence": ["Bonus base shield reduced to 45 / 85 / 125 / 165 from 50 / 100 / 150 / 200."], "patch": "16_7"}
+{"champion": "Nami", "direction": "mixed", "evidence": ["Base bounce modifier reduced to -20% from -10%.", "Bounce modifier AP ratio increased 15% per 100 AP from 10% per 100 AP ."], "patch": "16_7"}
+{"champion": "Neeko", "direction": "adjust", "evidence": ["Undocumented / Removed: Disguising while channeling Hexflash no longer forces Neeko to recast it early on the NA, OCE, and SEA servers.", "Editor's Note: Since this change was a result of the changes to controls and hotkeys exclusive to the above servers, it may or may not return any time controls and hotkeys are updated in the future, and this note may not accurately reflect the current status on those servers."], "patch": "16_7"}
+{"champion": "Ornn", "direction": "nerf", "evidence": ["Brittle health ratio reduced to 9% – 17% (based on level) of target's maximum health from 10% – 18% (based on level) ."], "patch": "16_7"}
+{"champion": "Rell", "direction": "buff", "evidence": ["Bonus movement speed increased to 15% from 10%.", "Increased bonus movement speed increased to 30% from 25%.", "Base damage increased to 150 / 250 / 350 from 120 / 200 / 280."], "patch": "16_7"}
+{"champion": "Riven", "direction": "adjust", "evidence": ["Bug Fix: Fixed a bug that caused the damage to not be reduced when she critically strikes from items."], "patch": "16_7"}
+{"champion": "Shyvana", "direction": "adjust", "evidence": ["Bug Fix: Fixed a bug that caused her to lose SFX for all casts in both Human and Dragon form when using certain skins.", "Removed: No longer gains 0.015 fury per second per 1 ultimate haste.", "New Effect: Now gains 1% bonus fury generation per 1 ultimate haste."], "patch": "16_7"}
+{"champion": "Singed", "direction": "nerf", "evidence": ["Bonus stats reduced to 25 / 55 / 85 from 25 / 60 / 95."], "patch": "16_7"}
+{"champion": "Twisted Fate", "direction": "adjust", "evidence": ["Bug Fix: Fixed a bug that caused it to consume a stack of Fiendhunter Bolts even though the attack cannot critically strike."], "patch": "16_7"}
+{"champion": "Veigar", "direction": "nerf", "evidence": ["Cooldown increased to 120 / 90 / 60 seconds from 100 / 80 / 60."], "patch": "16_7"}

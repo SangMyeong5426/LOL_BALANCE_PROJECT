@@ -8,14 +8,20 @@
 
 | | |
 | --- | --- |
-| 규모 | **618종 · 23패치** |
-| 분포 | `adjust` 263 · `buff` 173 · `nerf` 106 · `mixed` 76 (+ 기계 판정 424) |
+| 규모 | **1,555종 · 52패치 — 예측 대상 전량** |
+| 분포 | `adjust` 641 · `buff` 411 · `nerf` 273 · `mixed` 230 |
 | 만든 방법 | **대화 중 Claude 가 패치 노트를 읽고 붙였다** |
 | **API 호출** | **없다.** `ANTHROPIC_API_KEY` 를 쓴 적이 없다 |
-| 채점 | Data Dragon diff 와 대조 — 채점 대상 167종, **충돌 0** ([`score-labels`](../scripts/score-labels)) |
+| 채점 | Data Dragon diff 와 대조 — 채점 대상 407종, **충돌 0** ([`score-labels`](../scripts/score-labels)) |
 | 기준 | [labeling-guide.md](../docs/spec/labeling-guide.md) |
 
-패치는 **시드 고정 무작위**로 뽑았다(`label-material --sample`). 처음에는 크기가 작은 패치를 골랐다가 표본을 편향시켰고, 그 사실과 근거는 labeling-guide 에 있다.
+**전량이라 이제 표본 편향이 없다.** 1,562종 중 1,555종에 라벨이 있고, 빠진 7종은
+그 패치에 처음 나온 챔피언이다(직전 버전이 없어 방향을 물을 수 없다).
+
+여기까지 오는 동안 패치는 **시드 고정 무작위**로 뽑았다(`label-material --sample`).
+처음에는 크기가 작은 패치를 골랐다가 표본을 편향시켰고, 그 사실과 근거는
+labeling-guide 에 있다. **전량을 붙인 지금도 그 기록은 지우지 않는다** — 중간
+결과가 왜 그렇게 나왔는지 설명하는 것이 그 기록이다.
 
 ## `records/` — 수치 변경 기록
 
