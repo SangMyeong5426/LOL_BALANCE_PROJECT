@@ -5,11 +5,12 @@ ruff==0.16.4
 
 # 단위 테스트와 평가 회귀 비교
 pytest==9.1.1
+
+# 커버리지 — `pytest --cov` 로 잰다. 현재 92%
 pytest-cov==7.1.0
 
 # 정적 타입 검사
 mypy==2.3.1
-pandas-stubs==3.0.5.260730
 
 # 커밋 전 ruff 자동 실행
 pre-commit==4.6.2

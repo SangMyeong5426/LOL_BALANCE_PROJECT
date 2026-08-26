@@ -1,29 +1,24 @@
-# 런타임 의존성. 직접 쓰는 것만 적고 정확한 버전으로 고정한다.
+# 런타임 의존성. **직접 import 하는 것만** 적고 정확한 버전으로 고정한다.
 # 전이 의존성까지 pip freeze 로 쏟아붓지 않는 이유는 docs/adr/0001 에 있다.
 #
 #   pip install -r requirements.txt
 
-# 패치 × 챔피언 시계열 집계
-pandas==3.0.5
+# 수치 배열 — 패널 인코딩, 지표 계산, 예측 점수
+numpy==2.4.6
 
 # 통계 베이스라인 — LLM 이 값을 하는지 비교할 대상
-scipy==1.17.1
 scikit-learn==1.8.0
 
-# 수집한 JSON·CSV 스키마 검증, LLM 구조화 출력 파싱 실패 처리
+# 수집한 JSON 스키마 검증, LLM 구조화 출력 파싱 실패 처리
 pydantic==2.13.4
 
-# 데이터 수집 (아카이브 경유 요청 포함)
-httpx==0.28.1
-
-# 웹 아카이브 HTML 파싱 (op.gg 스냅샷 등)
+# 웹 아카이브 HTML 파싱 (패치 노트)
 beautifulsoup4==4.14.2
 
 # .env 로드 — API 키를 코드에 두지 않는다
 python-dotenv==1.2.3
 
-# 결과 시각화
-matplotlib==3.11.1
-
-# 패치 노트 구조화, 규칙 추출, 예측 에이전트
+# 패치 노트 수치 추출. **실행 시점에는 부르지 않는다** —
+# extract.py 가 TYPE_CHECKING 아래에서만 쓰고, pilot-extract 는 지연 import 한다.
+# mypy 가 타입을 풀려면 필요하다.
 anthropic==1.0.0
