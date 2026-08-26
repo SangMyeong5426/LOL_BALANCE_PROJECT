@@ -59,6 +59,7 @@ def test_target_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
         "A0d",
         "A1",
         "A2",
+        "A2p",
         "A2h",
         "A3",
         "A5",
@@ -68,6 +69,23 @@ def test_target_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
     ]
     assert all(not r.uses_llm for r in results)  # A4 는 규칙을 넘겨야 나온다
     assert 0.0 < meta["기준선"] < 1.0
+
+
+def test_direction_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
+    """대상 쪽과 같은 이유다 — 표에 조용히 끼거나 빠지면 안 된다."""
+    results, _ = direction_arms(_panel(make_row), "15_13", SEED)
+
+    assert [r.arm for r in results][:9] == [
+        "B0",
+        "B0b",
+        "B0c",
+        "B0d",
+        "B1",
+        "B1p",
+        "B2",
+        "B2p",
+        "B2h",
+    ]
 
 
 def test_direction_arms_only_see_adjusted_champions(make_row: PanelRowFactory) -> None:

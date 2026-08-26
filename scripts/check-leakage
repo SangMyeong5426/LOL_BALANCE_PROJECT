@@ -76,6 +76,7 @@ def main() -> int:
             "A3 AUC": by["A3"]["auc"],
             "B0b AUC": by["B0b"]["auc"],
             "B1 AUC": by["B1"]["auc"],
+            "B1p AUC": by["B1p"]["auc"],
             "_기준선": meta["기준선"],
         }
 
@@ -90,6 +91,7 @@ def main() -> int:
         "A3 AUC": 0.5,
         "B0b AUC": 0.5,
         "B1 AUC": 0.5,
+        "B1p AUC": 0.5,
     }
     failed = []
     for key, floor in floors.items():
