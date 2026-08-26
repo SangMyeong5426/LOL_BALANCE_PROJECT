@@ -131,6 +131,7 @@ pre-commit install
 
 ```bash
 ruff check . && pytest && mypy
+pytest --cov              # 커버리지 92%
 ```
 
 `pre-commit` 이 커밋 전에 ruff 를 돌린다. **`pytest`(214개)와 `mypy` 는 자동으로 돌지 않으므로 직접 실행한다.**
@@ -156,10 +157,14 @@ tests/               214개
 | 기술 | 용도 |
 | --- | --- |
 | Python 3.11 | 전반 |
-| scikit-learn · numpy | **통계 베이스라인** — LLM 이 값을 하는지 비교 대상 |
+| numpy · scikit-learn | **통계 베이스라인** — LLM 이 값을 하는지 비교 대상 |
 | pydantic | 구조화 출력 강제 |
-| sqlite | 패널 저장 |
-| pytest · ruff · mypy · pre-commit | 코드 품질 |
+| beautifulsoup4 | 패치 노트 HTML 파싱 |
+| sqlite (표준 라이브러리) | 패널 저장 |
+| pytest · ruff · mypy · pre-commit | 코드 품질 — **테스트 214개 · 커버리지 92%** |
+
+**의존성은 직접 import 하는 것만 선언한다.** 전이 의존성은 적지 않는다 —
+`scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 안 적는다.
 
 **실행 시점에 LLM API 를 부르지 않는다.** 모델이 만든 산출물(라벨·규칙)은 저장소에 텍스트로 있고, 코드는 그것을 읽어 채점한다. 근거는 [`ground_truth/README.md`](ground_truth/README.md).
 
