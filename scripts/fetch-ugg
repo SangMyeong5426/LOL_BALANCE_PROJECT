@@ -44,7 +44,9 @@ PATCH_RE = re.compile(r"champion_ranking/world/(\d{1,2}_\d{1,2})/")
 
 
 def main() -> int:
-    rows = json.loads(get_with_retry(CDX, timeout=180).decode())[1:]
+    rows = json.loads(get_with_retry(CDX, timeout=180, validate=json.loads).decode())[
+        1:
+    ]
     by_patch: dict[str, tuple[str, str]] = {}
     for ts, url in rows:
         m = PATCH_RE.search(url)
@@ -61,7 +63,7 @@ def main() -> int:
             continue
         ts, url = by_patch[patch]
         try:
-            body = get_archived(ts, url)
+            body = get_archived(ts, url, validate=json.loads)
             ranking = parse_champion_ranking(json.loads(body))
             check_win_rate_identity(ranking)
             check_games_identity(ranking)

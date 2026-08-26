@@ -40,7 +40,9 @@ def in_scope(version: str) -> bool:
 
 def main() -> int:
     take_all = "--all" in sys.argv
-    versions = json.loads(get_with_retry(f"{BASE}/api/versions.json").decode())
+    versions = json.loads(
+        get_with_retry(f"{BASE}/api/versions.json", validate=json.loads).decode()
+    )
     targets = versions if take_all else [v for v in versions if in_scope(v)]
     targets = sorted(set(targets))
     print(f"대상 {len(targets)}개 버전 (전체 {len(versions)}개 중)", flush=True)
@@ -53,8 +55,7 @@ def main() -> int:
             continue
         url = f"{BASE}/cdn/{v}/data/en_US/championFull.json"
         try:
-            body = get_with_retry(url, attempts=3, base_delay=5.0)
-            json.loads(body)  # 온전한 JSON 인지 확인하고 저장한다
+            body = get_with_retry(url, attempts=3, base_delay=5.0, validate=json.loads)
             save(path, body)
             done += 1
             print(f"[{i}/{len(targets)}] {v}  {len(body):,}B", flush=True)

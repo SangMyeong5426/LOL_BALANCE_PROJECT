@@ -58,7 +58,9 @@ def delay_arg() -> float:
 def main() -> int:
     delay = delay_arg()
     wanted = set(GAP) | set(OVERLAP)
-    rows = json.loads(get_with_retry(CDX, timeout=180).decode())[1:]
+    rows = json.loads(get_with_retry(CDX, timeout=180, validate=json.loads).decode())[
+        1:
+    ]
 
     targets: dict[tuple[str, str], tuple[str, str]] = {}
     for ts, url in rows:
@@ -84,8 +86,7 @@ def main() -> int:
             continue
         ts, url = targets[(patch, champ)]
         try:
-            body = get_archived(ts, url)
-            json.loads(body)  # 온전한 JSON 인지만 본다. 해독은 나중에
+            body = get_archived(ts, url, validate=json.loads)
             save(path, body)
             done += 1
         except (Retryable, ValueError) as exc:

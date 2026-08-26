@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 USER_AGENT = (
@@ -33,6 +34,16 @@ ARCHIVE_BASE = "https://web.archive.org/web"
 REPLAY_MODIFIERS = ("id_", "if_")
 
 
+# 받은 내용이 온전한지 보는 검사기. `json.loads` 를 그대로 넘기면 된다.
+#
+# **왜 재시도 루프 안에 있어야 하는가.** 전송이 중간에 끊기면 HTTP 로는 성공이라
+# 크기 검사도 배너 검사도 통과한다. 검증을 루프 바깥에서 하면 그 실패가
+# 「영구 실패」가 되어 **한 번도 다시 받아 보지 않는다.** 실제로 겪었다 —
+# `15_19/sivir` 가 84,469 B 에서 끊긴 채로 왔고, 한 번 더 부르니 149,054 B 로
+# 멀쩡히 왔다. 재시도 예산 3회를 줬는데 한 번도 쓰이지 않았다.
+Validator = Callable[[bytes], object]
+
+
 class FetchError(RuntimeError):
     """받기를 포기해야 하는 상황."""
 
@@ -52,6 +63,10 @@ def get(url: str, timeout: int = 120) -> bytes:
         capture_output=True,
     )
     body = result.stdout
+    # **끊긴 전송은 여기서만 잡힌다.** 내용은 남아 있고 앞부분은 멀쩡하므로
+    # 아래 세 검사를 전부 통과한다. curl 은 exit 28 로 정확히 알려 준다.
+    if result.returncode != 0:
+        raise Retryable(f"curl 종료 {result.returncode}({len(body):,} B 받음): {url}")
     if not body:
         raise Retryable(f"빈 응답: {url}")
     head = body[:600]
@@ -62,17 +77,37 @@ def get(url: str, timeout: int = 120) -> bytes:
     return body
 
 
+def _validated(body: bytes, validate: Validator | None) -> bytes:
+    """검증기를 통과시킨다. **실패를 `Retryable` 로 바꾼다** — 그래야 재시도가 붙는다.
+
+    검증기가 무엇을 던질지 모르므로 `Exception` 을 통째로 받는다. `json.loads` 는
+    `ValueError` 지만 다른 검증기는 다른 것을 던진다.
+    """
+    if validate is None:
+        return body
+    try:
+        validate(body)
+    except Exception as exc:
+        raise Retryable(f"내용 검증 실패({len(body):,} B): {exc}") from exc
+    return body
+
+
 def get_with_retry(
     url: str,
     attempts: int = 5,
     base_delay: float = 20.0,
     timeout: int = 120,
+    validate: Validator | None = None,
 ) -> bytes:
-    """되는 데까지 다시 시도한다. 간격을 두 배씩 늘린다."""
+    """되는 데까지 다시 시도한다. 간격을 두 배씩 늘린다.
+
+    `validate` 를 주면 **내용 검사도 재시도 사유가 된다.** 받는 쪽에서 따로
+    검사하면 그 실패는 영구 실패가 되어 재시도 예산이 쓰이지 않는다.
+    """
     last: Exception | None = None
     for i in range(attempts):
         try:
-            return get(url, timeout=timeout)
+            return _validated(get(url, timeout=timeout), validate)
         except Retryable as exc:
             last = exc
             if i < attempts - 1:
@@ -86,6 +121,7 @@ def get_archived(
     attempts: int = 5,
     base_delay: float = 20.0,
     timeout: int = 120,
+    validate: Validator | None = None,
 ) -> bytes:
     """웹 아카이브 스냅샷 하나를 받는다.
 
@@ -105,6 +141,7 @@ def get_archived(
                 attempts=budget,
                 base_delay=base_delay,
                 timeout=timeout,
+                validate=validate,
             )
         except Retryable as exc:
             last = exc
