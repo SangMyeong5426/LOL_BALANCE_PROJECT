@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import pytest
 
+from lol_balance.cdragon import Change as ValueChange
 from lol_balance.ddragon import Change
 from lol_balance.direction import (
     champion_direction,
     change_direction,
     drop_mass_changes,
+    value_direction,
+    value_polarity,
     value_shift,
 )
 from lol_balance.groundtruth import compare
@@ -117,3 +120,80 @@ def test_a_field_that_changes_for_a_few_survives() -> None:
 def test_mass_filter_is_a_no_op_without_a_champion_count() -> None:
     changes = [Change("Ahri", "stat", "hp", 610, 580)]
     assert drop_mass_changes(changes, champion_count=0) == tuple(changes)
+
+
+# ── CommunityDragon 값의 방향 ────────────────────────────────────────────
+#
+# 이름이 챔피언마다 달라(13.15 한 패치에 1,044종) 정확한 목록으로는 못 잡는다.
+# 낱말로 잡되 **모르면 판정하지 않는다** — 틀린 라벨은 없느니만 못하다.
+
+
+def _change(field: str, before: object, after: object) -> ValueChange:
+    return ValueChange("Aatrox", "value", field, before, after)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("QBaseDamage", 1),
+        ("QTotalADRatio", 1),
+        ("ShieldBase", 1),
+        ("SlowDuration", 1),  # 적을 더 오래 느리게 = 버프
+        ("QCooldown", -1),
+        ("ManaCost", -1),
+        ("SelfSlowDuration", -1),  # slow 를 갖지만 자기가 느려진다
+        ("MonsterDamageCap", None),  # damage 를 갖지만 상한이다
+        ("AttackWindup", None),
+        ("SomethingUnknown", None),
+    ],
+)
+def test_polarity_reads_the_words_in_the_name(name: str, expected: int | None) -> None:
+    assert value_polarity(name) == expected
+
+
+def test_self_prefixed_names_are_read_before_the_plain_ones() -> None:
+    """`SelfSlow` 가 `slow` 로 읽히면 방향이 뒤집힌다."""
+    assert value_polarity("SelfSlowAmount") == -1
+    assert value_polarity("SlowAmount") == 1
+
+
+def test_damage_going_up_is_a_buff() -> None:
+    changes = [_change("AatroxQ.QBaseDamage", (10.0, 20.0), (15.0, 25.0))]
+
+    assert value_direction(changes) == "buff"
+
+
+def test_cooldown_going_up_is_a_nerf() -> None:
+    changes = [_change("AatroxQ.QCooldown", (9.0,), (10.0,))]
+
+    assert value_direction(changes) == "nerf"
+
+
+def test_two_ways_at_once_is_mixed() -> None:
+    changes = [
+        _change("AatroxQ.QBaseDamage", (10.0,), (15.0,)),
+        _change("AatroxQ.QCooldown", (9.0,), (10.0,)),
+    ]
+
+    assert value_direction(changes) == "mixed"
+
+
+def test_an_unknown_name_is_not_guessed() -> None:
+    assert value_direction([_change("AatroxQ.Whatever", (1.0,), (2.0,))]) is None
+
+
+def test_arrays_of_different_length_are_not_compared() -> None:
+    """**Jax 15.22 가 여기서 걸렸다.**
+
+    공식 부품이 `(0.7, 2.0) → (2.0,)` 로 하나 사라졌는데 평균이 1.35 → 2.0
+    이라 「올랐다」로 읽혔다. 실제로는 몬스터 피해량 상한 신설이라 너프였고,
+    손 라벨 241개 중 유일한 충돌이었다.
+    """
+    changes = [_change("JaxE.TotalDamage.mFormulaParts[1]", (0.7, 2.0), (2.0,))]
+
+    assert value_direction(changes) is None
+
+
+def test_a_field_that_appears_from_nothing_has_no_direction() -> None:
+    """없던 값이 생긴 것은 크기 비교로 못 읽는다."""
+    assert value_direction([_change("JaxE.MonsterDamageCap", None, (9000.0,))]) is None

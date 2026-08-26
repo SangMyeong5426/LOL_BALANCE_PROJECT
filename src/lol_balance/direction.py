@@ -18,9 +18,24 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from collections.abc import Sequence
+from typing import Any, Literal, Protocol
 
 from lol_balance.ddragon import Change
+
+
+class ValueChanged(Protocol):
+    """cdragon 변경 하나. **구조로 받는다** — `cdragon.Change` 는 다른 클래스다."""
+
+    @property
+    def field(self) -> str: ...
+
+    @property
+    def before(self) -> Any: ...
+
+    @property
+    def after(self) -> Any: ...
+
 
 # `adjust` 는 **조정은 됐는데 강해진 것도 약해진 것도 아닌 경우**다. 버그 수정,
 # 조작감 변경, 판정 로직 손질이 여기 들어간다. 노트에 실리지만 승률을 어느
@@ -158,3 +173,148 @@ def champion_direction(changes: tuple[Change, ...] | list[Change]) -> Direction 
     if len(seen) == 2:
         return "mixed"
     return "nerf" if "nerf" in seen else "buff"
+
+
+# ── CommunityDragon 값의 방향 ────────────────────────────────────────────
+#
+# **Data Dragon 과 방식이 다르다.** 저쪽은 필드가 `hp`·`cooldown` 처럼 정해져
+# 있어 정확한 이름 목록으로 잡히는데, cdragon 은 **이름이 챔피언마다 다르다** —
+# 13.15 한 패치에 `mDataValues` 항목 이름이 **1,044종**이다(`QBaseDamage` ·
+# `RAPCoefficient` · `ExplosionBaseDamage` …). 목록으로는 못 덮는다.
+#
+# 그래서 **이름에 든 낱말**로 잡는다. 정확도를 위해 세 가지를 지킨다.
+#
+# 1. 애매한 것을 **먼저** 걸러 판정하지 않는다
+# 2. `self-` 가 붙으면 뜻이 뒤집히므로 너프 쪽을 먼저 본다
+# 3. 모르는 이름은 **판정하지 않는다.** 틀린 라벨은 없느니만 못하다
+#
+# 손 라벨 241개에 붙여 **충돌 0** 을 확인하고 채택했다. 판정이 붙는 것은
+# 노트에 이름 오른 챔피언의 13.7% 이고, Data Dragon 의 25.5% 와 합쳐 39.2% 다.
+
+# 뜻이 뒤집히거나 크기로 못 읽는 것. **가장 먼저 본다.**
+#
+# `MonsterDamageCap` 이 그렇다 — 이름에 `damage` 가 있지만 상한이라 신설되면
+# 너프다. 「크면 강하다」가 성립하지 않는다.
+_VALUE_AMBIGUOUS = (
+    "cap",
+    "threshold",
+    "minimum",
+    "maximum",
+    "delay",
+    "windup",
+)
+
+# 오르면 너프. **버프 쪽보다 먼저 본다** — `SelfSlowDuration` 은 `slow` 를
+# 갖지만 자기가 느려지는 것이라 반대다.
+_VALUE_NERF_UP = (
+    "cooldown",
+    "cost",
+    "recharge",
+    "selfslow",
+    "selfroot",
+    "selfstun",
+    "selfdamage",
+)
+
+# 오르면 버프.
+_VALUE_BUFF_UP = (
+    "damage",
+    "ratio",
+    "heal",
+    "lifesteal",
+    "omnivamp",
+    "shield",
+    "slow",
+    "stun",
+    "root",
+    "snare",
+    "knockup",
+    "knockback",
+    "airborne",
+    "silence",
+    "taunt",
+    "charm",
+    "fear",
+    "flee",
+    "suppress",
+    "grounded",
+    "movementspeed",
+    "movespeed",
+    "haste",
+    "attackspeed",
+    "radius",
+    "castrange",
+    "missilespeed",
+    "dashspeed",
+    "armorpen",
+    "magicpen",
+    "shred",
+    "resist",
+    "armor",
+    "health",
+    "maxstacks",
+    "duration",
+)
+
+
+def value_polarity(name: str) -> int | None:
+    """`+1` = 오르면 버프, `-1` = 오르면 너프, `None` = 모른다."""
+    low = name.lower()
+    for token in _VALUE_AMBIGUOUS:
+        if token in low:
+            return None
+    for token in _VALUE_NERF_UP:
+        if token in low:
+            return -1
+    for token in _VALUE_BUFF_UP:
+        if token in low:
+            return 1
+    return None
+
+
+def _comparable(before: object, after: object) -> bool:
+    """크기로 비교해도 되는가.
+
+    **길이가 다르면 안 된다.** Jax 15.22 가 여기서 걸렸다 — 공식 부품이
+    `(0.7, 2.0) → (2.0,)` 로 하나 사라졌는데 평균이 1.35 → 2.0 이라 「올랐다」로
+    읽혔다. 실제로는 몬스터 피해량 상한 신설이라 너프였고, 손 라벨과 충돌한
+    유일한 건이었다. **구조가 바뀐 것은 크기 비교로 못 읽는다.**
+    """
+    if isinstance(before, tuple) and isinstance(after, tuple):
+        return len(before) == len(after)
+    return isinstance(before, (int, float)) and isinstance(after, (int, float))
+
+
+def _magnitude(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, tuple) and value:
+        return sum(value) / len(value)
+    return None
+
+
+def value_direction(changes: Sequence[ValueChanged]) -> Direction | None:
+    """cdragon 변경 묶음의 방향. **모르면 `None` 이다.**
+
+    `champion_direction` 과 같은 규칙으로 센다 — 강해진 항목과 약해진 항목이
+    같이 있으면 `mixed`, 한쪽뿐이면 그 방향, 셀 것이 없으면 판정하지 않는다.
+    """
+    up = down = 0
+    for change in changes:
+        polarity = value_polarity(change.field.split(".", 1)[-1])
+        if polarity is None or not _comparable(change.before, change.after):
+            continue
+        a, b = _magnitude(change.before), _magnitude(change.after)
+        if a is None or b is None or a == b:
+            continue
+        if (b > a) == (polarity > 0):
+            up += 1
+        else:
+            down += 1
+    if up and down:
+        return "mixed"
+    if up:
+        return "buff"
+    if down:
+        return "nerf"
+    return None
