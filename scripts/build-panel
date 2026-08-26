@@ -19,11 +19,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance.cdragon import field_changes, read_champion  # noqa: E402
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import (  # noqa: E402
     Direction,
     champion_direction,
     drop_mass_changes,
+    value_direction,
 )
 from lol_balance.groundtruth import read_labels  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
@@ -40,6 +42,7 @@ RANKING = ROOT / "data" / "ugg" / "champion_ranking"
 DDRAGON = ROOT / "data" / "ddragon"
 NOTES = ROOT / "data" / "patchnotes"
 LABELS = ROOT / "ground_truth" / "directions"
+CDRAGON = ROOT / "data" / "cdragon"
 OUT = ROOT / "data" / "panel.sqlite"
 
 
@@ -56,12 +59,38 @@ def adjusted_in(patch: str) -> frozenset[str]:
     return frozenset(b.champion for b in champion_changes(path.read_bytes()))
 
 
-def directions_in(patch: str, previous: str) -> dict[str, tuple[Direction, str]]:
-    """그 패치의 챔피언별 방향. **손 라벨이 자동 판정을 이긴다.**
+def version_short(patch: str) -> str:
+    """`13_15` → `13.15`. cdragon 은 빌드 번호를 안 쓴다."""
+    return patch.replace("_", ".")
 
-    자동 판정은 Data Dragon 이 보는 스탯·쿨다운 조정만 안다. 손으로 붙인
-    라벨은 노트 전체를 읽은 것이므로 더 정확하고, 라벨이 쌓일수록 패널이
-    좋아진다. 어느 쪽에서 왔는지는 `direction_source` 에 남긴다.
+
+def _merge(a: Direction | None, b: Direction | None) -> Direction | None:
+    """두 출처의 판정을 합친다. **반대를 말하면 그것이 `mixed` 다.**
+
+    Data Dragon 은 스탯·쿨다운을, cdragon 은 피해량·계수를 본다. **서로 다른
+    것을 보므로 한쪽이 다른 쪽을 이기게 하면 안 된다** — 쿨다운을 줄이면서
+    (버프) 피해량도 줄였으면(너프) 실제로는 `mixed` 이고, 손 라벨이 정확히
+    그렇게 붙는다(`groundtruth.compare` 의 `extends`).
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if a == b else "mixed"
+
+
+def directions_in(patch: str, previous: str) -> dict[str, tuple[Direction, str]]:
+    """그 패치의 챔피언별 방향. **손 라벨이 기계 판정을 이긴다.**
+
+    기계 판정은 두 출처를 합친 것이다.
+
+        auto    Data Dragon — 스탯 · 쿨다운 · 코스트 · 사거리
+        value   CommunityDragon — 피해량 · 계수 (ADR-0005)
+
+    손으로 붙인 라벨은 노트 전체를 읽은 것이라 더 정확하고, 라벨이 쌓일수록
+    패널이 좋아진다. 어느 쪽에서 왔는지는 `direction_source` 에 남긴다.
+
+    **cdragon 판정은 손 라벨 241개에 붙여 충돌 0 을 확인하고 넣었다.**
     """
     after = json.loads((DDRAGON / f"{version(patch)}.json").read_bytes())["data"]
     before = json.loads((DDRAGON / f"{version(previous)}.json").read_bytes())["data"]
@@ -73,10 +102,26 @@ def directions_in(patch: str, previous: str) -> dict[str, tuple[Direction, str]]
         grouped.setdefault(change.champion, []).append(change)
 
     out: dict[str, tuple[Direction, str]] = {}
-    for champion_id, changes in grouped.items():
-        direction = champion_direction(changes)
-        if direction:
-            out[names.get(champion_id, champion_id)] = (direction, "auto")
+    for champion_id, entry in standard.items():
+        name = names.get(champion_id, champion_id)
+        from_stats = champion_direction(grouped.get(champion_id, []))
+        from_values = value_direction(
+            field_changes(
+                read_champion(CDRAGON, version_short(previous), champion_id.lower()),
+                read_champion(CDRAGON, version_short(patch), champion_id.lower()),
+                champion_id,
+                {s["id"]: s["maxrank"] for s in entry.get("spells", [])},
+            )
+        )
+        merged = _merge(from_stats, from_values)
+        if merged is None:
+            continue
+        source = (
+            "both"
+            if from_stats and from_values
+            else ("auto" if from_stats else "value")
+        )
+        out[name] = (merged, source)
     for label in read_labels(LABELS / f"{patch}.jsonl"):
         out[label.champion] = (label.direction, "label")
     return out
@@ -137,7 +182,8 @@ def main() -> int:
 
     with_history = sum(1 for r in rows if r.history_len > 0)
     by_source = {
-        s: sum(1 for r in rows if r.direction_source == s) for s in ("label", "auto")
+        s: sum(1 for r in rows if r.direction_source == s)
+        for s in ("label", "both", "auto", "value")
     }
     points = len({r.patch for r in rows})
     trend_points = len({r.patch for r in rows if r.has_trend})
@@ -151,7 +197,8 @@ def main() -> int:
     )
     print(
         f"방향 라벨 {sum(by_source.values()):,} "
-        f"(손 {by_source['label']:,} · 자동 {by_source['auto']:,})"
+        f"(손 {by_source['label']:,} · 둘 다 {by_source['both']:,} "
+        f"· Data Dragon {by_source['auto']:,} · cdragon {by_source['value']:,})"
     )
     if skipped_no_next:
         print(f"제외: 마지막 패치 {skipped_no_next}개 — 다음 패치가 없어 라벨이 없다")
