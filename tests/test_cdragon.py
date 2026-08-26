@@ -14,6 +14,8 @@ from lol_balance.cdragon import (
     Change,
     changed_share,
     diff_versions,
+    field_changes,
+    rank_arrays,
     ranks,
     read_champion,
     spells,
@@ -152,3 +154,80 @@ def test_changed_share_counts_champions_not_fields() -> None:
 
 def test_read_champion_returns_none_when_absent(tmp_path: Path) -> None:
     assert read_champion(tmp_path, "13.15", "briar") is None
+
+
+# ── 필드 단위로 다시 묶기 ────────────────────────────────────────────────
+#
+# 채점은 **노트가 쓰는 단위**로 이뤄진다. 「60 / 67.5 / 75 / 82.5 / 90% AD」는
+# 다섯 칸을 한 문장으로 말한다. 칸별 변경을 그대로 내면 어느 문장과도 안 맞는다.
+
+RANKS = {"AatroxQ": 5}
+
+
+def test_rank_arrays_puts_the_slots_back_together() -> None:
+    got = rank_arrays(champion([value("QRatio", 0.5, 0.6, 0.7)]))
+
+    assert got[("AatroxQ", "QRatio")] == (0.5, 0.6, 0.7)
+
+
+def test_field_changes_cuts_to_the_game_ranks() -> None:
+    before = champion([value("QRatio", 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1)])
+    after = champion([value("QRatio", 0.525, 0.6, 0.675, 0.75, 0.825, 0.9, 0.975)])
+
+    got = field_changes(before, after, "Aatrox", RANKS)
+
+    assert got == (
+        Change(
+            "Aatrox",
+            "value",
+            "AatroxQ.QRatio",
+            (0.6, 0.7, 0.8, 0.9, 1.0),
+            (0.6, 0.675, 0.75, 0.825, 0.9),
+        ),
+    )
+
+
+def test_a_change_only_in_the_extrapolation_slots_is_not_a_change() -> None:
+    """`[0]` 과 `[6]` 은 게임이 안 쓴다. 그것만 움직였으면 아무 일도 없었다."""
+    before = champion([value("QRatio", 0.1, 0.6, 0.6, 0.6, 0.6, 0.6, 9.9)])
+    after = champion([value("QRatio", 0.2, 0.6, 0.6, 0.6, 0.6, 0.6, 8.8)])
+
+    assert field_changes(before, after, "Aatrox", RANKS) == ()
+
+
+def test_a_constant_array_collapses_to_one_number() -> None:
+    """**노트가 그렇게 쓴다.** 「75% AP」는 다섯 랭크가 모두 75라는 뜻이다.
+
+    다섯 칸으로 내면 한 숫자짜리 문장과 안 맞는다.
+    """
+    before = champion([value("QAP", 0.0, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75)])
+    after = champion([value("QAP", 0.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5)])
+
+    got = field_changes(before, after, "Aatrox", RANKS)
+
+    assert got == (Change("Aatrox", "value", "AatroxQ.QAP", (0.75,), (0.5,)),)
+
+
+def test_formula_numbers_are_grouped_by_part() -> None:
+    """한 문장이 한 부품에서 나온다.
+
+    「1150 – 3500 (based on level)」은 `mStartValue` 와 `mEndValue` 둘을 한
+    번에 말한다. 낱개로 내면 어느 쪽도 그 문장과 안 맞는다.
+    """
+    part = {"mStartValue": 1300.0, "mEndValue": 3200.0, "__type": "ByCharLevel"}
+    before = champion(calculations={"RDamage": {"mFormulaParts": [part]}})
+    after = champion(
+        calculations={
+            "RDamage": {
+                "mFormulaParts": [{**part, "mStartValue": 1150.0, "mEndValue": 3500.0}]
+            }
+        }
+    )
+
+    got = [
+        c for c in field_changes(before, after, "Annie", RANKS) if c.kind == "formula"
+    ]
+
+    assert len(got) == 1
+    assert got[0].before == (3200.0, 1300.0)  # mEndValue · mStartValue (경로 정렬순)
+    assert got[0].after == (3500.0, 1150.0)
