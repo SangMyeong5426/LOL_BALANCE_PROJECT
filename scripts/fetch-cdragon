@@ -96,8 +96,7 @@ def main() -> int:
             continue
         url = f"{BASE}/{version(patch)}/game/data/characters/{champion}/{champion}.bin.json"
         try:
-            body = get_with_retry(url, attempts=3, base_delay=5.0)
-            json.loads(body)  # 온전한 JSON 인지만 본다
+            body = get_with_retry(url, attempts=3, base_delay=5.0, validate=json.loads)
             save(path, body)
             done += 1
         except (Retryable, ValueError) as exc:
