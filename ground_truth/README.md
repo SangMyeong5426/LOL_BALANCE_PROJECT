@@ -8,11 +8,11 @@
 
 | | |
 | --- | --- |
-| 규모 | **242종 · 11패치** |
-| 분포 | `buff` 81 · `adjust` 76 · `nerf` 49 · `mixed` 36 (+ 자동 판정 344) |
+| 규모 | **424종 · 17패치** |
+| 분포 | `adjust` 164 · `buff` 135 · `nerf` 77 · `mixed` 48 (+ 기계 판정 496) |
 | 만든 방법 | **대화 중 Claude 가 패치 노트를 읽고 붙였다** |
 | **API 호출** | **없다.** `ANTHROPIC_API_KEY` 를 쓴 적이 없다 |
-| 채점 | Data Dragon diff 와 대조 — **충돌 0** ([`score-labels`](../scripts/score-labels)) |
+| 채점 | Data Dragon diff 와 대조 — 채점 대상 121종, **충돌 0** ([`score-labels`](../scripts/score-labels)) |
 | 기준 | [labeling-guide.md](../docs/spec/labeling-guide.md) |
 
 패치는 **시드 고정 무작위**로 뽑았다(`label-material --sample`). 처음에는 크기가 작은 패치를 골랐다가 표본을 편향시켰고, 그 사실과 근거는 labeling-guide 에 있다.

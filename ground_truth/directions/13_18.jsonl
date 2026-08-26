@@ -1,0 +1,36 @@
+{"champion": "Aphelios", "direction": "adjust", "evidence": ["Bug Fix: Model no longer twitches unexpectedly during his weapon's idle animations."], "patch": "13_18"}
+{"champion": "Bard", "direction": "mixed", "evidence": ["Movement speed duration increased to 20 seconds from 7.", "Maximum number of stacks increased to 10 from 5.", "New Effect: Now stores 2 charges of the ability with an 18 second recharge timer.", "Bonus movement speed reduced to 20 / 22.5 / 25 / 27.5 / 30% from 30% at all ranks.", "New Effect: Bonus movement speed now scales with 5% per 100 AP .", "Shrine charge timer reduced to 5 seconds from 10.", "Cooldown reduced to 0 seconds from 14."], "patch": "13_18"}
+{"champion": "Blitzcrank", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Caitlyn", "direction": "adjust", "evidence": ["Critical strike ratio formula changed to (100% total crit damage x 81.25 % total crit chance) from (62.5 % total crit damage x 130% total crit chance).", "Damage unchanged."], "patch": "13_18"}
+{"champion": "Ezreal", "direction": "adjust", "evidence": ["Bug Fix: Mark is now properly triggered when hitting a target with an ability that doesn't apply on-hit effects even if they are under the effect of a dodging ability."], "patch": "13_18"}
+{"champion": "Graves", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Gwen", "direction": "buff", "evidence": ["Health growth increased to 115 to 106.", "Maximum monster base damage increased to 10 from 6.", "Maximum monster AP ratio increased to 15% AP from 10% AP ."], "patch": "13_18"}
+{"champion": "Irelia", "direction": "buff", "evidence": ["Cooldown reduced to 125 / 105 / 85 seconds from 140 / 120 / 100."], "patch": "13_18"}
+{"champion": "Ivern", "direction": "adjust", "evidence": ["Bug Fix: Now properly keeps aggro when fighting dragons.", "Note: This documents a change that was hotfixed during patch 13.17."], "patch": "13_18"}
+{"champion": "Janna", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Jarvan IV", "direction": "nerf", "evidence": ["Updated ability icons.", "Health ratio reduced to 6% of target's current health from 8% .", "Bug Fix: Summoned terrain now counts as a knockback and applies airborne to enemies knocked by being within the perimeter interval.", "In particular, this means displacement immune dashes now properly resist the push, and are thereby no longer overridden by it.", "This makes it consistent with similar spells such as Anivia's Crystallize and Yorick's Dark Procession .", "The knockback is sourced from the wall segment that applied it, not Jarvan IV , meaning it does not trigger effects such as Aftershock or Glacial Augment for him."], "patch": "13_18"}
+{"champion": "Jayce", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "K'Sante", "direction": "adjust", "evidence": ["Bug Fix: Now properly converts percent bonus resistances into bonus attack damage."], "patch": "13_18"}
+{"champion": "Kassadin", "direction": "adjust", "evidence": ["AP ratio increased to 60% AP from 40% AP .", "This was changed in V13.15 , but is only documented in this patch."], "patch": "13_18"}
+{"champion": "Kayn", "direction": "nerf", "evidence": ["Darkin healing changed to 25% of damage dealt at all levels from 20% – 30% (based on level) .", "Darkin damage bonus AD ratio reduced to 10% per bonus AD from 13% .", "Darkin heal bonus AD ratio reduced to 6.5 % per 100 bonus AD from 8.45 % ."], "patch": "13_18"}
+{"champion": "Kennen", "direction": "buff", "evidence": ["Energy cost reduced to 80 at all ranks from 100 / 95 / 90 / 85 / 80.", "Cooldown reduced to 120 / 100 / 80 seconds from 120 at all ranks."], "patch": "13_18"}
+{"champion": "Kog'Maw", "direction": "adjust", "evidence": ["Bug Fix: Character swap to the exploded Kog'Maw model is no longer partially overriding his champion statistics.", "No longer shows as having the maximum amount of attack speed while a corpse."], "patch": "13_18"}
+{"champion": "Lee Sin", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Leona", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Lucian", "direction": "adjust", "evidence": ["Bug Fix: Now properly triggers Ardent Blaze's bonus movement speed again."], "patch": "13_18"}
+{"champion": "Malphite", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Naafiri", "direction": "adjust", "evidence": ["Bug Fix: No longer able to target Little Legend units on ARAM."], "patch": "13_18"}
+{"champion": "Nami", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Neeko", "direction": "adjust", "evidence": ["Bug Fix: KDA score no longer changes based on unit she is disguised as."], "patch": "13_18"}
+{"champion": "Olaf", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Orianna", "direction": "adjust", "evidence": ["Updated ability icons.", "Bug Fix: Basic attacks no longer improperly cancel when the ball returns to her location."], "patch": "13_18"}
+{"champion": "Rell", "direction": "nerf", "evidence": ["Bonus movement speed reduced to 12 / 14 / 16 / 18 / 20% from 15 / 17.5 / 20 / 22.5 / 25%.", "Increased bonus movement speed reduced to 24 / 28 / 32 / 36 / 40% from 30 / 35 / 40 / 45 / 50%."], "patch": "13_18"}
+{"champion": "Senna", "direction": "buff", "evidence": ["Critical strike damage increased to 100% from 91.5 %.", "New Effect: Area of effect spread now applies a stack of Mist to champions hit."], "patch": "13_18"}
+{"champion": "Thresh", "direction": "buff", "evidence": ["Shield strength per soul increased to 2 from 1.5 ."], "patch": "13_18"}
+{"champion": "Tryndamere", "direction": "nerf", "evidence": ["Base attack damage reduced to 66 from 68.", "Health growth reduced to 108 from 115."], "patch": "13_18"}
+{"champion": "Udyr", "direction": "adjust", "evidence": ["Bug Fix: Spell shield no longer blocks the application of the on-target cooldown marker for the empowered attack."], "patch": "13_18"}
+{"champion": "Varus", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Vayne", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Xayah", "direction": "mixed", "evidence": ["Base health reduced to 630 from 660.", "Health growth increased to 107 from 102.", "Cooldown increased to 13 / 12 / 11 / 10 / 9 seconds from 11 / 10.5 / 10 / 9.5 / 9."], "patch": "13_18"}
+{"champion": "Zed", "direction": "adjust", "evidence": ["Updated ability icons."], "patch": "13_18"}
+{"champion": "Zoe", "direction": "adjust", "evidence": ["Bug Fix: Item actives for Goredrinker and Stridebreaker now properly drop spell shards."], "patch": "13_18"}
