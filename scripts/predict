@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""다음 패치에 무엇이 조정될지 예측한다. **백테스트가 아니라 실제 예측이다.**
+
+    ./scripts/predict [--patch 16_13] [--top 10] [--score]
+
+`run-report` 는 과거를 되짚어 성적을 재는 도구다. 이것은 **한 패치를 놓고 그
+다음 패치를 예측**한다 — 저장소가 실제로 무엇을 하는지가 여기서 보인다.
+
+## 셋을 따로 낸다
+
+    조정 후보   A7p  부스팅 + 프로 경기      기준선의 1.9배
+    너프 후보   A7nerfp                  기준선의 5.7배
+    버프 후보   A7buffp                  기준선의 3.5배
+
+**「조정되나」 하나로 묻지 않는다.** 프로 픽·밴율의 신호가 방향에 따라 반대라
+(너프 쪽 AUC 0.658 · 버프 쪽 0.473) 합치면 상쇄된다. 자세한 것은
+[results](../docs/results/README.md).
+
+## 학습은 예측 대상 패치 이전까지만 쓴다
+
+`--patch 16_13` 이면 `16_13` **이전** 행으로만 학습한다. 그 패치 자신도 안
+쓴다 — 그 행의 라벨이 곧 정답이기 때문이다.
+
+## `--score` 는 답을 이미 아는 경우에만 쓴다
+
+패널의 마지막 패치가 아니면 실제 결과가 라벨로 들어 있으므로 바로 채점된다.
+**진짜 다음 패치를 예측할 때는 답이 없으므로 붙이지 않는다.**
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import _boosting, _narrow, split  # noqa: E402
+from lol_balance.baseline import direction_rows, encode, fit_encoder  # noqa: E402
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.explain import reasons  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE, PanelRow, patch_index  # noqa: E402
+from lol_balance.retrieval import CaseSearch  # noqa: E402
+from lol_balance.rules import read_rules  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+RULES = ROOT / "rules" / "proposed.jsonl"
+
+# 예측 셋. 이름·좁힐 방향·프로 피처를 쓸지.
+VIEWS = (
+    ("조정 후보", None, True),
+    ("너프 후보", "nerf", True),
+    ("버프 후보", "buff", True),
+)
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def rank(
+    train: tuple[PanelRow, ...],
+    test: tuple[PanelRow, ...],
+    want: str | None,
+    pro: bool,
+    seed: int,
+) -> np.ndarray:
+    """그 대상이 될 확률. **라벨만 바꾸고 피처는 그대로 둔다.**"""
+    tr = train if want is None else _narrow(train, want)
+    enc = fit_encoder(tr, with_trend=True, with_pro=pro)
+    a, b = encode(tr, enc), encode(test, enc)
+    return np.asarray(_boosting(seed).fit(a.x, a.y).predict_proba(b.x)[:, 1])
+
+
+def lifetime_pro(rows: tuple[PanelRow, ...]) -> dict[str, float]:
+    """챔피언별 **평생 평균** 프로 픽·밴율.
+
+    한 패치 값이 아니라 평생 값으로 「프로 단골인가」를 본다 — 한 패치만 튀는
+    것과 늘 나오는 것은 다르다.
+    """
+    seen: dict[str, list[float]] = {}
+    for r in rows:
+        if r.pro_presence is not None:
+            seen.setdefault(r.champion, []).append(r.pro_presence)
+    return {c: sum(v) / len(v) for c, v in seen.items() if len(v) >= 20}
+
+
+def outcome(row: PanelRow) -> str:
+    if not row.adjusted_next:
+        return "조정 안 됨"
+    return {"nerf": "너프", "buff": "버프"}.get(
+        row.direction_next or "", row.direction_next or "방향 미상"
+    )
+
+
+def main() -> int:
+    at = arg("--patch", "")
+    top = int(arg("--top", "10"))
+    seed = load_settings().seed
+    rows = read_panel(PANEL)
+    if not rows:
+        print("패널이 비었다. ./scripts/build-panel 을 먼저 돌린다.", file=sys.stderr)
+        return 1
+
+    if not at:
+        at = max(rows, key=lambda r: r.patch_index).patch
+    if at not in {r.patch for r in rows}:
+        print(f"패널에 {at} 이 없다.", file=sys.stderr)
+        return 2
+
+    nxt = PATCH_SEQUENCE[patch_index(at) + 1]
+    train, _ = split(rows, at)
+    test = tuple(r for r in rows if r.patch == at)
+    scored = "--score" in sys.argv
+    known = sum(r.adjusted_next for r in test)
+
+    print(f"{at} 지표로 {nxt} 패치를 예측한다")
+    print(
+        f"  학습 {len(train):,}행 (~{max(r.patch for r in train)}) · 대상 {len(test)}종"
+    )
+    if scored and not known:
+        print("  ⚠ 이 패치에는 라벨이 없다 — 채점할 수 없다", file=sys.stderr)
+        scored = False
+
+    rules = read_rules(RULES)
+    search = CaseSearch(direction_rows(rows), at)
+    pro = lifetime_pro(rows)
+
+    for label, want, with_pro in VIEWS:
+        score = rank(train, test, want, with_pro, seed)
+        order = np.argsort(-score)[:top]
+        print(f"\n=== {label} 상위 {top} ===")
+
+        for i, j in enumerate(order, 1):
+            r = test[j]
+            line = f"  {i:2} {r.champion:14}점수 {score[j]:.2f}"
+            if scored:
+                got = outcome(r)
+                want_kr = {"nerf": "너프", "buff": "버프"}.get(want or "", "")
+                mark = (
+                    "✅"
+                    if (got == want_kr or (want is None and r.adjusted_next))
+                    else "  "
+                )
+                line += f"   {mark} 실제 {got}"
+            print(line)
+            # **순위만으로는 도구가 안 된다.** 왜 그런지와 주의할 점을 붙인다.
+            notes = reasons(
+                r, test, search.similar(r, k=25), rules, pro.get(r.champion), want
+            )
+            for k, note in enumerate(notes):
+                tip = "└" if k == len(notes) - 1 else "├"
+                flag = "⚠ " if note.warn else ""
+                print(f"      {tip} {flag}{note.text}")
+        if scored:
+            hits = sum(
+                1
+                for j in order
+                if (
+                    test[j].adjusted_next
+                    if want is None
+                    else test[j].direction_next == want
+                )
+            )
+            print(f"  → 상위 {top} 중 적중 {hits}종")
+
+    if not scored:
+        print(
+            f"\n실제 {nxt} 패치 노트와 대조하려면 그 노트를 받은 뒤 --score 를 붙인다."
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

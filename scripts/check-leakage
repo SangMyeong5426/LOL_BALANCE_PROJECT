@@ -96,7 +96,10 @@ def main() -> int:
         by = {r.arm: r.scores for r in target} | {r.arm: r.scores for r in direction}
         return {
             "A1 R-정확도": by["A1"]["r_precision"],
+            "A7p R-정확도": by["A7p"]["r_precision"],
+            "A7buffp AUC": by["A7buffp"]["auc"],
             "A3 AUC": by["A3"]["auc"],
+            "_조정탐지": by["A7"]["auc"],
             "B0b AUC": by["B0b"]["auc"],
             "B1 AUC": by["B1"]["auc"],
             "B1p AUC": by["B1p"]["auc"],
@@ -115,18 +118,27 @@ def main() -> int:
 
     print(f"시드 {seed} · 분할 {at}\n")
     print(f"{'':14}{'원본':>10}{'대상 섞음':>12}{'방향 섞음':>12}{'기준선':>10}")
-    floors = {
-        "A1 R-정확도": real["_기준선"],
-        "A3 AUC": 0.5,
-        "B0b AUC": 0.5,
-        "B1 AUC": 0.5,
-        "B1p AUC": 0.5,
-        "B5p AUC": 0.5,
-        "B6 AUC": 0.5,
+    # **어느 라벨을 섞어야 무너지는지는 arm 이름으로 못 정한다.** `A7buffp` 는
+    # `A` 로 시작하지만 라벨이 `direction_next` 에서 온다 — 「대상 섞음」으로
+    # 보면 안 무너지고, 그것을 누출로 잘못 읽는다. 실제로 한 번 그랬다.
+    #
+    # 바닥도 arm 마다 다르다. `A7buffp` 는 버프 대상이 **전부 조정된 챔피언**
+    # 이므로 방향을 섞어도 「조정되나」 신호가 남는다. 그 잔여값(`A7` 의 AUC)이
+    # 바닥이지 0.5 가 아니다.
+    checks = {
+        "A1 R-정확도": ("대상", real["_기준선"]),
+        "A7p R-정확도": ("대상", real["_기준선"]),
+        "A7buffp AUC": ("방향", real["_조정탐지"]),
+        "A3 AUC": ("대상", 0.5),
+        "B0b AUC": ("방향", 0.5),
+        "B1 AUC": ("방향", 0.5),
+        "B1p AUC": ("방향", 0.5),
+        "B5p AUC": ("방향", 0.5),
+        "B6 AUC": ("방향", 0.5),
     }
     failed = []
-    for key, floor in floors.items():
-        broken = swapped_target[key] if key.startswith("A") else swapped_direction[key]
+    for key, (which, floor) in checks.items():
+        broken = swapped_target[key] if which == "대상" else swapped_direction[key]
         mark = "✅" if broken - floor <= TOLERANCE else "❌"
         if mark == "❌":
             failed.append(key)
