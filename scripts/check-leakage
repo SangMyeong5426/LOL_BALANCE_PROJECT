@@ -24,9 +24,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.arms import direction_arms, target_arms  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.panel import PanelRow  # noqa: E402
+from lol_balance.ragjudge import read_judgments  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
+JUDGMENTS = ROOT / "ground_truth" / "rag"
 # 기준선을 이만큼 **넘게 웃돌면** 실패다.
 #
 # **한쪽만 본다.** 누출은 라벨을 섞어도 성능이 **남는** 것이고, 기준선 아래로
@@ -40,21 +42,42 @@ def arg(flag: str, default: str) -> str:
 
 
 def shuffled(
-    rows: tuple[PanelRow, ...], field: str, rng: np.random.Generator
+    rows: tuple[PanelRow, ...],
+    field: str,
+    rng: np.random.Generator,
+    keep: frozenset[object] | None = None,
 ) -> tuple[PanelRow, ...]:
-    """패치 **안에서만** 섞는다.
+    """패치 **안에서**, **값이 있는 행끼리만** 섞는다.
 
     패치를 넘나들며 섞으면 패치별 조정 건수까지 흐트러져 과제 자체가 달라진다.
     안에서 섞으면 「누가」만 무작위가 되고 나머지 구조는 그대로 남는다.
+
+    **채점 대상 밖의 값까지 섞으면 평가 집합 자체가 바뀐다.** ② 는 `nerf`·`buff`
+    만 채점하는데, `None`·`mixed`·`adjust` 까지 섞으면 방향 라벨이 무작위
+    챔피언에게 옮겨 가 **대상 자체가 달라진다.** 그러면 대상별로 채점하는
+    arm(`B6`)을 아예 못 재고, 나머지 arm 도 「연결이 끊겼나」와 「표본이
+    바뀌었나」가 섞인다.
+
+    `keep` 을 주면 그 값들끼리만 섞는다. 안 주면 `None` 이 아닌 것끼리 섞는다.
+    `adjusted_next` 는 `bool` 이라 `None` 이 없어 동작이 그대로다.
     """
     grouped: dict[str, list[PanelRow]] = {}
     for row in rows:
         grouped.setdefault(row.patch, []).append(row)
     out: list[PanelRow] = []
     for part in grouped.values():
-        values = [getattr(r, field) for r in part]
+
+        def wanted(row: PanelRow) -> bool:
+            value = getattr(row, field)
+            return value in keep if keep is not None else value is not None
+
+        movable = [r for r in part if wanted(r)]
+        values = [getattr(r, field) for r in movable]
         rng.shuffle(values)
-        out += [replace(r, **{field: v}) for r, v in zip(part, values, strict=True)]
+        swap = {id(r): v for r, v in zip(movable, values, strict=True)}
+        out += [
+            replace(r, **{field: swap[id(r)]}) if id(r) in swap else r for r in part
+        ]
     return tuple(out)
 
 
@@ -69,7 +92,7 @@ def main() -> int:
 
     def measure(data: tuple[PanelRow, ...]) -> dict[str, float]:
         target, meta = target_arms(data, at, seed)
-        direction, _ = direction_arms(data, at, seed)
+        direction, _ = direction_arms(data, at, seed, (), read_judgments(JUDGMENTS))
         by = {r.arm: r.scores for r in target} | {r.arm: r.scores for r in direction}
         return {
             "A1 R-정확도": by["A1"]["r_precision"],
@@ -78,12 +101,17 @@ def main() -> int:
             "B1 AUC": by["B1"]["auc"],
             "B1p AUC": by["B1p"]["auc"],
             "B5p AUC": by["B5p"]["auc"],
+            "B6 AUC": by["B6"]["auc"],
             "_기준선": meta["기준선"],
         }
 
     real = measure(rows)
     swapped_target = measure(shuffled(rows, "adjusted_next", rng))
-    swapped_direction = measure(shuffled(rows, "direction_next", rng))
+    # ② 는 `nerf`·`buff` 만 채점하므로 그 둘끼리만 섞는다 — 평가 집합을 고정한 채
+    # 피처와 라벨의 연결만 끊는다.
+    swapped_direction = measure(
+        shuffled(rows, "direction_next", rng, frozenset({"nerf", "buff"}))
+    )
 
     print(f"시드 {seed} · 분할 {at}\n")
     print(f"{'':14}{'원본':>10}{'대상 섞음':>12}{'방향 섞음':>12}{'기준선':>10}")
@@ -94,6 +122,7 @@ def main() -> int:
         "B1 AUC": 0.5,
         "B1p AUC": 0.5,
         "B5p AUC": 0.5,
+        "B6 AUC": 0.5,
     }
     failed = []
     for key, floor in floors.items():
