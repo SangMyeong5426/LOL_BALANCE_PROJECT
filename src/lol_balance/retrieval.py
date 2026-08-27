@@ -206,7 +206,17 @@ class NoteSearch:
 
 
 class StatLookup:
-    """R3 — 지금 값이 얼마인지 그대로 준다. **추정하지 않는다.**"""
+    """R3 — 지금 값이 얼마인지 그대로 준다. **추정하지 않는다.**
+
+    **아직 부르는 arm 이 없다.** 억지로 끼워 넣지 않는다 — `NoteSearch` 를
+    이름만으로 질의했다가 「스킨 이름 변경」이 최상위로 올라온 적이 있고,
+    쓰이지 않는 도구를 쓰이는 것처럼 보이게 만드는 것이 그것보다 나쁘다.
+
+    이것은 **에이전트가 루프 중에 조회하려고** 만든 도구다. 단발 판단(`B6`)은
+    맥락을 한 번에 받으므로 조회할 일이 없고, 이력·추세는 `PanelRow` 가
+    (`d_win_rate` · `history_len` · `recent_adjustments` · `high_wr_streak`)
+    이미 담고 있다. **루프가 생기면 그때 쓰인다.**
+    """
 
     def __init__(self, rows: Sequence[PanelRow], as_of: str) -> None:
         limit = patch_index(as_of)
