@@ -235,9 +235,18 @@ pre-commit install
 
 ```bash
 ./scripts/build-panel        # 8,767행 패널
-./scripts/run-report         # 26개 arm 비교표 → runs/
+./scripts/run-report         # arm 비교표 → runs/
 ./scripts/check-leakage      # 누출 검사
 ```
+
+**다음 패치를 실제로 예측한다.**
+
+```bash
+./scripts/predict --patch 16_13 --top 10          # 조정·너프·버프 후보
+./scripts/predict --patch 16_13 --top 10 --score  # 답을 아는 패치면 채점까지
+```
+
+`run-report` 가 과거를 되짚어 성적을 재는 도구라면, `predict` 는 **한 패치를 놓고 그 다음 패치를 예측한다.** 셋을 따로 낸다 — 「조정되나」로만 물으면 프로 픽·밴율의 신호가 방향에 따라 반대라 상쇄되기 때문이다.
 
 검사:
 
@@ -252,7 +261,7 @@ pytest --cov              # 커버리지 92%
 
 ```text
 src/lol_balance/     수집 · 파싱 · 패널 · 예측 · 평가
-scripts/             실행 진입점 (수집 · 라벨링 · 리포트 · 검증)
+scripts/             실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증)
 ground_truth/        정답지 — 방향 라벨 1,555종 (커밋한다)
 rules/               밸런스 규칙 12개 (커밋한다)
 docs/glossary.md     용어 — 여기 있는 말만 쓴다
