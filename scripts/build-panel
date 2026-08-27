@@ -35,7 +35,7 @@ from lol_balance.panel import (  # noqa: E402
     champion_names,
     patch_rows,
 )
-from lol_balance.patchnotes import champion_changes  # noqa: E402
+from lol_balance.patchnotes import champion_changes, changed_champions  # noqa: E402
 from lol_balance.store import write_panel  # noqa: E402
 from lol_balance.ugg import parse_champion_ranking  # noqa: E402
 
@@ -103,9 +103,16 @@ def directions_in(patch: str, previous: str) -> dict[str, tuple[Direction, str]]
     for change in drop_mass_changes(diff_versions(before, after), len(standard)):
         grouped.setdefault(change.champion, []).append(change)
 
+    # **스냅샷은 노트보다 늦게 움직인다.** 직전 패치의 조정이 이 diff 에 처음
+    # 나타나므로, 그대로 두면 직전 패치 것이 이 패치 것으로 적힌다. 근거는
+    # `patchnotes.changed_champions`.
+    late = changed_champions((NOTES / f"{version(previous)}.html").read_bytes())
+
     out: dict[str, tuple[Direction, str]] = {}
     for champion_id, entry in standard.items():
         name = names.get(champion_id, champion_id)
+        if name in late:
+            continue
         from_stats = champion_direction(grouped.get(champion_id, []))
         from_values = value_direction(
             field_changes(

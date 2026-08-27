@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from lol_balance.patchnotes import champion_changes, wiki_url, wiki_version
+from lol_balance.patchnotes import (
+    champion_changes,
+    changed_champions,
+    wiki_url,
+    wiki_version,
+)
 
 
 @pytest.mark.parametrize(
@@ -197,3 +202,25 @@ def test_the_wiki_name_is_mapped_to_the_panel_name() -> None:
     (block,) = champion_changes(_sections(("Champions", "Nunu")))
 
     assert block.champion == "Nunu & Willump"
+
+
+def test_changed_champions_covers_both_kinds_of_section() -> None:
+    """**스냅샷은 노트보다 늦게 움직인다.**
+
+    패치 P 의 조정이 Data Dragon 의 P → P+1 diff 에 처음 나타나므로, 그것을
+    빼지 않으면 P 의 조정이 P+1 것으로 적힌다. 빼려면 **P 노트가 적은 챔피언을
+    전부** 알아야 한다 — 본절과 핫픽스 둘 다.
+
+    Corki 13.24 → 14.1 이 그렇게 부딪혔다.
+    """
+    got = changed_champions(
+        _sections(("Champions", "Ahri"), ("December 12th Hotfix", "Corki"))
+    )
+
+    assert got == {"Ahri", "Corki"}
+
+
+def test_changed_champions_still_excludes_other_modes() -> None:
+    got = changed_champions(_sections(("Champions", "Ahri"), ("Arena", "Zed")))
+
+    assert got == {"Ahri"}
