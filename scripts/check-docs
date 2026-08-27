@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""README 에 적힌 수치가 실제와 맞는지 본다.
+
+    ./scripts/check-docs
+
+**수치는 반복해서 낡는다.** 테스트 개수는 두 번 어긋났고(214 → 215 → 248),
+arm 개수는 26 으로 굳어 있는데 실제는 36 이었다. 커버리지도 92% 로 남아 있었다.
+**사람이 기억해서 고치는 것으로는 안 된다.**
+
+`check-rule-docs` 가 두 규칙 문서의 동일성을 강제하듯 이것은 수치를 강제한다.
+**pre-commit 에는 안 건다** — `pytest --collect-only` 와 arm 계산이 몇 초 걸려
+커밋마다 돌리기엔 무겁다. `pytest`·`mypy` 와 같이 직접 돌린다.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import direction_arms, target_arms  # noqa: E402
+from lol_balance.ragjudge import read_judgments  # noqa: E402
+from lol_balance.rules import read_rules  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+README = ROOT / "README.md"
+PANEL = ROOT / "data" / "panel.sqlite"
+SEED = 20260824
+SPLIT = "15_13"
+
+
+def collected() -> int | None:
+    """`pytest` 가 세는 테스트 수. 못 세면 건너뛴다."""
+    out = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    found = re.search(r"^(\d+) tests? collected", out.stdout, re.M)
+    return int(found.group(1)) if found else None
+
+
+def arms() -> int | None:
+    """표에 실리는 arm 수. **패널이 있어야 센다** — 없으면 건너뛴다."""
+    if not PANEL.exists():
+        return None
+    rows = read_panel(PANEL)
+    if not rows:
+        return None
+    rules = read_rules(ROOT / "rules" / "proposed.jsonl")
+    judgments = read_judgments(ROOT / "ground_truth" / "rag")
+    target, _ = target_arms(rows, SPLIT, SEED, rules)
+    direction, _ = direction_arms(rows, SPLIT, SEED, rules, judgments)
+    return len(target) + len(direction)
+
+
+def main() -> int:
+    text = README.read_text(encoding="utf-8")
+    failed: list[str] = []
+    skipped: list[str] = []
+
+    for label, pattern, actual in (
+        ("arm 개수", r"(\d+)개 arm", arms()),
+        ("테스트 개수", r"테스트 (\d+)개", collected()),
+    ):
+        found = re.search(pattern, text)
+        if found is None:
+            failed.append(f"{label}: README 에서 못 찾았다 ({pattern})")
+            continue
+        if actual is None:
+            skipped.append(f"{label}: 셀 수 없어 건너뛴다")
+            continue
+        written = int(found.group(1))
+        mark = "✅" if written == actual else "❌"
+        print(f"  {mark} {label:12}README {written:5}   실제 {actual:5}")
+        if written != actual:
+            failed.append(f"{label}: README {written} ≠ 실제 {actual}")
+
+    for note in skipped:
+        print(f"  ⏭  {note}")
+    if failed:
+        print("\n❌ 어긋난 수치")
+        for line in failed:
+            print(f"   {line}")
+        return 1
+    print("\n✅ README 수치가 실제와 맞는다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

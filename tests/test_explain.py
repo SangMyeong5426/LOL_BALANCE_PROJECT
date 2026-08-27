@@ -43,6 +43,17 @@ def test_a_flat_win_rate_says_so(make_row: PanelRowFactory) -> None:
     assert "안 기운다" in texts(reasons(row, [row]))
 
 
+def test_a_moving_win_rate_is_reported(make_row: PanelRowFactory) -> None:
+    """**추세는 수준과 다른 정보다.** 5할 위인데 내려오는 중이면 판단이 달라진다."""
+    up = make_row("16_13", 1, d_win_rate=0.02)
+    down = make_row("16_13", 2, d_win_rate=-0.02)
+    flat = make_row("16_13", 3, d_win_rate=0.001)
+
+    assert "오르는 중" in texts(reasons(up, [up]))
+    assert "내리는 중" in texts(reasons(down, [down]))
+    assert "중이다" not in texts(reasons(flat, [flat]))
+
+
 def test_fired_rules_are_named(make_row: PanelRowFactory) -> None:
     """어떤 규칙이 걸렸는지가 근거다. **규칙 이름을 그대로 보인다.**"""
     row = make_row("16_13", 1, ban_rate=0.30)

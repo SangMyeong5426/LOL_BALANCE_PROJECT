@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction  # noqa: E402
-from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE, next_patch  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
@@ -61,7 +61,8 @@ def targets() -> list[str]:
     """예측 대상 패치 — 통계가 있는 패치의 **다음** 패치."""
     rows = read_panel(ROOT / "data" / "panel.sqlite")
     predicted = sorted({r.patch for r in rows}, key=PATCH_SEQUENCE.index)
-    return [PATCH_SEQUENCE[PATCH_SEQUENCE.index(p) + 1] for p in predicted]
+    # **순서 끝은 다음이 없다.** 그냥 `+1` 하면 패널이 끝까지 차는 순간 죽는다.
+    return [n for p in predicted if (n := next_patch(p)) is not None]
 
 
 def show_sample(count: int) -> None:

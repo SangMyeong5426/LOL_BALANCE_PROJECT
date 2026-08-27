@@ -41,7 +41,7 @@ from lol_balance.arms import _boosting, _narrow, split  # noqa: E402
 from lol_balance.baseline import direction_rows, encode, fit_encoder  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.explain import reasons  # noqa: E402
-from lol_balance.panel import PATCH_SEQUENCE, PanelRow, patch_index  # noqa: E402
+from lol_balance.panel import PanelRow, next_patch  # noqa: E402
 from lol_balance.retrieval import CaseSearch  # noqa: E402
 from lol_balance.rules import read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
@@ -111,7 +111,10 @@ def main() -> int:
         print(f"패널에 {at} 이 없다.", file=sys.stderr)
         return 2
 
-    nxt = PATCH_SEQUENCE[patch_index(at) + 1]
+    nxt = next_patch(at)
+    if nxt is None:
+        print(f"{at} 이 패치 순서의 끝이라 다음 패치가 없다.", file=sys.stderr)
+        return 2
     train, _ = split(rows, at)
     test = tuple(r for r in rows if r.patch == at)
     scored = "--score" in sys.argv
