@@ -44,7 +44,7 @@ HISTORY_FEATURES = ("history_len", "recent_adjustments", "high_wr_streak")
 
 # 프로 경기 피처 — Oracle's Elixir. **따로 켜고 끌 수 있어야 기여를 잴 수 있다.**
 #
-# 방향 예측에서 값을 한다(AUC 0.812 → 0.852). 대상 예측에는 안 한다
+# 방향 예측에서 값을 한다. ① 대상에서는 너프·버프의 부호가 반대라 상쇄된다
 # (0.597 → 0.597). **한쪽에만 듣는 피처라 섞어 넣으면 그 사실이 사라진다.**
 PRO_FEATURES = ("pro_pick_rate", "pro_ban_rate", "pro_presence")
 

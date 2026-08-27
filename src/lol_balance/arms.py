@@ -16,7 +16,7 @@ LLM 이 그것을 못 이기면 못 이겼다고 적는다.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -183,6 +183,15 @@ def _rank_scores(matrix: Matrix, score: NDArray[np.float64]) -> dict[str, float]
     return {k: float(np.nanmean(v)) for k, v in per.items()}
 
 
+def _narrow(rows: tuple[PanelRow, ...], want: str) -> tuple[PanelRow, ...]:
+    """`adjusted_next` 를 「그 방향으로 조정되나」로 바꿔 끼운다.
+
+    **라벨만 바꾸고 피처는 그대로 둔다.** 행을 걸러 내면 「조정 안 됨」이 사라져
+    과제가 달라진다 — 우리가 묻는 것은 「171종 중 누가 너프될까」다.
+    """
+    return tuple(replace(r, adjusted_next=(r.direction_next == want)) for r in rows)
+
+
 def target_arms(
     rows: tuple[PanelRow, ...],
     at: str,
@@ -248,18 +257,48 @@ def target_arms(
         found, _ = _retrieved(rows, test, at, k=25, expanding=expanding)
         out.append(Result(arm, label, False, _rank_scores(te, np.array(found))))
 
-    for arm, label, history in (
-        ("A7", "부스팅 트리 — 수준 + 추세", False),
-        ("A7h", "부스팅 트리 — + 이력·역할", True),
+    for arm, label, history, pro in (
+        ("A7", "부스팅 트리 — 수준 + 추세", False, False),
+        ("A7h", "부스팅 트리 — + 이력·역할", True, False),
+        # **부스팅과 프로를 같이 넣은 적이 없었다.** 프로는 회귀(A2p)에만
+        # 붙여 봤고 거기서는 안 올랐다. 트리는 상호작용을 나눠 담으므로
+        # 「프로에서 세면서 솔랭 승률은 낮다」 같은 조건을 표현할 수 있다.
+        ("A7p", "부스팅 트리 — + 프로 경기", False, True),
     ):
-        enc = fit_encoder(train, with_trend=True, with_history=history)
+        enc = fit_encoder(train, with_trend=True, with_history=history, with_pro=pro)
         tr, ts = encode(train, enc), encode(test, enc)
         boost = _boosting(seed).fit(tr.x, tr.y)
         out.append(
             Result(arm, label, False, _rank_scores(ts, boost.predict_proba(ts.x)[:, 1]))
         )
 
+    # **예측 대상을 방향으로 좁힌다.** 「조정되나」 하나만 물으면 프로 픽·밴율의
+    # 신호가 상쇄된다 — 너프 쪽은 「조정 안 됨」과 AUC 0.658 로 갈리는데 버프
+    # 쪽은 0.473 이라 방향이 반대다. 합치면 0.546 으로 뭉개진다.
+    #
+    # **R-정확도를 A7 과 나란히 읽으면 안 된다.** 패치당 양성 수가 달라
+    # (조정 전부 ~25종 → 너프 ~5종) 기준선 자체가 다르다. 그래서 각 줄의
+    # 기준선을 따로 낸다.
+    for arm, label, want in (
+        ("A7nerf", "부스팅 — 너프 대상만", "nerf"),
+        ("A7buff", "부스팅 — 버프 대상만", "buff"),
+    ):
+        for tag, pro in (("", False), ("p", True)):
+            narrowed_train = _narrow(train, want)
+            narrowed_test = _narrow(test, want)
+            enc = fit_encoder(narrowed_train, with_trend=True, with_pro=pro)
+            tr, ts = encode(narrowed_train, enc), encode(narrowed_test, enc)
+            boost = _boosting(seed).fit(tr.x, tr.y)
+            ranked = _rank_scores(ts, boost.predict_proba(ts.x)[:, 1])
+            ranked["기준선"] = sum(r.adjusted_next for r in narrowed_test) / len(
+                narrowed_test
+            )
+            suffix = " + 프로" if pro else ""
+            out.append(Result(arm + tag, label + suffix, False, ranked))
+
     base = sum(r.adjusted_next for r in test) / len(test)
+    for result in out:
+        result.scores.setdefault("기준선", base)
     return out, {"기준선": base, "학습": len(train), "평가": len(test)}
 
 
