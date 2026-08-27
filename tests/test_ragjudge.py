@@ -217,3 +217,89 @@ def test_the_same_target_in_two_conditions_is_fine(tmp_path: Path) -> None:
     out = read_judgments(tmp_path)
 
     assert len(out) == 2
+
+
+# --- ADR 0007 · 답변 형식 -------------------------------------------------
+#
+# **새 칸은 전부 선택이다.** 필수로 만들면 이미 만든 판단 314건이 통째로 깨지고,
+# 그것만 여덟 묶음이 걸렸다. 그래서 「없으면 기본값」이 계약이다.
+
+
+def test_the_old_shape_still_reads(tmp_path: Path) -> None:
+    """**기존 314건이 그대로 유효해야 한다.** 이것이 스키마를 넓힌 전제다."""
+    write(tmp_path, [good()])
+
+    j = read_judgments(tmp_path)[("abc123", "anon")]
+
+    assert j.as_of is None
+    assert j.abstain is False
+    assert j.adjust_prob is None
+    assert j.evidence == ()
+    assert j.warnings == ()
+
+
+def test_the_new_fields_round_trip(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        [
+            good(
+                as_of="16_13",
+                abstain=False,
+                adjust_prob=62,
+                evidence=[{"source": "R1", "text": "이웃 25종 중 너프 24"}],
+                warnings=[{"kind": "missing_data", "text": "프로 데이터가 없다"}],
+            )
+        ],
+    )
+
+    j = read_judgments(tmp_path)[("abc123", "anon")]
+
+    assert j.as_of == "16_13"
+    assert j.adjust_prob == 62
+    assert j.evidence[0].source == "R1"
+    assert j.warnings[0].kind == "missing_data"
+
+
+def test_evidence_without_a_known_source_is_rejected(tmp_path: Path) -> None:
+    """**근거는 지어내지 않는다를 형식으로 건다.**
+
+    어느 검색기가 준 것인지 안 적으면 「`R2` 가 스킨 버그를 물어 오는 약점이
+    판단에 얼마나 번지나」를 영영 못 잰다.
+    """
+    write(tmp_path, [good(evidence=[{"source": "어디선가", "text": "세다"}])])
+
+    with pytest.raises(ValueError, match="source"):
+        read_judgments(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        (good(adjust_prob=101), "0~100"),
+        (good(adjust_prob=True), "정수"),
+        (good(adjust_prob="62"), "정수"),
+        (good(abstain="false"), "abstain"),
+        (good(evidence={"source": "R1"}), "배열"),
+        (good(evidence=[{"source": "R1", "text": "  "}]), "text"),
+        (good(warnings=[{"kind": "", "text": "무엇"}]), "kind"),
+    ],
+)
+def test_bad_new_fields_fail_loudly(tmp_path: Path, record: dict, message: str) -> None:
+    """`abstain="false"` 가 특히 위험하다 — **비지 않은 문자열은 전부 참이다.**"""
+    write(tmp_path, [record])
+
+    with pytest.raises(ValueError, match=message):
+        read_judgments(tmp_path)
+
+
+def test_abstain_is_carried_so_coverage_can_be_counted(tmp_path: Path) -> None:
+    """**「모른다」를 말할 자리가 없으면 억지로 답한다.**
+
+    지금까지는 확신 없는 판단도 반드시 0~100 안에 들어가, 「이웃이 0종이라
+    검색이 아무 말도 못 한다」가 50 으로 적혀 「반반이다」와 구별이 안 됐다.
+    """
+    write(tmp_path, [good(abstain=True), good(key="def456")])
+
+    out = read_judgments(tmp_path)
+
+    assert [k for k, v in out.items() if v.abstain] == [("abc123", "anon")]
