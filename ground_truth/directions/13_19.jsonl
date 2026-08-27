@@ -16,7 +16,7 @@
 {"champion": "Malzahar", "direction": "adjust", "evidence": ["Bug Fix: Now properly spreads the debuff even if it was cast on a minion as it was dying."], "patch": "13_19"}
 {"champion": "Naafiri", "direction": "adjust", "evidence": ["Bug Fix: Packmates no longer ignore certain crowd control effects."], "patch": "13_19"}
 {"champion": "Neeko", "direction": "adjust", "evidence": ["Bug Fix: VFX is no longer visible to enemies from the Fog of War."], "patch": "13_19"}
-{"champion": "Nunu", "direction": "buff", "evidence": ["AP ratio per snowball increased to 15% AP from 10% AP ."], "patch": "13_19"}
+{"champion": "Nunu & Willump", "direction": "buff", "evidence": ["AP ratio per snowball increased to 15% AP from 10% AP ."], "patch": "13_19"}
 {"champion": "Orianna", "direction": "adjust", "evidence": ["Bug Fix: No longer is castable beyond its intended range."], "patch": "13_19"}
 {"champion": "Ornn", "direction": "adjust", "evidence": ["Bug Fix: Now properly grants its bonus stats when upgrading the additional Mythic items of allied teammates into Masterwork items."], "patch": "13_19"}
 {"champion": "Pyke", "direction": "buff", "evidence": ["Health growth increased to 110 from 104.", "Cooldown reduced to 12 / 11 / 10 / 9 / 8 seconds from 12 / 11.5 / 11 / 10.5 / 10."], "patch": "13_19"}

@@ -59,6 +59,31 @@ def wiki_url(ddragon_version: str) -> str:
 # 챔피언 절의 제목. 다른 절(Items·Runes 등)은 이 프로젝트의 대상이 아니다.
 _CHAMPION_HEADING = "champion"
 
+# **핫픽스도 그 패치의 조정이다.** 「January 12th Hotfix」처럼 날짜가 붙은 별도
+# 절로 나오는데, 처음에는 `Champions` 절만 읽어 통째로 놓쳤다 — 14.1 은 본절
+# 16종에 핫픽스 14종이라 절반 가까이가 빠졌다. 플레이어는 그 값으로 게임을 했다.
+_HOTFIX_HEADING = "hotfix"
+
+# **위키와 Data Dragon 이 한 챔피언을 다르게 부른다.** 위키의 `data-champion` 은
+# `Nunu`, Data Dragon 과 패널은 `Nunu & Willump` 다. 이름이 안 맞으면 그 챔피언의
+# 조정이 통째로 「조정 안 됨」으로 기록된다 — 실제로 5개 패치가 그렇게 빠졌고,
+# 라벨 4건도 패널에 못 붙었다. **연결 키를 이름으로 잡은 대가다**(AGENTS.md
+# 「버전 표기를 믿지 않는다」).
+#
+# `scripts/build-panel` 이 노트 이름과 패널 이름을 대조해, 여기 없는 새 어긋남이
+# 생기면 그 자리에서 경고한다. **조용히 지나가지 않는다.**
+_ALIASES = {"Nunu": "Nunu & Willump"}
+
+
+def champion_name(wiki_name: str) -> str:
+    """위키 표기를 Data Dragon · 패널 표기로 맞춘다."""
+    return _ALIASES.get(wiki_name, wiki_name)
+
+
+# **Arena·Doom Bots 는 협곡이 아니다.** 같은 형식으로 챔피언 변경을 담지만
+# 모드 전용 수치라, 협곡 지표와 이어 붙이면 값이 튄다(AGENTS.md 「출처를 섞지
+# 않는다」). 그래서 제목으로 걸러 낸다.
+
 
 @dataclass(frozen=True)
 class ChangeBlock:
@@ -127,6 +152,23 @@ def _sentences(item: Tag) -> list[str]:
     return [own] if own else []
 
 
+def _change_sections(soup: BeautifulSoup) -> list[Tag]:
+    """챔피언 변경을 담은 절들의 **부모 노드.**
+
+    `Champions` 하나만 보면 안 된다 — 같은 패치 안에서 핫픽스가 별도 절로
+    나오고, 그것도 그 패치에 실제로 적용된 조정이다. 반대로 `Arena` 나
+    `Doom Bots` 는 형식이 같아도 협곡이 아니라 제외한다.
+    """
+    out: list[Tag] = []
+    for h in soup.select("h3"):
+        title = h.get_text(strip=True).lower()
+        if not (title.startswith(_CHAMPION_HEADING) or _HOTFIX_HEADING in title):
+            continue
+        if isinstance(h.parent, Tag):
+            out.append(h.parent)
+    return out
+
+
 def champion_changes(html: bytes) -> tuple[ChangeBlock, ...]:
     """패치 노트 HTML 에서 챔피언 변경 묶음을 뽑는다.
 
@@ -138,34 +180,28 @@ def champion_changes(html: bytes) -> tuple[ChangeBlock, ...]:
     LLM 의 일이고, 여기서는 **어느 챔피언의 어느 묶음인지**까지만 확정한다.
     """
     soup = BeautifulSoup(html, "html.parser")
-    heading = next(
-        (
-            h
-            for h in soup.select("h3")
-            if h.get_text(strip=True).lower().startswith(_CHAMPION_HEADING)
-        ),
-        None,
-    )
-    if heading is None or heading.parent is None:
-        return ()
-
     blocks: list[ChangeBlock] = []
-    champion: str | None = None
-    for sib in heading.parent.next_siblings:
-        if not isinstance(sib, Tag):
-            continue
-        if sib.name == "div" and sib.find("h3"):
-            break  # 다음 절로 넘어갔다
-        if sib.name == "dl":
-            icon = sib.find("span", attrs={"data-champion": True})
-            champion = str(icon["data-champion"]) if isinstance(icon, Tag) else None
-        elif sib.name == "ul" and champion:
-            for item in sib.find_all("li", recursive=False):
-                section, ability = _label(item)
-                lines = tuple(_sentences(item))
-                if not lines:
-                    continue
-                if lines == (section,):
-                    section = "General"  # 묶음 없이 문장 하나만 있는 경우
-                blocks.append(ChangeBlock(champion, section, ability, lines))
+    for parent in _change_sections(soup):
+        champion: str | None = None
+        for sib in parent.next_siblings:
+            if not isinstance(sib, Tag):
+                continue
+            if sib.name == "div" and sib.find("h3"):
+                break  # 다음 절로 넘어갔다
+            if sib.name == "dl":
+                icon = sib.find("span", attrs={"data-champion": True})
+                champion = (
+                    champion_name(str(icon["data-champion"]))
+                    if isinstance(icon, Tag)
+                    else None
+                )
+            elif sib.name == "ul" and champion:
+                for item in sib.find_all("li", recursive=False):
+                    section, ability = _label(item)
+                    lines = tuple(_sentences(item))
+                    if not lines:
+                        continue
+                    if lines == (section,):
+                        section = "General"  # 묶음 없이 문장 하나만 있는 경우
+                    blocks.append(ChangeBlock(champion, section, ability, lines))
     return tuple(blocks)
