@@ -38,12 +38,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from lol_balance.arms import _boosting, _narrow, split  # noqa: E402
-from lol_balance.baseline import encode, fit_encoder  # noqa: E402
+from lol_balance.baseline import direction_rows, encode, fit_encoder  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.explain import reasons  # noqa: E402
 from lol_balance.panel import PATCH_SEQUENCE, PanelRow, patch_index  # noqa: E402
+from lol_balance.retrieval import CaseSearch  # noqa: E402
+from lol_balance.rules import read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
+RULES = ROOT / "rules" / "proposed.jsonl"
 
 # 예측 셋. 이름·좁힐 방향·프로 피처를 쓸지.
 VIEWS = (
@@ -69,6 +73,19 @@ def rank(
     enc = fit_encoder(tr, with_trend=True, with_pro=pro)
     a, b = encode(tr, enc), encode(test, enc)
     return np.asarray(_boosting(seed).fit(a.x, a.y).predict_proba(b.x)[:, 1])
+
+
+def lifetime_pro(rows: tuple[PanelRow, ...]) -> dict[str, float]:
+    """챔피언별 **평생 평균** 프로 픽·밴율.
+
+    한 패치 값이 아니라 평생 값으로 「프로 단골인가」를 본다 — 한 패치만 튀는
+    것과 늘 나오는 것은 다르다.
+    """
+    seen: dict[str, list[float]] = {}
+    for r in rows:
+        if r.pro_presence is not None:
+            seen.setdefault(r.champion, []).append(r.pro_presence)
+    return {c: sum(v) / len(v) for c, v in seen.items() if len(v) >= 20}
 
 
 def outcome(row: PanelRow) -> str:
@@ -108,18 +125,18 @@ def main() -> int:
         print("  ⚠ 이 패치에는 라벨이 없다 — 채점할 수 없다", file=sys.stderr)
         scored = False
 
-    for label, want, pro in VIEWS:
-        score = rank(train, test, want, pro, seed)
+    rules = read_rules(RULES)
+    search = CaseSearch(direction_rows(rows), at)
+    pro = lifetime_pro(rows)
+
+    for label, want, with_pro in VIEWS:
+        score = rank(train, test, want, with_pro, seed)
         order = np.argsort(-score)[:top]
         print(f"\n=== {label} 상위 {top} ===")
-        head = f"  {'':3}{'챔피언':14}{'승률':>7}{'픽률':>7}{'밴율':>7}{'점수':>7}"
-        print(head + ("   실제" if scored else ""))
+
         for i, j in enumerate(order, 1):
             r = test[j]
-            line = (
-                f"  {i:2} {r.champion:14}{r.win_rate:7.3f}{r.pick_rate:7.3f}"
-                f"{(r.ban_rate or 0):7.3f}{score[j]:7.2f}"
-            )
+            line = f"  {i:2} {r.champion:14}점수 {score[j]:.2f}"
             if scored:
                 got = outcome(r)
                 want_kr = {"nerf": "너프", "buff": "버프"}.get(want or "", "")
@@ -128,8 +145,16 @@ def main() -> int:
                     if (got == want_kr or (want is None and r.adjusted_next))
                     else "  "
                 )
-                line += f"   {mark} {got}"
+                line += f"   {mark} 실제 {got}"
             print(line)
+            # **순위만으로는 도구가 안 된다.** 왜 그런지와 주의할 점을 붙인다.
+            notes = reasons(
+                r, test, search.similar(r, k=25), rules, pro.get(r.champion), want
+            )
+            for k, note in enumerate(notes):
+                tip = "└" if k == len(notes) - 1 else "├"
+                flag = "⚠ " if note.warn else ""
+                print(f"      {tip} {flag}{note.text}")
         if scored:
             hits = sum(
                 1
