@@ -207,18 +207,36 @@ def test_b6_appears_only_when_judgments_are_given(
     assert "B6" in {r.arm for r in with_it}
 
 
-def test_b6_is_skipped_when_coverage_is_partial(make_row: PanelRowFactory) -> None:
-    """**평가 구간을 다 덮지 못하면 `B5` 와 짝지어 비교가 안 된다.**
+def test_partial_coverage_brings_a_paired_b5(make_row: PanelRowFactory) -> None:
+    """**부분만 실으면 다른 표본의 수치를 나란히 놓게 된다.**
 
-    부분만 실으면 다른 표본의 수치를 나란히 놓게 되고, 읽는 사람은 같은 행에서
-    잰 값으로 읽는다.
+    읽는 사람은 같은 행에서 잰 값으로 읽으므로, 못 덮을 때는 `B5` 도 같은
+    부분집합으로 잘라 함께 낸다. 덮는 종수를 이름에 적어 표에서 바로 보이게
+    한다.
+
+    이 자리가 실제로 생겼다 — `Nunu & Willump` 이름을 고치자 평가 구간이 한
+    종 늘었고, 그 행에는 판단이 없다.
     """
     rows = _panel(make_row)
     partial = dict(list(_judgments(rows, "15_13").items())[:-1])
 
     results, _ = direction_arms(rows, "15_13", SEED, (), partial)
+    by_arm = {r.arm: r for r in results}
 
-    assert "B6" not in {r.arm for r in results}
+    assert "B5s" in by_arm
+    assert "종" in by_arm["B6"].label
+    assert str(len(partial)) in by_arm["B5s"].label
+
+
+def test_full_coverage_does_not_bring_a_paired_b5(make_row: PanelRowFactory) -> None:
+    """다 덮으면 `B5` 가 이미 같은 표본이라 자를 이유가 없다."""
+    rows = _panel(make_row)
+
+    results, _ = direction_arms(rows, "15_13", SEED, (), _judgments(rows, "15_13"))
+    by_arm = {r.arm: r for r in results}
+
+    assert "B5s" not in by_arm
+    assert "종)" not in by_arm["B6"].label
 
 
 def test_b6_is_marked_as_an_llm_product(make_row: PanelRowFactory) -> None:
