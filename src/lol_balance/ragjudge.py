@@ -54,6 +54,11 @@ NOTE_POOL = 40
 # 판단 점수의 범위. **라벨이 아니라 점수여야 한다** — AUC 는 줄 세우기 점수다.
 PROB_MIN, PROB_MAX = 0, 100
 
+# 근거가 어디서 왔는지. **`R2` 가 스킨 버그 수정을 물어 오는 약점이 판단에 얼마나
+# 번지는지 지금은 못 잰다** — 출처를 달아야 그것이 수치가 된다.
+Source = Literal["R1", "R2", "R3", "규칙", "수치"]
+SOURCES: tuple[Source, ...] = ("R1", "R2", "R3", "규칙", "수치")
+
 
 def anon_key(row: PanelRow, condition: Condition = "anon") -> str:
     """챔피언·패치에서 만드는 **되돌릴 수 없는** 키.
@@ -83,17 +88,54 @@ class Target:
 
 
 @dataclass(frozen=True)
+class Note:
+    """근거 한 줄, **어디서 왔는지와 함께.**
+
+    `source` 를 요구하는 이유가 있다 — **어느 검색기가 값을 했는지 지금은 못
+    잰다.** `NoteSearch` 는 이름만으로 질의하면 스킨 버그 수정을 최상위로
+    올리는데, 그 약점이 판단에 얼마나 번지는지 알 수가 없었다.
+    """
+
+    source: Source
+    text: str
+
+
+@dataclass(frozen=True)
+class Warning_:
+    """놓치면 사고가 나는 것. **`kind` 는 자유 문자열이다.**
+
+    미리 분류를 못 박지 않는다 — 어떤 경고가 필요한지는 쓰면서 드러난다.
+    """
+
+    kind: str
+    text: str
+
+
+@dataclass(frozen=True)
 class Judgment:
     """한 대상에 대한 판단.
 
     `nerf_prob` 는 **0~100 정수**다. 라벨(`nerf`/`buff`)로 받으면 점수가 두
     종류뿐이라 AUC 가 사실상 정확도가 된다 — `B4` 가 해상도로 겪은 문제다.
+
+    **`nerf_prob` 아래는 전부 선택이다**([ADR 0007](../../docs/adr/0007-answer-schema.md)).
+    기존 판단 314건이 그대로 유효해야 하기 때문이다 — 필수로 만들면 `B6` 을
+    처음부터 다시 만들어야 하고, 그것만 여덟 묶음이 걸렸다.
+
+    `adjust_prob` 은 **에이전트가 한 건씩 답할 때 쓰는 칸이고 arm 이 없다.**
+    ① 대상은 패치 안 줄 세우기라 한 패치(약 171종)를 통째로 판단해야 하는데,
+    평가 구간이 20패치 3,433행이라 손으로는 R-정확도를 못 낸다.
     """
 
     key: str
     condition: Condition
     nerf_prob: int
     reason: str
+    as_of: str | None = None
+    abstain: bool = False
+    adjust_prob: int | None = None
+    evidence: tuple[Note, ...] = ()
+    warnings: tuple[Warning_, ...] = ()
 
 
 def _fmt(value: float | None, digits: int = 3) -> str:
@@ -216,6 +258,67 @@ def targets_of(rows: Iterable[PanelRow]) -> tuple[Target, ...]:
     return tuple(Target(anon_key(r), r.patch, r.champion_id) for r in rows)
 
 
+def _flag(value: object, where: str) -> bool:
+    """`abstain` — 있으면 참/거짓이어야 한다. **`"false"` 는 참이 아니다.**"""
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ValueError(f"{where}: abstain 이 참/거짓이 아니다 — {value!r}")
+    return value
+
+
+def _optional_prob(value: object, where: str) -> int | None:
+    """점수는 **전부 0~100 정수**다. `bool` 을 먼저 걷어낸다."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{where}: adjust_prob 이 정수가 아니다 — {value!r}")
+    if not PROB_MIN <= value <= PROB_MAX:
+        raise ValueError(f"{where}: adjust_prob 이 0~100 밖이다 — {value}")
+    return value
+
+
+def _pairs(value: object, where: str, field: str) -> list[dict[str, object]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{where}: {field} 가 배열이 아니다 — {value!r}")
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(f"{where}: {field} 의 항목이 객체가 아니다 — {item!r}")
+    return list(value)
+
+
+def _evidence(value: object, where: str) -> tuple[Note, ...]:
+    """**출처를 안 적으면 거절한다.** 근거는 지어내지 않는다는 것을 형식으로 건다."""
+    out = []
+    for item in _pairs(value, where, "evidence"):
+        source, text = item.get("source"), str(item.get("text") or "").strip()
+        if source not in SOURCES:
+            raise ValueError(
+                f"{where}: evidence 의 source 가 {SOURCES} 중 하나가 아니다 — {source!r}"
+            )
+        if not text:
+            raise ValueError(f"{where}: evidence 의 text 가 비어 있다")
+        out.append(Note(source, text))
+    return tuple(out)
+
+
+def _warnings(value: object, where: str) -> tuple[Warning_, ...]:
+    out = []
+    for item in _pairs(value, where, "warnings"):
+        kind, text = (
+            str(item.get("kind") or "").strip(),
+            str(item.get("text") or "").strip(),
+        )
+        if not kind or not text:
+            raise ValueError(
+                f"{where}: warnings 에 kind 나 text 가 비어 있다 — {item!r}"
+            )
+        out.append(Warning_(kind, text))
+    return tuple(out)
+
+
 def read_judgments(path: Path) -> dict[tuple[str, str], Judgment]:
     """`ground_truth/rag/*.jsonl` → (키, 조건) → 판단.
 
@@ -250,5 +353,15 @@ def read_judgments(path: Path) -> dict[tuple[str, str], Judgment]:
                 raise ValueError(f"{where}: reason 이 비어 있다")
             if (key, condition) in out:
                 raise ValueError(f"{where}: 같은 (키, 조건)이 두 번 나왔다 — {key}")
-            out[(key, condition)] = Judgment(key, condition, prob, reason)
+            out[(key, condition)] = Judgment(
+                key,
+                condition,
+                prob,
+                reason,
+                as_of=record.get("as_of"),
+                abstain=_flag(record.get("abstain"), where),
+                adjust_prob=_optional_prob(record.get("adjust_prob"), where),
+                evidence=_evidence(record.get("evidence"), where),
+                warnings=_warnings(record.get("warnings"), where),
+            )
     return out

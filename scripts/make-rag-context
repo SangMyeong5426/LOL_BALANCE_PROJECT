@@ -108,6 +108,21 @@ def main() -> int:
         "```\n\n"
         "`nerf_prob` 는 **너프일 확률 0~100 정수**다. 라벨이 아니라 점수여야 "
         "줄 세우기(AUC)를 잴 수 있다.\n\n"
+        "### 더 적어도 되는 칸 — 전부 선택\n\n"
+        "[ADR 0007](../docs/adr/0007-answer-schema.md)이 정한 것이다. "
+        "**안 적어도 채점에는 영향이 없다.**\n\n"
+        "```json\n"
+        '{"…": "…", "abstain": false,\n'
+        ' "evidence": [{"source": "R1", "text": "이웃 6종이 전부 nerf"}],\n'
+        ' "warnings": [{"kind": "thin_sample", "text": "판수 3,417 로 얇다"}]}\n'
+        "```\n\n"
+        "| 칸 | 무엇 |\n"
+        "| --- | --- |\n"
+        "| `abstain` | **판단할 재료가 없으면 참.** 억지로 50 을 적는 것과 다르다 |\n"
+        "| `evidence[].source` | `R1` 사례 · `R2` 노트 · `R3` 수치 · `규칙` · `수치` |\n"
+        "| `warnings[].kind` | 자유 문자열. `text` 는 반드시 채운다 |\n\n"
+        "**`evidence` 는 어느 검색기가 값을 했는지 재려고 받는다.** 근거를 지어내지 "
+        "않았다는 것이 그 자리에서 보인다.\n\n"
         "---\n\n"
     )
     body.write_text(header + text, encoding="utf-8")
