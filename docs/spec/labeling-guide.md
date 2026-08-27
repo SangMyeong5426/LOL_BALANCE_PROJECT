@@ -94,6 +94,24 @@ Jax 13.20  위키:  Undocumented / Bug: Cooldown reduced to 14/12.5/… from 15/
 라벨이 빠진 챔피언 1종: [...]      ← 이건 막힌다
 ```
 
+## 아이템·룬 변경은 라벨에 안 들어간다
+
+**노트의 `Champions` 절만 읽는다.** `data-champion` 속성이 붙은 블록만
+뽑으므로 `Items` · `Runes` · `Summoner Spells` · `Monsters` 절은 통째로 빠진다.
+
+**그래서 아이템으로 이뤄진 조정은 「조정 안 됨」으로 기록된다.**
+
+```
+14_10   Lucian·Nami 챔피언 변경 없음        → 라벨 「조정 안 됨」
+        Items 절: B. F. Sword 빌드 경로 변경  → Navori·Essence Reaver 가 갈렸다
+        프로 조합 출전 24.0% → 6.0%
+```
+
+**「Navori 너프」가 누구의 너프인지는 규칙으로 안 잡힌다** — 그 아이템을 누가
+쓰는지를 알아야 하고, 챔피언별 빌드 데이터가 없다. 그래서 넣지 않기로 했고,
+[results](../results/README.md#아이템으로-이뤄진-조정을-놓친다)에
+한계로 적었다.
+
 ## 추천 룬 교체는 `adjust`
 
 「Aftershock 을 Grasp 으로 대체」 같은 항목은 추천 룬 목록이 바뀐 것이지 챔피언 자체가 바뀐 게 아니다.
