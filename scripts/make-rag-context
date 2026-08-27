@@ -69,10 +69,24 @@ def main() -> int:
     targets = list(direction_rows(test))
     total = len(targets)
 
-    if limit and limit < total:
+    seen = arg("--exclude", "")
+    if seen:
+        # **이미 이름을 본 대상은 뺀다.** 조건별 소금을 치기 전에 뽑아 둔
+        # `named` 맥락을 한 번 읽었고, 그 이름들은 오염 상한을 못 잰다.
+        blocked = {
+            (json.loads(line)["champion"], json.loads(line)["patch"])
+            for line in Path(seen).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        targets = [r for r in targets if (r.champion, r.patch) not in blocked]
+        print(f"제외 {total - len(targets)}건 · 남은 {len(targets)}건", file=sys.stderr)
+
+    if limit and limit < len(targets):
         # **시드를 고정해 무작위로 뽑는다.** 편한 것을 고르면 그 편함이 결과에
         # 들어온다 — labeling-guide 가 패치 선택에서 겪은 일이다.
-        picked = np.random.default_rng(seed).choice(total, size=limit, replace=False)
+        picked = np.random.default_rng(seed).choice(
+            len(targets), size=limit, replace=False
+        )
         targets = [targets[i] for i in sorted(picked)]
 
     blocks = notes_by_patch({r.patch for r in rows}) if condition == "anon" else None
@@ -103,7 +117,7 @@ def main() -> int:
         "".join(
             json.dumps(
                 {
-                    "key": anon_key(r),
+                    "key": anon_key(r, condition),
                     "champion": r.champion,
                     "patch": r.patch,
                     "direction": r.direction_next,
