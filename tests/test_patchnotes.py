@@ -142,3 +142,58 @@ def test_returns_nothing_when_there_is_no_champion_section() -> None:
     assert (
         champion_changes(b"<html><body><p>no patch notes here</p></body></html>") == ()
     )
+
+
+# --- 절 고르기 ----------------------------------------------------------
+#
+# **`Champions` 절만 읽어 핫픽스를 통째로 놓쳤다.** 14.1 은 본절 16종에
+# 핫픽스 14종이라 절반 가까이가 빠졌고, 그 챔피언들은 패널에 「조정 안 됨」
+# 으로 기록됐다. 반대로 Arena·Doom Bots 는 형식이 같아도 협곡이 아니다.
+
+
+def _sections(*pairs: tuple[str, str]) -> bytes:
+    """`(제목, 챔피언)` 들로 여러 절을 가진 문서를 만든다."""
+    out = []
+    for title, champion in pairs:
+        out.append(f'<div class="mw-heading"><h3>{title}</h3></div>')
+        out.append(f'<dl><dt><span data-champion="{champion}"></span></dt></dl>')
+        out.append(
+            "<ul><li>Stats<ul><li>Base health increased to 600 from 580.</li>"
+            "</ul></li></ul>"
+        )
+    return "".join(out).encode()
+
+
+def test_a_hotfix_section_is_read_too() -> None:
+    """핫픽스도 그 패치에 실제로 적용된 조정이다."""
+    got = {
+        b.champion
+        for b in champion_changes(
+            _sections(("Champions", "Ahri"), ("January 12th Hotfix", "Zed"))
+        )
+    }
+
+    assert got == {"Ahri", "Zed"}
+
+
+def test_arena_and_doom_bots_are_not_summoners_rift() -> None:
+    """모드 전용 수치를 협곡 지표에 이어 붙이면 값이 튄다."""
+    got = {
+        b.champion
+        for b in champion_changes(
+            _sections(("Champions", "Ahri"), ("Arena", "Zed"), ("Doom Bots", "Teemo"))
+        )
+    }
+
+    assert got == {"Ahri"}
+
+
+def test_the_wiki_name_is_mapped_to_the_panel_name() -> None:
+    """위키는 `Nunu`, Data Dragon 과 패널은 `Nunu & Willump` 다.
+
+    이름이 안 맞으면 그 챔피언의 조정이 통째로 「조정 안 됨」이 된다 —
+    실제로 5개 패치가 그렇게 빠졌다.
+    """
+    (block,) = champion_changes(_sections(("Champions", "Nunu")))
+
+    assert block.champion == "Nunu & Willump"

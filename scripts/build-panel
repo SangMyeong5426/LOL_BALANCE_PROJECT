@@ -144,6 +144,10 @@ def main() -> int:
     previous: dict[int, PanelRow] | None = None
     previous_patch: str | None = None
     skipped_no_next = 0
+    # 노트가 쓴 이름을 모아 뒀다가 패널 이름과 대조한다. **이름이 안 맞으면 그
+    # 챔피언의 조정이 통째로 「조정 안 됨」이 된다** — `Nunu` ↔ `Nunu & Willump`
+    # 로 실제로 5개 패치가 그렇게 빠졌다. 조용히 지나가지 않는다.
+    note_names: set[str] = set()
 
     print(f"{'패치':8}{'챔피언':>7}{'조정':>6}{'추세':>6}   다음 패치")
     for i, patch in enumerate(PATCH_SEQUENCE):
@@ -162,6 +166,7 @@ def main() -> int:
             json.loads((DDRAGON / f"{version(patch)}.json").read_bytes())["data"]
         )
         adjusted = adjusted_in(nxt)
+        note_names |= adjusted
 
         # 직전 패치가 **바로 앞**일 때만 추세를 붙인다. 사이에 결측이 있으면
         # 「직전 대비」가 아니라 「두세 패치 전 대비」가 된다.
@@ -209,6 +214,13 @@ def main() -> int:
         f"(손 {by_source['label']:,} · 둘 다 {by_source['both']:,} "
         f"· Data Dragon {by_source['auto']:,} · cdragon {by_source['value']:,})"
     )
+    unmatched = sorted(note_names - {r.champion for r in rows})
+    if unmatched:
+        print(
+            f"⚠ 노트에만 있고 패널에 없는 이름 {len(unmatched)}종: "
+            f"{', '.join(unmatched)}\n"
+            "   patchnotes._ALIASES 에 대응을 넣거나, 패널에 없는 이유를 확인한다."
+        )
     if skipped_no_next:
         print(f"제외: 마지막 패치 {skipped_no_next}개 — 다음 패치가 없어 라벨이 없다")
     print(f"저장: {OUT.relative_to(ROOT)}  ({OUT.stat().st_size:,} B)")
