@@ -43,10 +43,10 @@ def arg(flag: str, default: str) -> str:
 
 
 def table(results: list[Result], columns: Columns) -> None:
-    print(f"{'arm':6}{'방법':30}" + "".join(f"{title:>10}" for title, _, _ in columns))
-    print("-" * (36 + 10 * len(columns)))
+    print(f"{'arm':9}{'방법':30}" + "".join(f"{title:>10}" for title, _, _ in columns))
+    print("-" * (39 + 10 * len(columns)))
     for row in results:
-        line = f"{row.arm:6}{row.label:30}"
+        line = f"{row.arm:9}{row.label:30}"
         for _, key, fmt in columns:
             value = row.scores.get(key)
             shown = "—" if value is None or np.isnan(value) else format(value, fmt)
@@ -63,13 +63,25 @@ def show_target(
         f"   학습 {meta['학습']:,.0f}행 · 평가 {meta['평가']:,.0f}행 "
         f"· 기준선 {meta['기준선']:.1%}"
     )
+    # **arm 마다 기준선이 다를 수 있다.** 예측 대상을 방향으로 좁힌 arm 은
+    # 패치당 양성이 훨씬 적어(조정 전부 497 → 너프 114) 기준선이 3%대다.
+    # 배수를 안 보이면 19.0% 를 27.9% 보다 못한 값으로 읽게 된다.
+    for row in results:
+        base = row.scores.get("기준선", meta["기준선"])
+        row.scores["배수"] = row.scores["r_precision"] / base
     table(
         results,
         [
             ("R-정확도", "r_precision", ".1%"),
+            ("기준선", "기준선", ".1%"),
+            ("배수", "배수", ".1f"),
             ("P@10", "p_at_10", ".1%"),
             ("AUC", "auc", ".3f"),
         ],
+    )
+    print(
+        "\n   **기준선이 다른 줄은 R-정확도를 나란히 읽으면 안 된다.**\n"
+        "   예측 대상을 방향으로 좁히면 양성이 적어져 기준선이 내려간다 — 배수로 본다."
     )
     return results
 
