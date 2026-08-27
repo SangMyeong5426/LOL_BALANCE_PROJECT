@@ -40,13 +40,15 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.arms import _boosting, _narrow, split  # noqa: E402
 from lol_balance.baseline import direction_rows, encode, fit_encoder  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
-from lol_balance.explain import reasons  # noqa: E402
+from lol_balance.explain import patch_notes, reasons  # noqa: E402
+from lol_balance.items import churn_by_patch  # noqa: E402
 from lol_balance.panel import PanelRow, next_patch  # noqa: E402
 from lol_balance.retrieval import CaseSearch  # noqa: E402
 from lol_balance.rules import read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
+ITEMS = ROOT / "data" / "items"
 RULES = ROOT / "rules" / "proposed.jsonl"
 
 # 예측 셋. 이름·좁힐 방향·프로 피처를 쓸지.
@@ -131,6 +133,12 @@ def main() -> int:
     rules = read_rules(RULES)
     search = CaseSearch(direction_rows(rows), at)
     pro = lifetime_pro(rows)
+
+    # **패치 전체에 붙는 경고는 머리말에 한 번만 낸다.** 챔피언마다 띄우면 그
+    # 패치의 후보 목록 전체에 붙어 「항상 뜨는 경고」가 된다.
+    churn = churn_by_patch(ITEMS).get(nxt) if ITEMS.is_dir() else None
+    for note in patch_notes(churn):
+        print(f"  ⚠ {note.text}")
 
     for label, want, with_pro in VIEWS:
         score = rank(train, test, want, with_pro, seed)

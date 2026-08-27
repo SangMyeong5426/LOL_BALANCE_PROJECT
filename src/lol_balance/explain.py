@@ -11,11 +11,15 @@
 것이 아니라, 사람이 볼 만한 사실을 모아 주는 것이다.** 둘은 다르고, 후자만
 한다.
 
-## 경고 셋
+## 경고 넷
 
     올려 주면 프로 경기가 터진다   프로 단골 버프 시 대회 출전 +37% (그 외 ±0%)
     지나치게 내려갈 수 있다        높은 쪽 너프는 16% 가 승률 48% 아래로 간다
     표본이 얇다                   판수가 적으면 승률이 요동친다
+    아이템이 크게 바뀌었다          그 패치의 승률 변화를 챔피언 조정으로만 읽으면 안 된다
+
+**마지막 것만 챔피언이 아니라 패치에 붙는다**(`patch_notes`). 챔피언마다 띄우면
+그 패치 목록 전체에 붙어 「항상 뜨는 경고」가 된다.
 
 근거는 [results](../../docs/results/README.md).
 """
@@ -25,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from lol_balance.items import LOUD, Churn
 from lol_balance.panel import PanelRow
 from lol_balance.retrieval import Case
 from lol_balance.rules import Rule
@@ -163,3 +168,25 @@ def warnings(
         )
 
     return out
+
+
+def patch_notes(item_churn: Churn | None) -> list[Note]:
+    """**패치 전체에 붙는 경고.** 챔피언별 경고와 자리를 나눈다.
+
+    아이템 변경은 정답지에 없다. 라벨은 패치 노트의 챔피언 절에서 오는데, 조정의
+    상당수가 아이템으로 이뤄진다. Lucian–Nami 가 `14_9` 24.0% 에서 `14_10` 6.0%
+    로 무너졌을 때 두 챔피언 모두 「조정 안 됨」이었고, 무너뜨린 것은
+    `Essence Reaver` 의 골드가 2900 에서 3200 으로 오른 것이었다.
+
+    **어느 챔피언이 그 아이템을 사는지는 모른다.** 그래서 「이 챔피언이 흔들린다」
+    가 아니라 「이 패치를 챔피언 조정만으로 읽지 마라」까지만 말한다.
+    """
+    if item_churn is None or item_churn.finished < LOUD:
+        return []
+    return [
+        Note(
+            f"이 패치는 아이템이 크게 바뀌었다 — 완성템 {item_churn.finished}종 "
+            f"(중앙값 1종). 승률 변화를 챔피언 조정으로만 읽으면 안 된다",
+            warn=True,
+        )
+    ]

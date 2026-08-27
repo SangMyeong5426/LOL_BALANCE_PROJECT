@@ -160,6 +160,7 @@ Ryze 는 솔랭에서 지고 있었다. 승률 48.3% 에 밴율 3.4% 라 일반 
 | --- | --- | --- |
 | u.gg 아카이브 | 솔랭 승률·픽률·밴율 | 53패치 (`world` · `emerald_plus`) |
 | Data Dragon | 정답지 — 버전 diff 가 곧 수치 변경 | 74버전 |
+| Data Dragon `item.json` | 아이템 수치 변경. 정답지가 못 보는 조정 | 74버전 |
 | 패치 노트 (공식 위키) | 조정 의도 — 버그 수정인가 밸런스인가 | 74패치 |
 | CommunityDragon | 스킬 피해량·계수 (Data Dragon 에 없다) | 2,788쌍 · [ADR-0005](docs/adr/0005-skill-damage-data-source.md) |
 | Oracle's Elixir | 프로 경기 픽·밴 (본 분석 밖) | 29,977경기 · 72패치 |
@@ -233,6 +234,7 @@ pre-commit install
 ./scripts/fetch-patchnotes   # 공식 위키 패치 노트
 ./scripts/fetch-ugg          # 솔랭 통계 (웹 아카이브 경유)
 ./scripts/fetch-cdragon      # 스킬 피해량
+./scripts/fetch-items        # 아이템 수치
 ```
 
 패널을 만들고 리포트를 낸다.
@@ -250,7 +252,18 @@ pre-commit install
 ./scripts/predict --patch 16_13 --top 10 --score  # 답을 아는 패치면 채점까지
 ```
 
-순위만 내지 않는다. 왜 그런지와 놓치면 사고가 나는 것을 같이 낸다.
+순위만 내지 않는다. 왜 그런지와 놓치면 사고가 나는 것을 같이 낸다. 패치 전체에 걸리는 것은 머리말에 한 번만 낸다.
+
+```text
+14_9 지표로 14_10 패치를 예측한다
+  학습 3,143행 (~14_8) · 대상 167종
+  ⚠ 이 패치는 아이템이 크게 바뀌었다 — 완성템 30종 (중앙값 1종).
+    승률 변화를 챔피언 조정으로만 읽으면 안 된다
+```
+
+`14_10` 은 Lucian–Nami 조합이 24.0% 에서 6.0% 로 무너진 패치다. 두 챔피언 모두 조정 안 됨으로 기록돼 있고, 무너뜨린 것은 `Essence Reaver` 의 골드가 2900 에서 3200 으로 오른 것이었다. 어느 챔피언이 그 아이템을 사는지는 아직 모르므로 경고는 패치 단위다.
+
+챔피언별로는 이렇게 붙는다.
 
 ```text
  3 K'Sante       점수 0.71
@@ -273,7 +286,7 @@ pytest --cov              # 커버리지 93%
 ./scripts/check-docs      # README 수치가 실제와 맞는가
 ```
 
-`pre-commit` 이 커밋 전에 ruff 를 돌린다. `pytest`(265개)와 `mypy` 는 자동으로 돌지 않으므로 직접 실행한다.
+`pre-commit` 이 커밋 전에 ruff 를 돌린다. `pytest`(276개)와 `mypy` 는 자동으로 돌지 않으므로 직접 실행한다.
 
 ## 구조
 
@@ -287,7 +300,7 @@ docs/spec/           데이터를 어디서 어떻게 받는가
 docs/adr/            기술 결정 기록 7건
 docs/results/        측정 결과
 data/ · runs/        원자료와 실행 산출물 (커밋하지 않는다)
-tests/               265개
+tests/               276개
 ```
 
 작업 규칙은 [`AGENTS.md`](AGENTS.md)에 있다. [`CLAUDE.md`](CLAUDE.md)와 같은 문서다.
@@ -301,7 +314,7 @@ tests/               265개
 | pydantic | 구조화 출력 강제 |
 | beautifulsoup4 | 패치 노트 HTML 파싱 |
 | sqlite (표준 라이브러리) | 패널 저장 |
-| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 265개, 커버리지 93% |
+| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 276개, 커버리지 93% |
 
 의존성은 직접 import 하는 것만 선언한다. `scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 적지 않는다.
 
