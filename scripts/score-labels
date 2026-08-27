@@ -22,6 +22,7 @@ from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction, drop_mass_changes  # noqa: E402
 from lol_balance.groundtruth import compare, read_labels  # noqa: E402
 from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.patchnotes import changed_champions  # noqa: E402
 
 LABELS = ROOT / "ground_truth" / "directions"
 
@@ -37,10 +38,14 @@ def automatic(patch: str) -> dict[str, str]:
     grouped: dict[str, list] = {}
     for change in drop_mass_changes(diff_versions(before, after), len(standard)):
         grouped.setdefault(change.champion, []).append(change)
+    # 직전 패치의 조정이 이 diff 에 처음 나타난다 — 그것은 직전 패치 것이다.
+    notes = ROOT / "data" / "patchnotes"
+    late = changed_champions((notes / f"{previous}.html").read_bytes())
     return {
-        names.get(cid, cid): direction
+        name: direction
         for cid, changes in grouped.items()
-        if (direction := champion_direction(changes))
+        if (name := names.get(cid, cid)) not in late
+        and (direction := champion_direction(changes))
     }
 
 

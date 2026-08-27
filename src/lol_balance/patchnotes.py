@@ -169,6 +169,25 @@ def _change_sections(soup: BeautifulSoup) -> list[Tag]:
     return out
 
 
+def changed_champions(html: bytes) -> frozenset[str]:
+    """그 패치 노트가 조정을 적은 챔피언 전부.
+
+    **스냅샷은 노트보다 늦게 움직인다.** Data Dragon 은 패치 시작 시점에 뜨므로
+    패치 P 중간에 나간 핫픽스가 P → P+1 diff 에서 처음 나타나고, cdragon 도 같은
+    지연을 낸다. 그대로 두면 **P 의 조정이 P+1 의 조정으로 적힌다.**
+
+    Corki 가 그랬다 — 13.24 핫픽스(체력 588→610 · 공격력 55→59 · 성장치 하향)가
+    Data Dragon 의 14.1 diff 에 통째로 나타나, 14.1 노트가 적은 것(공격력 59→61 ·
+    R 계수 상향, 명백한 버프)과 부딪혔다. **14.1 자신의 변경은 그 diff 에 아예
+    없다.**
+
+    그래서 P+1 의 기계 판정에서 **P 의 노트가 이미 적은 챔피언을 뺀다.** 그 조정은
+    P 것이고 손 라벨도 거기 붙는다. 잃는 것은 「P 에서 조정됐고 P+1 에서 문서화
+    없이 또 조정된」 경우뿐인데, 전수 확인에서 0건이었다.
+    """
+    return frozenset(b.champion for b in champion_changes(html))
+
+
 def champion_changes(html: bytes) -> tuple[ChangeBlock, ...]:
     """패치 노트 HTML 에서 챔피언 변경 묶음을 뽑는다.
 
