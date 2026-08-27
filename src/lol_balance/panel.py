@@ -46,6 +46,17 @@ def patch_index(patch: str) -> int:
     return _INDEX[patch]
 
 
+def next_patch(patch: str) -> str | None:
+    """바로 다음 패치. **순서 끝이면 없다.**
+
+    「이 패치의 다음」은 여러 곳에서 필요한데, `PATCH_SEQUENCE[i + 1]` 을 그냥
+    쓰면 **마지막 패치에서 `IndexError` 로 죽는다.** 지금은 패널이 순서 끝에 못
+    미쳐 안 걸리지만, 패치 하나만 더 받으면 걸린다. 세 군데가 그렇게 돼 있었다.
+    """
+    index = _INDEX[patch] + 1
+    return PATCH_SEQUENCE[index] if index < len(PATCH_SEQUENCE) else None
+
+
 @dataclass(frozen=True)
 class PanelRow:
     """한 패치·한 챔피언."""

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from lol_balance.panel import PATCH_SEQUENCE, PanelRow, patch_index
+from lol_balance.panel import PanelRow, next_patch
 from lol_balance.retrieval import Case, CaseSearch, NoteSearch
 
 # 판단에 쓰는 조건. `anon` 이 본 조건이고 `named` 는 오염 상한을 잰다.
@@ -108,12 +108,6 @@ def _case_line(case: Case) -> str:
     )
 
 
-def _next_patch(patch: str) -> str | None:
-    """`direction_next` 가 가리키는 패치. 순서 끝이면 없다."""
-    index = patch_index(patch) + 1
-    return PATCH_SEQUENCE[index] if index < len(PATCH_SEQUENCE) else None
-
-
 def _notes_for(
     notes: NoteSearch | None, cases: Sequence[Case], limit: int = NOTE_CHAMPIONS
 ) -> list[str]:
@@ -132,7 +126,7 @@ def _notes_for(
     for case in cases:
         row = case.row
         name = row.champion
-        target = _next_patch(row.patch)
+        target = next_patch(row.patch)
         if name in seen or target is None:
             continue
         seen.add(name)

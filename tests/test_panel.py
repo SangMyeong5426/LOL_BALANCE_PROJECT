@@ -15,6 +15,7 @@ from lol_balance.panel import (
     HISTORY,
     PATCH_SEQUENCE,
     champion_names,
+    next_patch,
     patch_index,
     patch_rows,
 )
@@ -186,3 +187,21 @@ def test_high_win_rate_streak_counts_back_from_the_most_recent(
     rows = patch_rows("13_18", _ranking(), NAMES, frozenset(), history={103: past})
 
     assert next(r for r in rows if r.champion == "Ahri").high_wr_streak == 2
+
+
+# --- 다음 패치 경계 -----------------------------------------------------
+
+
+def test_next_patch_walks_forward() -> None:
+    assert next_patch(PATCH_SEQUENCE[0]) == PATCH_SEQUENCE[1]
+    assert next_patch("13_14") == "13_15"
+
+
+def test_next_patch_stops_at_the_end() -> None:
+    """**순서 끝에서 죽지 않는다.**
+
+    `PATCH_SEQUENCE[i + 1]` 을 그냥 쓰던 곳이 셋 있었다(`predict` ·
+    `fetch-cdragon` · `label-material`). 지금은 패널이 순서 끝에 못 미쳐 안
+    걸리지만, **패치 하나만 더 받으면 `IndexError` 로 죽는다.**
+    """
+    assert next_patch(PATCH_SEQUENCE[-1]) is None

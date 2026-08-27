@@ -94,7 +94,7 @@ def reasons(
         out.append(Note(f"승률 {row.win_rate:.1%} — 5할에 붙어 있어 지표가 안 기운다"))
 
     if row.d_win_rate is not None and abs(row.d_win_rate) >= 0.01:
-        way = "오르는" if row.d_win_rate > 0 else "내리는"  # noqa: E501
+        way = "오르는" if row.d_win_rate > 0 else "내리는"
         out.append(Note(f"직전 대비 {row.d_win_rate:+.1%} — {way} 중이다"))
 
     fired = [r for r in rules if r.fires(row)]
