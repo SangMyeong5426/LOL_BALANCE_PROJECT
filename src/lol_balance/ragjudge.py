@@ -64,8 +64,12 @@ def anon_key(row: PanelRow, condition: Condition = "anon") -> str:
     **조건마다 키가 달라야 한다.** 처음엔 하나로 썼다가 걸렸다 — `named` 블록이
     `### 834b7a` 를 그대로 보여 주면, 판단자가 **자기가 `anon` 에서 그 키에 매긴
     점수를 꺼내 온다.** 오염 상한을 재려는 검정이 자기 판단에 오염되는 것이다.
+
+    **`anon` 만 소금을 안 친다.** 그것이 대상의 기준 키이고, `B6` 채점이 그것으로
+    행을 찾는다. 다른 조건은 파생 키를 받아 `anon` 판단과 이어지지 않는다.
     """
-    seed = f"{condition}/{row.champion_id}/{row.patch}".encode()
+    salt = "" if condition == "anon" else f"{condition}/"
+    seed = f"{salt}{row.champion_id}/{row.patch}".encode()
     return hashlib.sha256(seed).hexdigest()[:KEY_LENGTH]
 
 

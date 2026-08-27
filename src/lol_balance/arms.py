@@ -15,7 +15,7 @@ LLM 이 그것을 못 이기면 못 이겼다고 적는다.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -36,6 +36,7 @@ from lol_balance.baseline import (
     roc_auc,
 )
 from lol_balance.panel import PanelRow, patch_index
+from lol_balance.ragjudge import Judgment, anon_key
 from lol_balance.retrieval import CASE_FEATURES, CASE_FEATURES_PRO, CaseSearch
 from lol_balance.rules import Rule, RulePredictor
 
@@ -270,6 +271,7 @@ def direction_arms(
     at: str,
     seed: int,
     rules: tuple[Rule, ...] = (),
+    judgments: Mapping[tuple[str, str], Judgment] | None = None,
 ) -> tuple[list[Result], dict[str, float]]:
     """조정된다면 어느 쪽인가. 조정된 챔피언만 본다."""
     pool = direction_rows(rows)
@@ -373,6 +375,28 @@ def direction_arms(
             "B5p", "사례 검색 — + 프로 · 거리가중", False, scored(np.array(found), True)
         )
     )
+
+    # `B6` — **검색부 위에 판단을 올린다.** `B5` 와 같은 이웃 25종을 보고 대화
+    # 안에서 매긴 점수를 읽어 채점한다. 실행 시점 API 호출은 0회다.
+    # 근거는 `docs/adr/0006-rag-generation-and-contamination-control.md`.
+    if judgments:
+        picked = [
+            (row, judgments[(anon_key(row), "anon")])
+            for row in test
+            if (anon_key(row), "anon") in judgments
+        ]
+        # **평가 구간을 다 덮지 못하면 `B5` 와 짝지어 비교가 안 된다.**
+        # 부분만 있는 채로 표에 실으면 다른 표본의 수치를 나란히 놓게 된다.
+        if len(picked) == len(test):
+            scores = np.array([j.nerf_prob / 100 for _, j in picked])
+            out.append(
+                Result(
+                    "B6",
+                    "사례 검색 + 판단 — 대화 중",
+                    True,
+                    scored(scores, True),
+                )
+            )
 
     for arm, label, history in (
         ("B7", "부스팅 트리 — 수준 + 추세", False),

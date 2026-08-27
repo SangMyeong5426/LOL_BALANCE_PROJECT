@@ -11,6 +11,7 @@ import pytest
 from conftest import PanelRowFactory
 from lol_balance.arms import direction_arms, split, target_arms
 from lol_balance.panel import PanelRow
+from lol_balance.ragjudge import Judgment, anon_key
 
 SEED = 20260824
 
@@ -173,3 +174,55 @@ def test_boosting_hyperparameters_are_fixed_not_tuned_per_run() -> None:
         "learning_rate": 0.05,
         "l2_regularization": 1.0,
     }
+
+
+# --- B6: 검색 위의 판단 -------------------------------------------------
+
+
+def _judgments(rows: tuple[PanelRow, ...], at: str) -> dict:
+    """평가 구간 전량에 판단을 붙인다. 값은 아무래도 좋다 — 붙었는지만 본다."""
+    from lol_balance.baseline import direction_rows
+
+    _, test = split(direction_rows(rows), at)
+    return {
+        (anon_key(r), "anon"): Judgment(anon_key(r), "anon", 60, "테스트") for r in test
+    }
+
+
+def test_b6_appears_only_when_judgments_are_given(
+    make_row: PanelRowFactory,
+) -> None:
+    """판단 파일이 없으면 `B6` 이 표에 없어야 한다. **빈 arm 을 0 으로 싣지 않는다.**"""
+    rows = _panel(make_row)
+
+    without, _ = direction_arms(rows, "15_13", SEED)
+    with_it, _ = direction_arms(rows, "15_13", SEED, (), _judgments(rows, "15_13"))
+
+    assert "B6" not in {r.arm for r in without}
+    assert "B6" in {r.arm for r in with_it}
+
+
+def test_b6_is_skipped_when_coverage_is_partial(make_row: PanelRowFactory) -> None:
+    """**평가 구간을 다 덮지 못하면 `B5` 와 짝지어 비교가 안 된다.**
+
+    부분만 실으면 다른 표본의 수치를 나란히 놓게 되고, 읽는 사람은 같은 행에서
+    잰 값으로 읽는다.
+    """
+    rows = _panel(make_row)
+    partial = dict(list(_judgments(rows, "15_13").items())[:-1])
+
+    results, _ = direction_arms(rows, "15_13", SEED, (), partial)
+
+    assert "B6" not in {r.arm for r in results}
+
+
+def test_b6_is_marked_as_an_llm_product(make_row: PanelRowFactory) -> None:
+    """`B4` 와 같은 자리다 — 대화 산출물을 코드가 채점한다."""
+    results, _ = direction_arms(
+        rows := _panel(make_row), "15_13", SEED, (), _judgments(rows, "15_13")
+    )
+
+    b6 = next(r for r in results if r.arm == "B6")
+
+    assert b6.uses_llm is True
+    assert "accuracy" in b6.scores
