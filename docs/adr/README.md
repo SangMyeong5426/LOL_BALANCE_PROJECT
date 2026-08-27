@@ -24,3 +24,4 @@
 - [ADR 0003: LLM 제공자와 호출 방식](0003-llm-provider-and-calling-convention.md)
 - [ADR 0004: 정리한 결과를 어떤 형식으로 남기는가](0004-processed-data-storage-format.md)
 - [ADR 0005: 스킬 피해량을 어디서 받는가](0005-skill-damage-data-source.md)
+- [ADR 0006: 검색 위에 판단을 올리고, 판단자의 오염을 어떻게 다루는가](0006-rag-generation-and-contamination-control.md)
