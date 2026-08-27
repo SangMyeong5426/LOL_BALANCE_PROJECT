@@ -391,12 +391,16 @@ def direction_arms(
             )
         )
 
+    b5_scores: NDArray[np.float64] | None = None
     for arm, label, expanding in (
         ("B5", "사례 검색만 (RAG 검색부)", False),
         ("B5b", "사례 검색만 — 매 패치 갱신", True),
     ):
         _, found = _retrieved(pool, test, at, k=25, expanding=expanding)
-        out.append(Result(arm, label, False, scored(np.array(found), True)))
+        scores = np.array(found)
+        if arm == "B5":
+            b5_scores = scores  # `B6` 이 부분집합일 때 짝지어 비교한다
+        out.append(Result(arm, label, False, scored(scores, True)))
 
     # `B5p` 는 거리에 프로 경기를 넣고 가까운 사례에 가중을 준다.
     # **셋 다 학습 구간 3겹 교차검증으로 골랐다** — 피처·k·가중 방식.
@@ -420,22 +424,42 @@ def direction_arms(
     # 근거는 `docs/adr/0006-rag-generation-and-contamination-control.md`.
     if judgments:
         picked = [
-            (row, judgments[(anon_key(row), "anon")])
-            for row in test
+            (i, judgments[(anon_key(row), "anon")])
+            for i, row in enumerate(test)
             if (anon_key(row), "anon") in judgments
         ]
-        # **평가 구간을 다 덮지 못하면 `B5` 와 짝지어 비교가 안 된다.**
-        # 부분만 있는 채로 표에 실으면 다른 표본의 수치를 나란히 놓게 된다.
-        if len(picked) == len(test):
-            scores = np.array([j.nerf_prob / 100 for _, j in picked])
+        # **부분만 있는 채로 표에 실으면 다른 표본의 수치를 나란히 놓게 된다.**
+        # 그래서 못 덮을 때는 `B5` 도 같은 부분집합으로 잘라 함께 낸다. 덮는
+        # 종수를 이름에 적어 두 줄이 같은 표본이라는 것을 표에서 바로 보이게 한다.
+        if picked:
+            index = np.array([i for i, _ in picked])
+            truth = te.y[index]
+
+            def on_subset(score: NDArray[np.float64]) -> dict[str, float]:
+                return {
+                    "auc": roc_auc(truth, score),
+                    "accuracy": float(((score >= 0.5).astype(int) == truth).mean()),
+                }
+
+            whole = len(picked) == len(test)
+            suffix = "" if whole else f" ({len(picked)}/{len(test)}종)"
             out.append(
                 Result(
                     "B6",
-                    "사례 검색 + 판단 — 대화 중",
+                    f"사례 검색 + 판단 — 대화 중{suffix}",
                     True,
-                    scored(scores, True),
+                    on_subset(np.array([j.nerf_prob / 100 for _, j in picked])),
                 )
             )
+            if not whole and b5_scores is not None:
+                out.append(
+                    Result(
+                        "B5s",
+                        f"사례 검색만 — B6 과 같은 {len(picked)}종",
+                        False,
+                        on_subset(b5_scores[index]),
+                    )
+                )
 
     for arm, label, history in (
         ("B7", "부스팅 트리 — 수준 + 추세", False),
