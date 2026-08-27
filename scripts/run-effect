@@ -22,10 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from lol_balance.effect import outcomes  # noqa: E402
+from lol_balance.items import LOUD, churn_by_patch  # noqa: E402
 from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
+ITEMS = ROOT / "data" / "items"
 
 
 def main() -> int:
@@ -34,13 +36,23 @@ def main() -> int:
     for row in rows:
         by_patch.setdefault(row.patch, []).append(row)
 
+    # **아이템 변경은 정답지에 없다.** 대조군이 패치 전반의 변화는 흡수하지만
+    # 한 챔피언 빌드를 겨냥한 아이템 변경은 못 흡수한다. 어느 챔피언이 그
+    # 아이템을 사는지 모르므로 빼지는 못하고, 어느 패치가 그런지만 표시한다.
+    churn = churn_by_patch(ITEMS) if ITEMS.is_dir() else {}
+
     found = []
+    loud: list[tuple[str, int, int]] = []
     pairs = 0
     for i in range(len(PATCH_SEQUENCE) - 1):
         a, b = PATCH_SEQUENCE[i], PATCH_SEQUENCE[i + 1]
         if a in by_patch and b in by_patch:
             pairs += 1
-            found.extend(outcomes(tuple(by_patch[a]), tuple(by_patch[b])))
+            got = outcomes(tuple(by_patch[a]), tuple(by_patch[b]))
+            found.extend(got)
+            c = churn.get(b)
+            if c and c.finished >= LOUD:
+                loud.append((b, c.finished, len(got)))
 
     if not found:
         print("잴 것이 없다. ./scripts/build-panel 을 먼저 돌린다.")
@@ -73,6 +85,16 @@ def main() -> int:
         print(
             f"   {source:6} {len(part):>4}건 · 의도대로 {worked:.1%} · 평균 |효과| {np.abs(adj).mean():.3f}%p"
         )
+
+    if loud:
+        share = sum(n for _, _, n in loud) / len(found)
+        print(
+            f"\n⚠ 아이템이 크게 바뀐 패치 {len(loud)}개 — 이 표의 {share:.0%} 가 여기서 왔다"
+        )
+        print("   대조군은 패치 전반의 변화만 흡수한다. 한 챔피언 빌드를 겨냥한")
+        print("   아이템 변경은 남아서 효과에 섞인다.")
+        for patch, finished, n in sorted(loud, key=lambda r: -r[1]):
+            print(f"     {patch:7}완성템 {finished:>3}종 · 이 패치의 조정 {n:>3}건")
 
     print("\n**측정이지 판정이 아니다.** 이 표는 조정이 어느 방향으로 얼마나")
     print("움직였는지만 말한다. 라이엇이 잘했는지는 다루지 않는다.")

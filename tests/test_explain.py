@@ -12,7 +12,8 @@
 from __future__ import annotations
 
 from conftest import PanelRowFactory
-from lol_balance.explain import PRO_REGULAR, reasons, warnings
+from lol_balance.explain import PRO_REGULAR, patch_notes, reasons, warnings
+from lol_balance.items import LOUD, Churn
 from lol_balance.retrieval import Case
 from lol_balance.rules import Condition, Rule
 
@@ -143,3 +144,43 @@ def test_a_champion_with_no_pro_data_gets_no_pro_warning(
     row = make_row("16_13", 1, win_rate=0.47, matches=50_000)
 
     assert "프로 단골" not in warns(warnings(row, lifetime_pro=None))
+
+
+# --- 패치에 붙는 경고 ---------------------------------------------------
+#
+# **이 하나만 챔피언이 아니라 패치에 붙는다.** 챔피언마다 띄우면 그 패치의 후보
+# 목록 전체에 붙어 「항상 뜨는 경고」가 된다. 자리를 나눠 그것을 막는다.
+
+
+def test_a_loud_item_patch_is_flagged() -> None:
+    """Lucian–Nami 가 무너진 `14_10` 이 완성템 30종이었다."""
+    out = patch_notes(Churn(items=37, finished=30, fields=87, total=230))
+
+    assert out and out[0].warn
+    assert "아이템이 크게 바뀌었다" in out[0].text
+
+
+def test_a_quiet_item_patch_says_nothing() -> None:
+    """중앙값은 완성템 1종이다. 여기에 경고를 띄우면 절반의 패치에 붙는다."""
+    assert patch_notes(Churn(items=2, finished=1, fields=3, total=230)) == []
+
+
+def test_the_threshold_is_the_boundary() -> None:
+    assert patch_notes(Churn(0, LOUD - 1, 0, 230)) == []
+    assert patch_notes(Churn(0, LOUD, 0, 230)) != []
+
+
+def test_no_item_data_is_not_a_warning(make_row: PanelRowFactory) -> None:
+    """**모르는 것을 경고로 만들지 않는다.** 스냅샷이 없으면 조용히 넘어간다."""
+    assert patch_notes(None) == []
+
+
+def test_the_item_warning_never_lands_on_a_champion(
+    make_row: PanelRowFactory,
+) -> None:
+    """챔피언별 경고에는 섞이지 않는다. 섞이면 목록 전체에 붙는다."""
+    row = make_row("14_9", 1, win_rate=0.52, matches=50_000)
+
+    for considering in ("nerf", "buff", None):
+        out = " / ".join(n.text for n in warnings(row, considering=considering))
+        assert "아이템" not in out
