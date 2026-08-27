@@ -26,11 +26,13 @@ from lol_balance.arms import Result, direction_arms, target_arms  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.effect import outcomes  # noqa: E402
 from lol_balance.panel import PATCH_SEQUENCE, PanelRow  # noqa: E402
+from lol_balance.ragjudge import read_judgments  # noqa: E402
 from lol_balance.rules import Rule, read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
 RULES = ROOT / "rules" / "proposed.jsonl"
+JUDGMENTS = ROOT / "ground_truth" / "rag"
 RUNS = ROOT / "runs"
 
 Columns = list[tuple[str, str, str]]
@@ -75,7 +77,7 @@ def show_target(
 def show_direction(
     rows: tuple[PanelRow, ...], at: str, seed: int, rules: tuple[Rule, ...]
 ) -> list[Result]:
-    results, meta = direction_arms(rows, at, seed, rules)
+    results, meta = direction_arms(rows, at, seed, rules, read_judgments(JUDGMENTS))
     print("\n② 방향 — 너프냐 버프냐  (조정된 챔피언만)")
     print(
         f"   학습 {meta['학습']:,.0f}건 · 평가 {meta['평가']:,.0f}건 "
