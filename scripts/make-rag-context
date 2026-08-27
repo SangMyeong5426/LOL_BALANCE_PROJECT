@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""판단자에게 줄 검색 맥락을 만든다 — **arm `B6` 의 입력.**
+
+    ./scripts/make-rag-context [--split 15_13] [--condition anon|named]
+                               [--limit N] [--seed 20260827] [--out PATH]
+
+`A5`·`B5` 는 이웃 라벨을 다수결할 뿐 생성 단계가 없다. 여기서 만든 맥락을 읽고
+대화 안에서 판단을 내려 `ground_truth/rag/` 에 저장하면, `B6` 가 그것을 채점한다.
+근거는 [ADR 0006](../docs/adr/0006-rag-generation-and-contamination-control.md).
+
+**대상은 익명이다.** 챔피언 이름과 패치를 가려 「내가 이걸 뭐로 라벨했지」가
+발동할 열쇠를 없앤다. `--condition named` 는 그 반대로 이름만 주는 조건이고,
+**오염 상한**을 재려고 돌린다.
+
+**경계는 `B5` 와 같다.** `as_of` 를 분할점으로 고정하므로 평가 구간 정보가
+검색 풀에 아예 안 들어간다.
+
+정답 대조표(`key` → 챔피언·패치)는 `--out` 옆에 `*.key.jsonl` 로 따로 쓴다.
+**판단할 때 그 파일을 열지 않는다.**
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import split  # noqa: E402
+from lol_balance.baseline import direction_rows  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+from lol_balance.ragjudge import CONDITIONS, anon_key, build  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+NOTES = ROOT / "data" / "patchnotes"
+OUT = ROOT / "runs"
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def notes_by_patch(patches: set[str]) -> dict[str, tuple]:
+    """패치별 변경 묶음. 파일이 없으면 그 패치는 빠진다 — 조용히 넘어간다."""
+    out: dict[str, tuple] = {}
+    for patch in sorted(patches):
+        path = NOTES / f"{patch.replace('_', '.')}.1.html"
+        if path.exists():
+            out[patch] = tuple(champion_changes(path.read_bytes()))
+    return out
+
+
+def main() -> int:
+    at = arg("--split", "15_13")
+    condition = arg("--condition", "anon")
+    limit = int(arg("--limit", "0"))
+    seed = int(arg("--seed", "20260827"))
+    if condition not in CONDITIONS:
+        print(f"--condition 은 {' | '.join(CONDITIONS)} 중 하나다", file=sys.stderr)
+        return 2
+
+    rows = read_panel(PANEL)
+    train, test = split(rows, at)
+    targets = list(direction_rows(test))
+    total = len(targets)
+
+    if limit and limit < total:
+        # **시드를 고정해 무작위로 뽑는다.** 편한 것을 고르면 그 편함이 결과에
+        # 들어온다 — labeling-guide 가 패치 선택에서 겪은 일이다.
+        picked = np.random.default_rng(seed).choice(total, size=limit, replace=False)
+        targets = [targets[i] for i in sorted(picked)]
+
+    blocks = notes_by_patch({r.patch for r in rows}) if condition == "anon" else None
+    text = build(targets, rows, at, condition, blocks)
+
+    stem = arg("--out", str(OUT / f"rag-{condition}-{len(targets)}"))
+    body = Path(f"{stem}.md")
+    body.parent.mkdir(parents=True, exist_ok=True)
+    header = (
+        f"# 검색 맥락 — {condition} · {len(targets)}건 / 전체 {total}건\n\n"
+        f"분할 `{at}` · 시드 `{seed}` · 검색 경계 `as_of={at}`\n\n"
+        "## 과제\n\n"
+        "**아래 대상은 모두 다음 패치에 조정되는 것이 확정된 챔피언이다.**\n"
+        "조정 여부가 아니라 **방향만** 판단한다 — 너프인가 버프인가.\n\n"
+        "각 블록의 `###` 뒤가 익명 키다. 판단은 한 줄씩 이렇게 낸다.\n\n"
+        "```json\n"
+        '{"key": "834b7a", "condition": "' + condition + '", '
+        '"nerf_prob": 78, "reason": "…"}\n'
+        "```\n\n"
+        "`nerf_prob` 는 **너프일 확률 0~100 정수**다. 라벨이 아니라 점수여야 "
+        "줄 세우기(AUC)를 잴 수 있다.\n\n"
+        "---\n\n"
+    )
+    body.write_text(header + text, encoding="utf-8")
+
+    keys = Path(f"{stem}.key.jsonl")
+    keys.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "key": anon_key(r),
+                    "champion": r.champion,
+                    "patch": r.patch,
+                    "direction": r.direction_next,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+            for r in targets
+        ),
+        encoding="utf-8",
+    )
+
+    print(f"맥락  {body}  ({len(targets)}건 · {len(text):,} 자)")
+    print(f"대조표 {keys}  ← 판단할 때 열지 않는다")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
