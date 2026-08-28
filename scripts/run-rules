@@ -18,7 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from lol_balance.arms import split  # noqa: E402
-from lol_balance.rules import Rule, Score, read_rules, score  # noqa: E402
+from lol_balance.rules import (  # noqa: E402
+    Rule,
+    Score,
+    read_rules,
+    redundant,
+    score,
+)
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
@@ -75,6 +81,16 @@ def main() -> int:
         print(f"   {rule}")
     if not kept:
         print("   (없다 — 그것도 결과다)")
+
+    covered = redundant(kept, train)
+    if covered:
+        print(f"\n다른 규칙이 이미 덮는 것 {len(covered)}개 — **자동으로 빼지 않는다**")
+        for rule_id, share, adds in covered:
+            note = "혼자 잡는 행이 없다" if adds == 0 else f"혼자 잡는 행 {adds}개"
+            print(f"   {rule_id:18}같은 방향 규칙이 {share:.0%} 를 덮는다 · {note}")
+        print(
+            "   좁은 규칙은 정밀도가 높아 확신을 더한다. 덮인다고 값이 없는 것은 아니다."
+        )
     return 0
 
 

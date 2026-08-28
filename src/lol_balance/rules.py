@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -237,3 +238,31 @@ class RulePredictor:
             return self.fallback["nerf"]
         prior = self.fallback["nerf"]
         return (nerf + PRIOR_WEIGHT * prior) / (nerf + buff + PRIOR_WEIGHT)
+
+
+def redundant(
+    rules: Sequence[Rule], train: Sequence[PanelRow]
+) -> list[tuple[str, float, int]]:
+    """**같은 방향의 다른 규칙이 이미 덮는 규칙.**
+
+    LLM 이 규칙을 제안하면 넓은 것을 내놓고 그 안에 든 좁은 것을 또 내놓는다.
+    실제로 넷이 그랬다 — `A-strong`(승률≥0.53)은 `A-gap`(|승률−0.5|≥0.03)의
+    부분집합이고, `D-strong`·`D-fading`·`D-banned-strong` 도 마찬가지다.
+
+    **그런데 덮인다고 값이 없는 것은 아니다.** `RulePredictor` 가 정밀도로
+    가중하므로 좁은 규칙은 같은 자리에 확신을 더한다. 빼 보면 `D-fading` 은
+    B4 AUC 가 0.0015 내려가고 `A-strong` 은 안 움직인다. **그래서 알리기만 하고
+    자동으로 떨구지 않는다.**
+
+    통과 기준이 향상과 적용률만 봐서 이것이 안 보였다.
+    """
+    out: list[tuple[str, float, int]] = []
+    for rule in rules:
+        fired = [row for row in train if rule.fires(row)]
+        if not fired:
+            continue
+        peers = [o for o in rules if o.id != rule.id and o.then == rule.then]
+        covered = [r for r in fired if any(o.fires(r) for o in peers)]
+        if len(covered) == len(fired):
+            out.append((rule.id, 1.0, 0))
+    return out
