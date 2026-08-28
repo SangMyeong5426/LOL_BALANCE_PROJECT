@@ -23,8 +23,19 @@
 
 ## `--score` 는 답을 이미 아는 경우에만 쓴다
 
-패널의 마지막 패치가 아니면 실제 결과가 라벨로 들어 있으므로 바로 채점된다.
-**진짜 다음 패치를 예측할 때는 답이 없으므로 붙이지 않는다.**
+패널에 있는 패치면 실제 결과가 라벨로 들어 있으므로 바로 채점된다.
+
+## 아직 답이 없는 패치도 예측한다
+
+**패널은 마지막 패치를 뺀다** — 다음 패치 노트가 없으면 전 챔피언이 「조정 안
+됨」으로 라벨이 붙어 조용히 틀리기 때문이다. 그 제외는 맞지만, 그러면 우리가
+가진 가장 최근 패치에서 다음을 예측할 수가 없다.
+
+그래서 그 경우 **행을 그 자리에서 만든다**(`assemble.forecast_rows`). 라벨은
+안 읽고 `--score` 도 거절한다 — 맞춰 볼 답이 없기 때문이다.
+
+    ./scripts/predict                  가장 최근 패치에서 다음을 예측한다
+    ./scripts/predict --patch 16_12    답이 있는 패치. --score 로 채점된다
 """
 
 from __future__ import annotations
@@ -37,17 +48,27 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from lol_balance.arms import _boosting, _narrow, split  # noqa: E402
+from lol_balance.arms import _boosting, _narrow  # noqa: E402
+from lol_balance.assemble import forecast_rows  # noqa: E402
 from lol_balance.baseline import direction_rows, encode, fit_encoder  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.explain import patch_notes, reasons  # noqa: E402
 from lol_balance.items import churn_by_patch  # noqa: E402
-from lol_balance.panel import PanelRow, next_patch  # noqa: E402
+from lol_balance.oracle import read_pro  # noqa: E402
+from lol_balance.panel import (  # noqa: E402
+    PATCH_SEQUENCE,
+    PanelRow,
+    next_patch,
+    patch_index,
+)
 from lol_balance.retrieval import CaseSearch  # noqa: E402
 from lol_balance.rules import read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
+RANKING = ROOT / "data" / "ugg" / "champion_ranking"
+DDRAGON = ROOT / "data" / "ddragon"
+ORACLE = ROOT / "data" / "oracle"
 ITEMS = ROOT / "data" / "items"
 RULES = ROOT / "rules" / "proposed.jsonl"
 
@@ -57,6 +78,31 @@ VIEWS = (
     ("너프 후보", "nerf", True),
     ("버프 후보", "buff", True),
 )
+
+
+def after(patch: str) -> str:
+    """다음 패치의 **이름**. 부 번호를 하나 올린다.
+
+    `PATCH_SEQUENCE` 는 **수집을 확정한 범위**라 `16_15` 에서 끝난다. 아직 안
+    받은 패치를 예측할 때는 그 이름이 순서에 없으므로 여기서 만든다.
+
+    **표시에만 쓴다.** 시즌이 넘어가면(`16_24` 다음) 부 번호가 1 로 돌아가는데,
+    그때는 `PATCH_SEQUENCE` 를 늘리면서 같이 손보면 된다. 지금 그것까지
+    맞히려 들면 안 쓰이는 규칙을 만드는 것이다.
+    """
+    major, minor = patch.split("_")
+    return f"{major}_{int(minor) + 1}"
+
+
+def latest_usable(rows: tuple[PanelRow, ...]) -> str:
+    """예측할 수 있는 가장 최근 패치.
+
+    **패널의 끝이 아니라 지표가 있는 끝이다.** 패널은 라벨을 못 만드는 마지막
+    패치를 빼므로, 그것까지 보려면 수집한 파일을 봐야 한다.
+    """
+    have = {p.stem for p in RANKING.glob("*.json")} if RANKING.is_dir() else set()
+    usable = have or {r.patch for r in rows}
+    return max(usable, key=patch_index)
 
 
 def arg(flag: str, default: str) -> str:
@@ -108,25 +154,51 @@ def main() -> int:
         return 1
 
     if not at:
-        at = max(rows, key=lambda r: r.patch_index).patch
-    if at not in {r.patch for r in rows}:
-        print(f"패널에 {at} 이 없다.", file=sys.stderr)
+        at = latest_usable(rows)
+    if at not in PATCH_SEQUENCE:
+        print(
+            f"{at} 은 아는 패치가 아니다. {PATCH_SEQUENCE[0]} ~ {PATCH_SEQUENCE[-1]}",
+            file=sys.stderr,
+        )
         return 2
 
-    nxt = next_patch(at)
+    forecast = at not in {r.patch for r in rows}
+    nxt = next_patch(at) or (after(at) if forecast else None)
     if nxt is None:
         print(f"{at} 이 패치 순서의 끝이라 다음 패치가 없다.", file=sys.stderr)
         return 2
-    train, _ = split(rows, at)
-    test = tuple(r for r in rows if r.patch == at)
+
+    # **패널에 없어도 지표가 있으면 예측한다.** 패널은 마지막 패치를 빼는데,
+    # 다음 패치 노트가 없으면 라벨이 조용히 틀리기 때문이다. 그 제외는 맞지만
+    # 그러면 가장 최근 패치에서 다음을 예측할 수가 없다. 여기서 따로 만든다 —
+    # **라벨은 안 읽고, 채점도 막는다.**
+    if forecast:
+        if not (RANKING / f"{at}.json").exists():
+            print(f"패널에도 없고 {RANKING.name}/{at}.json 도 없다.", file=sys.stderr)
+            return 2
+        test = forecast_rows(
+            at,
+            rows,
+            ranking=RANKING,
+            ddragon=DDRAGON,
+            pro=read_pro(ORACLE) if ORACLE.is_dir() else None,
+        )
+    else:
+        test = tuple(r for r in rows if r.patch == at)
+
+    train = tuple(r for r in rows if r.patch_index < patch_index(at))
     scored = "--score" in sys.argv
-    known = sum(r.adjusted_next for r in test)
 
     print(f"{at} 지표로 {nxt} 패치를 예측한다")
     print(
         f"  학습 {len(train):,}행 (~{max(r.patch for r in train)}) · 대상 {len(test)}종"
     )
-    if scored and not known:
+    if forecast:
+        print("  ⚠ 아직 답이 없는 패치다 — 진짜 예측이고 채점할 수 없다")
+        if scored:
+            print("     --score 는 무시한다", file=sys.stderr)
+        scored = False
+    elif scored and not sum(r.adjusted_next for r in test):
         print("  ⚠ 이 패치에는 라벨이 없다 — 채점할 수 없다", file=sys.stderr)
         scored = False
 

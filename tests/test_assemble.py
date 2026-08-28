@@ -96,9 +96,11 @@ def test_opposite_sources_never_let_one_win() -> None:
 # --- ② 방향의 정답 ------------------------------------------------------
 
 
-def champion(hp: int, name: str = "Ahri") -> dict:
+def champion(hp: int, name: str = "Ahri", key: int = 1) -> dict:
+    # **`key` 가 있어야 이름이 붙는다.** `champion_names` 가 숫자 key 로 색인한다.
     return {
         "id": name,
+        "key": str(key),
         "name": name,
         "tags": ["Mage"],
         "stats": {"hp": hp},
@@ -114,9 +116,9 @@ QUIET = 6
 
 
 def ddragon(tmp: Path, patch: str, hp: int) -> None:
-    data = {"Ahri": champion(hp, "Ahri")}
+    data = {"Ahri": champion(hp, "Ahri", 1)}
     for i in range(QUIET):
-        data[f"Q{i}"] = champion(500, f"Q{i}")
+        data[f"Q{i}"] = champion(500, f"Q{i}", 100 + i)
     (tmp / f"{version(patch)}.json").write_text(
         json.dumps({"data": data}), encoding="utf-8"
     )
@@ -181,3 +183,46 @@ def test_no_change_means_no_entry(tmp_path: Path) -> None:
     where = setup(tmp_path, hp_before=580, hp_after=580)
 
     assert directions_in("13_15", "13_14", **where) == {}
+
+
+# --- 아직 답이 없는 패치 -------------------------------------------------
+#
+# 패널은 마지막 패치를 뺀다 — 다음 패치 노트가 없으면 전 챔피언이 「조정 안 됨」
+# 으로 라벨이 붙어 조용히 틀린다. **그 제외는 맞지만, 그러면 가장 최근 패치에서
+# 다음을 예측할 수가 없다.** 그래서 예측용 행을 따로 만든다.
+
+
+def ranking_file(tmp: Path, patch: str, champions: int = 3) -> None:
+    """`champion_ranking` 응답 모양.
+
+    `[역할별 항목, 밴, 갱신 시각, 게임 수]` 이고 항목은
+    `[챔피언ID, 매치업, 승, 판, 딜, 골드, 킬, 데스, 어시, CS]` 다.
+    """
+    entries = [
+        [str(i), [[999, 0, 1]], 3000, 6000, 20000, 11000, 5, 5, 6, 200]
+        for i in range(1, champions + 1)
+    ]
+    payload = [
+        {"mid": entries},
+        {"11": 30, "total_matches": 80},
+        "2026-04-29T19:33:42Z",
+        600.0,
+    ]
+    (tmp / f"{patch}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_forecast_rows_need_no_next_patch_note(tmp_path: Path) -> None:
+    """**노트 없이도 행이 만들어진다.** 피처만 쓰고 라벨은 안 읽는다."""
+    from lol_balance.assemble import forecast_rows
+
+    dd, ranking = tmp_path / "dd", tmp_path / "ranking"
+    dd.mkdir()
+    ranking.mkdir()
+    ddragon(dd, "13_15", 600)
+    ranking_file(ranking, "13_15")
+
+    got = forecast_rows("13_15", (), ranking=ranking, ddragon=dd)
+
+    assert got  # 다음 패치 노트가 하나도 없는데도 만들어졌다
+    assert all(not r.adjusted_next for r in got)
+    assert all(r.direction_next is None for r in got)

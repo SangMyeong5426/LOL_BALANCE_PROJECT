@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,10 @@ from lol_balance.direction import (
     value_direction,
 )
 from lol_balance.groundtruth import read_labels
+from lol_balance.oracle import ProRates
+from lol_balance.panel import PATCH_SEQUENCE, PanelRow, champion_names, patch_rows
 from lol_balance.patchnotes import champion_changes, changed_champions
+from lol_balance.ugg import parse_champion_ranking
 
 
 def version(patch: str) -> str:
@@ -128,3 +132,47 @@ def directions_in(
     for label in read_labels(labels / f"{patch}.jsonl"):
         out[label.champion] = (label.direction, "label")
     return out
+
+
+def forecast_rows(
+    patch: str,
+    known: Sequence[PanelRow],
+    *,
+    ranking: Path,
+    ddragon: Path,
+    pro: Mapping[str, dict[str, ProRates]] | None = None,
+) -> tuple[PanelRow, ...]:
+    """**아직 답이 없는 패치의 행.** 예측만 하고 채점은 못 한다.
+
+    패널은 마지막 패치를 뺀다 — 다음 패치 노트가 없으면 전 챔피언이 「조정 안
+    됨」으로 라벨이 붙어 조용히 틀린다(`adjusted_in` 참고). **그 제외는 맞지만,
+    그러면 우리가 가진 가장 최근 패치에서 다음을 예측할 수가 없다.**
+
+    그래서 여기서 따로 만든다. **이 행들의 `adjusted_next` 와 `direction_next`
+    는 뜻이 없다** — 읽으면 안 된다. 부르는 쪽이 피처만 쓰고 채점을 막아야
+    한다(`scripts/predict` 가 `--score` 를 거절한다).
+
+    `known` 은 패널에 이미 있는 과거 행이다. 이력 피처와 직전 대비 추세를
+    거기서 가져온다. **직전 패치가 바로 앞이 아니면 추세는 `None` 이다** —
+    `16_14` 가 결측이라 `16_15` 가 실제로 그렇다.
+    """
+    index = PATCH_SEQUENCE.index(patch)
+    history: dict[int, list[PanelRow]] = {}
+    for row in sorted(known, key=lambda r: r.patch_index):
+        if row.patch_index < index:
+            history.setdefault(row.champion_id, []).append(row)
+
+    before = PATCH_SEQUENCE[index - 1] if index else None
+    prior = {r.champion_id: r for r in known if r.patch == before} if before else {}
+
+    return patch_rows(
+        patch,
+        parse_champion_ranking(json.loads((ranking / f"{patch}.json").read_bytes())),
+        champion_names(
+            json.loads((ddragon / f"{version(patch)}.json").read_bytes())["data"]
+        ),
+        frozenset(),  # 다음 패치 노트가 없다. **이 라벨은 읽지 않는다**
+        prior or None,
+        history=history,
+        pro=(pro or {}).get(version_short(patch)),
+    )
