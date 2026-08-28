@@ -35,9 +35,12 @@ from __future__ import annotations
 
 import math
 import re
+import warnings
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+
+import numpy as np
 
 from lol_balance.panel import PanelRow, patch_index
 from lol_balance.patchnotes import ChangeBlock
@@ -142,6 +145,66 @@ class CaseSearch:
                 scored.append(Case(row, distance))
         scored.sort(key=lambda c: (c.distance, c.row.patch_index, c.row.champion_id))
         return tuple(scored[:k])
+
+    def similar_many(
+        self, targets: Sequence[PanelRow], k: int = 10
+    ) -> tuple[tuple[Case, ...], ...]:
+        """`similar` 를 여러 대상에 한 번에. **결과가 같아야 한다.**
+
+        `① 대상` 은 풀 5,334행에 질의 3,433건이라 거리 계산이 1,830만 회다.
+        한 건씩 파이썬 루프로 돌면 `A5` 27.7초 · `A5b` 46.6초로 **리포트 82초 중
+        74초**를 여기서 쓴다. 같은 계산을 numpy 로 한 번에 하면 60배 넘게 빠르다.
+
+        **동점 순서를 맞추는 것이 핵심이다.** `similar` 는
+        `(거리, patch_index, champion_id)` 로 정렬하는데, 뒤 두 키는 질의와
+        무관하다. 그래서 **풀을 그 둘로 미리 정렬해 두고 거리만 안정 정렬**하면
+        같은 순서가 나온다.
+
+        결측 처리도 그대로다 — 맞대 볼 피처가 없으면 `nanmean` 이 NaN 을 주고,
+        그 행은 후보에서 뺀다. 0 으로 채우면 「평균값이었다」가 되어 엉뚱한
+        사례가 가까워진다.
+        """
+        if not self.pool or not targets:
+            return tuple(() for _ in targets)
+
+        order = sorted(
+            range(len(self.pool)),
+            key=lambda i: (self.pool[i].patch_index, self.pool[i].champion_id),
+        )
+        pool = [self.pool[i] for i in order]
+        left = self._matrix(targets)
+        right = self._matrix(pool)
+        # 맞대 볼 피처가 하나도 없는 짝은 NaN 이 되는데 **그것이 의도한 결과다.**
+        # numpy 가 「빈 조각의 평균」이라고 경고하므로 여기서만 눌러 둔다.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            gap = np.sqrt(np.nanmean((left[:, None, :] - right[None, :, :]) ** 2, 2))
+
+        ids = np.array([r.champion_id for r in pool])
+        patches = np.array([r.patch_index for r in pool])
+        out: list[tuple[Case, ...]] = []
+        for i, target in enumerate(targets):
+            row = gap[i].copy()
+            row[(ids == target.champion_id) & (patches == target.patch_index)] = np.nan
+            usable = ~np.isnan(row)
+            picked = np.flatnonzero(usable)[np.argsort(row[usable], kind="stable")[:k]]
+            out.append(tuple(Case(pool[j], float(row[j])) for j in picked))
+        return tuple(out)
+
+    def _matrix(self, rows: Sequence[PanelRow]) -> np.ndarray:
+        """표준화한 피처 행렬. 결측은 NaN 으로 둔다."""
+        mean = np.array([self.mean[f] for f in self.features])
+        spread = np.array([self.spread[f] for f in self.features])
+        raw = np.array(
+            [
+                [
+                    float(v) if (v := getattr(r, f)) is not None else np.nan
+                    for f in self.features
+                ]
+                for r in rows
+            ]
+        )
+        return np.asarray((raw - mean) / spread)
 
 
 _WORD = re.compile(r"[a-z]+")
