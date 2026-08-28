@@ -58,6 +58,25 @@ class Note:
     warn: bool = False
 
 
+# 방향 넷을 화면에 적는 이름. **둘만 한글이면 나머지가 오류처럼 보인다** —
+# 「실제 mixed」가 그렇게 읽혔다. 용어집이 넷을 영문 키로 정의하므로 이름은
+# 그대로 두고 짧은 설명만 붙인다(`docs/glossary.md` 「용어를 새로 만들지 않는다」).
+DIRECTION_NAMES = {
+    "nerf": "너프",
+    "buff": "버프",
+    "mixed": "mixed(방향이 갈림)",
+    "adjust": "adjust(방향 없음)",
+}
+
+
+def outcome(row: PanelRow) -> str:
+    """그 챔피언이 실제로 어떻게 됐나. `predict` 와 `ask` 가 같이 쓴다."""
+    if not row.adjusted_next:
+        return "조정 안 됨"
+    key = row.direction_next or ""
+    return DIRECTION_NAMES.get(key, key or "방향 미상")
+
+
 def _rank_in_patch(row: PanelRow, patch_rows: Sequence[PanelRow], field: str) -> int:
     """그 패치 안에서 몇 위인가. **절대값보다 이게 읽힌다.**"""
     values = sorted(
