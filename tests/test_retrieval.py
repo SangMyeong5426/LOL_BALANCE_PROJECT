@@ -158,3 +158,81 @@ def test_stat_lookup_orders_a_patch_by_pick_rate(make_row: PanelRowFactory) -> N
     lookup = StatLookup(pool, as_of="15_1")
 
     assert [r.champion for r in lookup.patch("13_14")] == ["High", "Low"]
+
+
+# --- 묶어서 검색하기 ----------------------------------------------------
+#
+# **`similar_many` 는 빠르기만 한 것이 아니라 같아야 한다.** ① 대상은 풀
+# 5,334행에 질의 3,433건이라 한 건씩 돌면 리포트 82초 중 74초를 여기서 쓴다.
+# 묶어서 계산하면 10배 빨라지는데, 결과가 한 칸이라도 달라지면 arm 성적이
+# 바뀌므로 그것은 최적화가 아니라 결함이다.
+
+
+def keys(cases: tuple) -> list[tuple[int, str]]:
+    return [(c.row.champion_id, c.row.patch) for c in cases]
+
+
+def test_many_matches_one_at_a_time(make_row: PanelRowFactory) -> None:
+    """순서까지 같아야 한다. **동점이 갈리는 자리가 위험하다.**"""
+    pool = tuple(
+        make_row(patch, champion_id, win_rate=0.50 + (champion_id % 5) * 0.004)
+        for patch in ("13_14", "13_15", "13_16")
+        for champion_id in range(1, 12)
+    )
+    search = CaseSearch(pool, "13_17")
+    targets = [make_row("13_17", i, win_rate=0.505) for i in range(1, 6)]
+
+    one = [search.similar(t, k=7) for t in targets]
+    many = search.similar_many(targets, k=7)
+
+    assert [keys(c) for c in many] == [keys(c) for c in one]
+
+
+def test_ties_break_the_same_way(make_row: PanelRowFactory) -> None:
+    """거리가 같으면 `(patch_index, champion_id)` 순이다. 풀을 미리 그 순으로
+    정렬해 두고 거리만 **안정 정렬**해야 이것이 재현된다."""
+    pool = tuple(
+        make_row(patch, champion_id, win_rate=0.50)
+        for patch in ("13_14", "13_15")
+        for champion_id in (9, 3, 7, 1)
+    )
+    search = CaseSearch(pool, "13_16")
+    target = make_row("13_16", 99, win_rate=0.50)
+
+    assert keys(search.similar_many([target], k=8)[0]) == keys(
+        search.similar(target, 8)
+    )
+
+
+def test_a_champion_never_matches_itself_in_batch(make_row: PanelRowFactory) -> None:
+    pool = tuple(make_row(p, 5) for p in ("13_14", "13_15"))
+    search = CaseSearch(pool, "13_16")
+    target = pool[0]
+
+    got = search.similar_many([target], k=5)[0]
+
+    assert all(c.row.patch != target.patch for c in got)
+
+
+def test_rows_with_no_comparable_feature_are_skipped_in_batch(
+    make_row: PanelRowFactory,
+) -> None:
+    """**결측을 0 으로 채우면 「평균값이었다」가 되어 엉뚱한 사례가 가까워진다.**"""
+    pool = (
+        make_row("13_14", 1, ban_rate=None),
+        make_row("13_14", 2, ban_rate=0.02),
+    )
+    search = CaseSearch(pool, "13_15", features=("ban_rate",))
+    target = make_row("13_15", 3, ban_rate=0.02)
+
+    got = search.similar_many([target], k=5)[0]
+    one = search.similar(target, k=5)
+
+    assert [c.row.champion_id for c in got] == [2]
+    assert keys(got) == keys(one)
+
+
+def test_an_empty_pool_gives_empty_results(make_row: PanelRowFactory) -> None:
+    search = CaseSearch((), "13_15")
+
+    assert search.similar_many([make_row("13_15", 1)], k=5) == ((),)

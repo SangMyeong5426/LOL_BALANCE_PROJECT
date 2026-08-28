@@ -37,7 +37,12 @@ from lol_balance.baseline import (
 )
 from lol_balance.panel import PanelRow, patch_index
 from lol_balance.ragjudge import Judgment, anon_key
-from lol_balance.retrieval import CASE_FEATURES, CASE_FEATURES_PRO, CaseSearch
+from lol_balance.retrieval import (
+    CASE_FEATURES,
+    CASE_FEATURES_PRO,
+    Case,
+    CaseSearch,
+)
 from lol_balance.rules import Rule, RulePredictor
 
 
@@ -132,17 +137,26 @@ def _retrieved(
     검색기가 `as_of` 를 생성자에서 받으므로 **경계는 도구가 지킨다.** 여기서
     빠뜨려도 경계 밖 사례가 섞이지 않는다.
     """
+    # **패치별로 묶어 한 번에 검색한다.** 한 건씩 돌면 ① 에서만 74초가 든다
+    # (풀 5,334행 × 질의 3,433건 = 거리 계산 1,830만 회). 결과는 같다 —
+    # `similar_many` 가 동점 순서까지 `similar` 와 맞춘다.
     fixed = None if expanding else CaseSearch(rows, at, features)
+    grouped: dict[str, list[int]] = {}
+    for index, row in enumerate(test):
+        grouped.setdefault(at if fixed is not None else row.patch, []).append(index)
+
+    found: list[tuple[Case, ...]] = [() for _ in test]
+    for patch, indexes in grouped.items():
+        search = fixed or CaseSearch(rows, patch, features)
+        for index, cases in zip(
+            indexes, search.similar_many([test[i] for i in indexes], k=k), strict=True
+        ):
+            found[index] = cases
+
     adjusted: list[float] = []
     nerf: list[float] = []
-    cache: dict[str, CaseSearch] = {}
 
-    for row in test:
-        if fixed is not None:
-            search = fixed
-        else:
-            search = cache.setdefault(row.patch, CaseSearch(rows, row.patch, features))
-        cases = search.similar(row, k=k)
+    for cases in found:
         if not cases:
             adjusted.append(0.0)
             nerf.append(0.5)
