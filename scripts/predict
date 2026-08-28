@@ -58,6 +58,7 @@ from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
     PATCH_SEQUENCE,
     PanelRow,
+    as_patch,
     name_after,
     next_patch,
     patch_index,
@@ -118,7 +119,7 @@ def outcome(row: PanelRow) -> str:
 
 
 def main() -> int:
-    at = arg("--patch", "")
+    at = as_patch(arg("--patch", ""))
     top = int(arg("--top", "10"))
     seed = load_settings().seed
     rows = read_panel(PANEL)
@@ -133,6 +134,11 @@ def main() -> int:
             f"{at} 은 아는 패치가 아니다. {PATCH_SEQUENCE[0]} ~ {PATCH_SEQUENCE[-1]}",
             file=sys.stderr,
         )
+        if at.count("_") > 1:
+            print(
+                "  세 자리는 Data Dragon 표기다. 패치는 두 자리로 쓴다 — 16_15 · 16.15 둘 다 된다",
+                file=sys.stderr,
+            )
         return 2
 
     forecast = at not in {r.patch for r in rows}
