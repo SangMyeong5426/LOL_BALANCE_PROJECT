@@ -135,8 +135,8 @@ def main() -> int:
         return 2
 
     nxt = next_patch(at) or name_after(at)
-    print(f"■ {at} 지표로 볼 때 {champion} 는 {nxt} 에 조정될까, 어느 쪽으로?")
-    print(f"  검색 경계 as_of={at} — 이후 정보는 검색 풀에 없다\n")
+    print(f"■ {champion} · {at} → {nxt}")
+    print(f"  {at} 까지만 보고 판단한다\n")
 
     churn = churn_by_patch(ITEMS).get(nxt) if ITEMS.is_dir() else None
     for note in patch_notes(churn):
@@ -147,11 +147,11 @@ def main() -> int:
     # (R1·R2·R3) 순으로 찍으면 남의 사례가 자기 이력보다 먼저 나와 읽기 어렵다.
     # 표는 전부 패치 순이다 — 시간이 뒤섞이면 흐름이 안 보인다.
 
-    print("── 지표       승률·픽률·밴율, 최근 여섯 패치")
+    print("── 지표       최근 여섯 패치")
     print(f"  {'패치':8}{'승률':>7}{'픽률':>8}{'밴율':>8}{'판수':>12}")
     history = [r for r in stat.champion(champion)[-5:]] + [target]
     for row in history:
-        here = "  ← 물어본 패치" if row.patch == at else ""
+        here = "  ← 기준" if row.patch == at else ""
         print(
             f"  {row.patch:8}{row.win_rate:>7.1%}{row.pick_rate:>8.1%}"
             f"{(row.ban_rate or 0):>8.1%}{row.matches:>12,}{here}"
@@ -171,9 +171,9 @@ def main() -> int:
             for r in stat.champion(champion)
             if r.adjusted_next and (n := next_patch(r.patch))
         ]
-        print("\n── 조정 이력  이 챔피언이 실제로 바뀐 것")
+        print("\n── 조정 이력")
         if not adjusted:
-            print("  이 경계 안에서는 조정된 적이 없다")
+            print("  없다")
         for patch in adjusted[-4:]:
             # **스킨 절을 걸러 낸다.** 「Bewitching Senna」처럼 절 이름이 챔피언
             # 이름을 또 담고 있어 BM25 점수가 높게 나오는데, 스킨은 밸런스
@@ -188,8 +188,8 @@ def main() -> int:
 
     pool = direction_rows(rows)
     cases = CaseSearch(pool, at).similar(target, k=10)
-    print(f"\n── 닮은 사례  지표가 가까웠던 {len(cases)}종과 그 뒤")
-    print(f"  {'패치':8}{'챔피언':16}{'승률':>7}{'밴율':>8}{'거리':>7}   그 다음")
+    print(f"\n── 닮은 사례  지표가 비슷한 과거 {len(cases)}종")
+    print(f"  {'패치':8}{'챔피언':16}{'승률':>7}{'밴율':>8}{'거리':>7}   결과")
     # **가까운 순이 아니라 패치 순으로 찍는다.** 거리는 칸으로 남기므로 어느
     # 것이 가까운지는 그대로 읽힌다.
     for case in sorted(cases, key=lambda c: c.row.patch_index):
@@ -219,7 +219,7 @@ def main() -> int:
     spot = here.index(target)
     seed = load_settings().seed
 
-    print(f"\n── 예측       학습 {len(train):,}행 · {len(here)}종 중 순위")
+    print(f"\n── 예측       {len(here)}종 중 순위 · 학습 {len(train):,}행")
     for label, want in (("조정", None), ("너프", "nerf"), ("버프", "buff")):
         score = rank_candidates(train, here, want=want, seed=seed)
         place = int((score > score[spot]).sum()) + 1
