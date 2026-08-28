@@ -48,9 +48,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from lol_balance.arms import _boosting, _narrow  # noqa: E402
+from lol_balance.arms import rank_candidates  # noqa: E402
 from lol_balance.assemble import forecast_rows  # noqa: E402
-from lol_balance.baseline import direction_rows, encode, fit_encoder  # noqa: E402
+from lol_balance.baseline import direction_rows  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.explain import patch_notes, reasons  # noqa: E402
 from lol_balance.items import churn_by_patch  # noqa: E402
@@ -94,20 +94,6 @@ def latest_usable(rows: tuple[PanelRow, ...]) -> str:
 
 def arg(flag: str, default: str) -> str:
     return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
-
-
-def rank(
-    train: tuple[PanelRow, ...],
-    test: tuple[PanelRow, ...],
-    want: str | None,
-    pro: bool,
-    seed: int,
-) -> np.ndarray:
-    """그 대상이 될 확률. **라벨만 바꾸고 피처는 그대로 둔다.**"""
-    tr = train if want is None else _narrow(train, want)
-    enc = fit_encoder(tr, with_trend=True, with_pro=pro)
-    a, b = encode(tr, enc), encode(test, enc)
-    return np.asarray(_boosting(seed).fit(a.x, a.y).predict_proba(b.x)[:, 1])
 
 
 def lifetime_pro(rows: tuple[PanelRow, ...]) -> dict[str, float]:
@@ -200,7 +186,7 @@ def main() -> int:
         print(f"  ⚠ {note.text}")
 
     for label, want, with_pro in VIEWS:
-        score = rank(train, test, want, with_pro, seed)
+        score = rank_candidates(train, test, want=want, with_pro=with_pro, seed=seed)
         order = np.argsort(-score)[:top]
         print(f"\n=== {label} 상위 {top} ===")
 

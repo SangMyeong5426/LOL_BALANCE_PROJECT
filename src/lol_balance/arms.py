@@ -505,3 +505,27 @@ def direction_arms(
         "평가": len(test),
         "손 라벨": sum(1 for r in pool if r.direction_source == "label"),
     }
+
+
+def rank_candidates(
+    train: tuple[PanelRow, ...],
+    test: tuple[PanelRow, ...],
+    *,
+    want: str | None = None,
+    with_pro: bool = True,
+    seed: int = 20260824,
+) -> NDArray[np.float64]:
+    """그 대상이 될 확률. **라벨만 바꾸고 피처는 그대로 둔다.**
+
+    `want` 가 `None` 이면 「조정되나」, `"nerf"`·`"buff"` 면 그 방향으로 좁힌다.
+    **「조정되나」 하나로만 물으면 안 된다** — 프로 픽·밴율의 신호가 방향에 따라
+    반대라(너프 쪽 AUC 0.658 · 버프 쪽 0.473) 합치면 상쇄된다.
+
+    `scripts/predict` 와 `scripts/ask` 가 같이 쓴다. 한때 `predict` 안에만
+    있어서 `ask` 는 근거만 보여 주고 정작 예측을 못 했다.
+    """
+    narrowed = train if want is None else _narrow(train, want)
+    encoder = fit_encoder(narrowed, with_trend=True, with_pro=with_pro)
+    fitted, target = encode(narrowed, encoder), encode(test, encoder)
+    model = _boosting(seed).fit(fitted.x, fitted.y)
+    return np.asarray(model.predict_proba(target.x)[:, 1])
