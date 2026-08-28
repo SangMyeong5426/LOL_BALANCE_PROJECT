@@ -56,6 +56,40 @@ def test_a_moving_win_rate_is_reported(make_row: PanelRowFactory) -> None:
     assert "직전 대비" not in texts(reasons(flat, [flat]))
 
 
+def test_pro_presence_is_reported_with_its_rank(make_row: PanelRowFactory) -> None:
+    """**점수를 만든 값은 화면에도 나와야 한다.**
+
+    프로 픽·밴율은 `A7p` · `B5p` 의 피처인데 한때 경고로만 나왔다. 경고는
+    문턱(`PRO_REGULAR`)을 넘어야 뜨므로 44종에서만 보였고, 나머지 126종은
+    순위가 조용히 달라졌다. 근거는 문턱 없이 낸다.
+    """
+    target = make_row("16_13", 1, pro_pick_rate=0.08, pro_ban_rate=0.04)
+    others = [make_row("16_13", i, pro_pick_rate=0.01) for i in range(2, 6)]
+
+    out = texts(reasons(target, [target, *others]))
+
+    assert "프로 픽·밴율 12.0% — 5종 중 1위" in out
+
+
+def test_a_champion_with_no_pro_data_gets_no_pro_reason(
+    make_row: PanelRowFactory,
+) -> None:
+    """**모르는 것을 0 으로 적지 않는다.** 「없다」와 「0% 다」는 다르다."""
+    row = make_row("16_13", 1, pro_pick_rate=None, pro_ban_rate=None)
+
+    assert "프로 픽·밴율" not in texts(reasons(row, [row]))
+
+
+def test_a_low_pro_rate_is_still_reported(make_row: PanelRowFactory) -> None:
+    """문턱 아래여도 낸다. **낮다는 것 자체가 판단 재료다** — 경고와 다른 점이다."""
+    row = make_row("16_13", 1, pro_pick_rate=0.005, pro_ban_rate=0.0)
+
+    notes = reasons(row, [row])
+
+    assert "프로 픽·밴율 0.5%" in texts(notes)
+    assert "프로 단골" not in warns(notes)
+
+
 def test_fired_rules_are_named(make_row: PanelRowFactory) -> None:
     """어떤 규칙이 걸렸는지가 근거다. **규칙 이름을 그대로 보인다.**"""
     row = make_row("16_13", 1, ban_rate=0.30)

@@ -103,6 +103,15 @@ def reasons(
         way = "오르는" if row.d_win_rate > 0 else "내리는"
         out.append(Note(f"직전 대비 {row.d_win_rate:+.1%} — {way} 중"))
 
+    # **점수를 바꾸는 값은 화면에도 나와야 한다.** 프로 픽·밴율은 `A7p` · `B5p`
+    # 의 피처라 순위를 만드는 데 쓰이는데, 한때 경고로만 나왔다. 경고는 문턱
+    # (`PRO_REGULAR`)을 넘어야 뜨므로 44종에서만 보였고 **나머지 126종은 점수가
+    # 조용히 달라졌다.** 근거는 문턱 없이 값이 있으면 낸다 — 「없다」와 「낮다」는
+    # 다르고, 낮다는 것 자체가 판단 재료다.
+    if row.pro_presence is not None:
+        rank = _rank_in_patch(row, patch_rows, "pro_presence")
+        out.append(Note(f"프로 픽·밴율 {row.pro_presence:.1%} — {n}종 중 {rank}위"))
+
     fired = [r for r in rules if r.fires(row)]
     if fired:
         out.append(Note("걸린 규칙 " + " · ".join(r.id for r in fired[:4])))
@@ -139,7 +148,7 @@ def warnings(
     if regular and considering != "nerf" and row.win_rate < 0.5:
         out.append(
             Note(
-                f"프로 단골이다(평생 픽·밴율 {lifetime_pro:.2f}). "
+                f"프로 단골이다(평생 픽·밴율 {lifetime_pro:.1%}). "
                 "승률이 낮아도 올려 주면 대회 출전이 크게 뛴다 — 버프 주의",
                 warn=True,
             )
@@ -147,7 +156,7 @@ def warnings(
     elif regular and considering != "buff":
         out.append(
             Note(
-                f"프로 단골이다(평생 픽·밴율 {lifetime_pro:.2f}). "
+                f"프로 단골이다(평생 픽·밴율 {lifetime_pro:.1%}). "
                 "너프하면 솔랭이 5할 아래로 밀릴 수 있다",
                 warn=True,
             )
