@@ -219,16 +219,16 @@ def main() -> int:
     spot = here.index(target)
     seed = load_settings().seed
 
-    print(f"\n── 예측      학습 {len(train):,}행 · 이 패치 {len(here)}종 중 순위")
-    for label, want in (("조정될까", None), ("너프될까", "nerf"), ("버프될까", "buff")):
+    print(f"\n── 예측       학습 {len(train):,}행 · {len(here)}종 중 순위")
+    for label, want in (("조정", None), ("너프", "nerf"), ("버프", "buff")):
         score = rank_candidates(train, here, want=want, seed=seed)
         place = int((score > score[spot]).sum()) + 1
         bar = "█" * round(score[spot] * 20)
-        print(f"  {label:8}{score[spot]:>6.2f}  {place:>3}위 / {len(here)}   {bar}")
+        print(f"  {label:6}{score[spot]:>6.2f}{place:>6}위   {bar}")
 
     if reveal:
         got = target.direction_next if target.adjusted_next else "조정 안 됨"
-        print(f"\n── 답        {nxt} 에 실제로 {got}")
+        print(f"\n── 답         {nxt} → {got}")
     else:
         print("\n답을 보려면 --answer")
     return 0
