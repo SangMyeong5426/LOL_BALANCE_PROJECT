@@ -260,7 +260,7 @@ pre-commit install
 | ruff · ruff format · mypy | 코드 형식과 타입 |
 | 문서 링크 | 상대 링크와 앵커가 실제로 가는가 ([`check-links`](scripts/check-links)) |
 | AGENTS ≡ CLAUDE | 두 규칙 문서가 한 글자도 안 다른가 |
-| 테스트 | 320개 · 커버리지 94% |
+| 테스트 | 323개 · 커버리지 94% |
 | README 수치 | 문서에 적은 수가 실제와 맞는가 |
 | 라벨 충돌 | 손 라벨이 기계 판정과 어긋나는가 |
 | 노트 검색 | R2 가 얼마나 맞히는가 ([`score-retrieval`](scripts/score-retrieval)) |
@@ -283,7 +283,7 @@ docs/spec/           데이터를 어디서 어떻게 받는가
 docs/adr/            기술 결정 기록 7건
 docs/results/        측정 결과
 data/ · runs/        원자료와 실행 산출물 (커밋하지 않는다)
-tests/               320개
+tests/               323개
 ```
 
 작업 규칙은 [`AGENTS.md`](AGENTS.md)에 있다. [`CLAUDE.md`](CLAUDE.md)와 같은 문서다.
@@ -297,7 +297,7 @@ tests/               320개
 | pydantic | 구조화 출력 강제 |
 | beautifulsoup4 | 패치 노트 HTML 파싱 |
 | sqlite (표준 라이브러리) | 패널 저장 |
-| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 320개, 커버리지 94% |
+| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 323개, 커버리지 94% |
 
 의존성은 직접 import 하는 것만 선언한다. `scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 적지 않는다.
 

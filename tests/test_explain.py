@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from conftest import PanelRowFactory
-from lol_balance.explain import PRO_REGULAR, patch_notes, reasons, warnings
+from lol_balance.explain import PRO_REGULAR, outcome, patch_notes, reasons, warnings
 from lol_balance.items import LOUD, Churn
 from lol_balance.retrieval import Case
 from lol_balance.rules import Condition, Rule
@@ -219,3 +219,37 @@ def test_the_item_warning_never_lands_on_a_champion(
     for considering in ("nerf", "buff", None):
         out = " / ".join(n.text for n in warnings(row, considering=considering))
         assert "아이템" not in out
+
+
+# --- 실제 결과 표기 -----------------------------------------------------
+
+
+def test_every_direction_gets_a_name(make_row: PanelRowFactory) -> None:
+    """**넷 중 둘만 한글이면 나머지가 오류처럼 보인다.**
+
+    「실제 mixed」가 그렇게 읽혔다. 용어집이 넷을 영문 키로 정의하므로 이름은
+    그대로 두고 설명만 붙인다 — 새 용어를 만들지 않는다.
+    """
+    got = {
+        d: outcome(make_row("16_13", 1, adjusted_next=True, direction_next=d))
+        for d in ("nerf", "buff", "mixed", "adjust")
+    }
+
+    assert got["nerf"] == "너프"
+    assert got["buff"] == "버프"
+    assert "방향이 갈림" in got["mixed"]
+    assert "방향 없음" in got["adjust"]
+
+
+def test_an_unadjusted_champion_says_so(make_row: PanelRowFactory) -> None:
+    """**유지는 방향이 아니라 조정이 없었다는 뜻이다.**"""
+    assert outcome(make_row("16_13", 1, adjusted_next=False)) == "조정 안 됨"
+
+
+def test_an_adjustment_with_no_direction_is_not_called_kept(
+    make_row: PanelRowFactory,
+) -> None:
+    """조정은 됐는데 방향을 모르는 것과 **조정이 없었던 것은 다르다.**"""
+    row = make_row("16_13", 1, adjusted_next=True, direction_next=None)
+
+    assert outcome(row) == "방향 미상"

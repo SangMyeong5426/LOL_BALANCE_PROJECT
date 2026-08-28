@@ -52,7 +52,7 @@ from lol_balance.arms import rank_candidates  # noqa: E402
 from lol_balance.assemble import forecast_rows  # noqa: E402
 from lol_balance.baseline import direction_rows  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
-from lol_balance.explain import patch_notes, reasons  # noqa: E402
+from lol_balance.explain import outcome, patch_notes, reasons  # noqa: E402
 from lol_balance.items import churn_by_patch  # noqa: E402
 from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
@@ -108,14 +108,6 @@ def lifetime_pro(rows: tuple[PanelRow, ...]) -> dict[str, float]:
         if r.pro_presence is not None:
             seen.setdefault(r.champion, []).append(r.pro_presence)
     return {c: sum(v) / len(v) for c, v in seen.items() if len(v) >= 20}
-
-
-def outcome(row: PanelRow) -> str:
-    if not row.adjusted_next:
-        return "조정 안 됨"
-    return {"nerf": "너프", "buff": "버프"}.get(
-        row.direction_next or "", row.direction_next or "방향 미상"
-    )
 
 
 def main() -> int:

@@ -34,7 +34,7 @@ from lol_balance.arms import rank_candidates  # noqa: E402
 from lol_balance.assemble import forecast_rows  # noqa: E402
 from lol_balance.baseline import direction_rows  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
-from lol_balance.explain import patch_notes, reasons  # noqa: E402
+from lol_balance.explain import outcome, patch_notes, reasons  # noqa: E402
 from lol_balance.items import churn_by_patch  # noqa: E402
 from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
@@ -234,15 +234,22 @@ def main() -> int:
     seed = load_settings().seed
 
     print(f"\n── 예측       ({len(here)}종 중 순위 · 학습 {len(train):,}행)")
+    adjusted = 0.0
     for label, want in (("조정", None), ("너프", "nerf"), ("버프", "buff")):
         score = rank_candidates(train, here, want=want, seed=seed)
         place = int((score > score[spot]).sum()) + 1
         bar = "█" * round(score[spot] * 20)
         print(f"  {label:6}{score[spot]:>6.2f}{place:>6}위   {bar}")
+        if want is None:
+            adjusted = float(score[spot])
+
+    # **유지는 따로 재지 않는다.** 점수가 `predict_proba` 라 조정의 여집합이
+    # 그대로 유지 확률이다. 이름이 안 붙어 있어 「유지 예측은 없나」로 읽혔다.
+    # **순위는 안 매긴다** — 패널의 81.8% 가 유지라 줄 세워도 정보가 없다.
+    print(f"  {'유지':6}{1 - adjusted:>6.2f}{'':>10}조정의 여집합")
 
     if reveal:
-        got = target.direction_next if target.adjusted_next else "조정 안 됨"
-        print(f"\n── 답         {nxt} → {got}")
+        print(f"\n── 답         {nxt} → {outcome(target)}")
     else:
         print("\n답을 보려면 --answer")
     return 0
