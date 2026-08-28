@@ -16,6 +16,7 @@ from lol_balance.rules import (
     Rule,
     RulePredictor,
     read_rules,
+    redundant,
     score,
     write_rules,
 )
@@ -201,3 +202,77 @@ def test_one_sided_evidence_does_not_collapse(make_row: PanelRowFactory) -> None
 
     assert barely < clearly < 1.0
     assert barely > predictor.fallback["nerf"]
+
+
+# --- 중복 규칙 찾기 -----------------------------------------------------
+#
+# **LLM 이 규칙을 제안하면 넓은 것을 내고 그 안에 든 좁은 것을 또 낸다.** 실제로
+# 12개 중 넷이 그랬다 — `A-strong`(승률≥0.53)이 `A-gap`(|승률−0.5|≥0.03)의
+# 부분집합이다. 통과 기준이 향상과 적용률만 봐서 이것이 안 보였다.
+
+
+def rule(
+    rule_id: str, metric: str, op: str, value: float, then: str = "adjusted"
+) -> Rule:
+    return Rule(
+        id=rule_id,
+        when=(Condition(metric, op, value),),  # type: ignore[arg-type]
+        then=then,  # type: ignore[arg-type]
+        proposed_by="conversation",
+        rationale="시험용",
+    )
+
+
+def test_a_narrow_rule_inside_a_wide_one_is_reported(
+    make_row: PanelRowFactory,
+) -> None:
+    """승률 0.53 이상은 |승률−0.5| 0.03 이상에 통째로 들어간다.
+
+    **아래쪽 행이 있어야 한다.** 5할 위만 두면 넓은 규칙도 좁은 규칙에 덮여
+    둘 다 걸린다 — 실제로 그렇게 만들었다가 잡혔다.
+    """
+    train = tuple(
+        make_row("13_14", i, win_rate=w)
+        for i, w in enumerate([0.44, 0.46, 0.50, 0.52, 0.54, 0.56], start=1)
+    )
+    rules = (rule("wide", "wr_gap", ">=", 0.03), rule("narrow", "win_rate", ">=", 0.53))
+
+    assert [r[0] for r in redundant(rules, train)] == ["narrow"]
+
+
+def test_a_rule_that_catches_something_alone_is_not_reported(
+    make_row: PanelRowFactory,
+) -> None:
+    train = tuple(
+        make_row("13_14", i, win_rate=0.50 + i * 0.01, ban_rate=0.3 if i == 1 else 0.0)
+        for i in range(1, 8)
+    )
+    rules = (rule("wide", "win_rate", ">=", 0.53), rule("ban", "ban_rate", ">=", 0.2))
+
+    assert redundant(rules, train) == []
+
+
+def test_a_different_direction_is_not_a_peer(make_row: PanelRowFactory) -> None:
+    """**`nerf` 규칙이 `buff` 규칙을 덮는다고 하면 안 된다.**
+
+    덮임은 같은 방향 안에서만 뜻이 있다. 방향이 다르면 같은 행에 걸려도 서로
+    다른 것을 말한다.
+    """
+    train = tuple(make_row("13_14", i, win_rate=0.55) for i in range(1, 5))
+    rules = (
+        rule("wide", "win_rate", ">=", 0.50, then="nerf"),
+        rule("narrow", "win_rate", ">=", 0.53, then="buff"),
+    )
+
+    assert redundant(rules, train) == []
+
+
+def test_a_rule_that_never_fires_is_skipped(make_row: PanelRowFactory) -> None:
+    """**한 번도 안 걸리는 규칙은 「덮였다」가 아니라 「쓸 자리가 없다」다.**"""
+    train = tuple(make_row("13_14", i, win_rate=0.50) for i in range(1, 5))
+    rules = (
+        rule("wide", "win_rate", ">=", 0.40),
+        rule("never", "win_rate", ">=", 0.99),
+    )
+
+    assert redundant(rules, train) == []
