@@ -27,10 +27,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance.assemble import forecast_rows  # noqa: E402
 from lol_balance.baseline import direction_rows  # noqa: E402
 from lol_balance.explain import patch_notes, reasons  # noqa: E402
 from lol_balance.items import churn_by_patch  # noqa: E402
-from lol_balance.panel import next_patch  # noqa: E402
+from lol_balance.oracle import read_pro  # noqa: E402
+from lol_balance.panel import (  # noqa: E402
+    PATCH_SEQUENCE,
+    name_after,
+    next_patch,
+    patch_index,
+)
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.retrieval import CaseSearch, NoteSearch, StatLookup  # noqa: E402
 from lol_balance.rules import read_rules  # noqa: E402
@@ -40,6 +47,9 @@ PANEL = ROOT / "data" / "panel.sqlite"
 NOTES = ROOT / "data" / "patchnotes"
 RULES = ROOT / "rules" / "proposed.jsonl"
 ITEMS = ROOT / "data" / "items"
+RANKING = ROOT / "data" / "ugg" / "champion_ranking"
+DDRAGON = ROOT / "data" / "ddragon"
+ORACLE = ROOT / "data" / "oracle"
 
 
 def lifetime_pro(rows: tuple, champion: str) -> float | None:
@@ -49,6 +59,27 @@ def lifetime_pro(rows: tuple, champion: str) -> float | None:
 
 
 def main() -> int:
+    if "--patches" in sys.argv:
+        if not PANEL.exists():
+            print("data/panel.sqlite 가 없다. ./scripts/build-panel 을 먼저 돌린다.")
+            return 1
+        covered = sorted({r.patch for r in read_panel(PANEL)}, key=patch_index)
+        print(f"지표가 있는 패치 {len(covered)}개")
+        for i in range(0, len(covered), 8):
+            print("  " + " · ".join(covered[i : i + 8]))
+        # **「지표가 없다」와 「패널에서만 빠졌다」는 다르다.** 마지막 패치는
+        # 라벨을 못 만들어 빠지는 것이라 지표는 있고 예측도 된다.
+        have = {f.stem for f in RANKING.glob("*.json")} if RANKING.is_dir() else set()
+        forecast = [p for p in PATCH_SEQUENCE if p not in covered and p in have]
+        missing = [p for p in PATCH_SEQUENCE if p not in covered and p not in have]
+        if forecast:
+            print(f"\n답이 없는 패치 {len(forecast)}개 — 예측만 된다")
+            print("  " + " · ".join(forecast))
+        print(f"\n지표가 없는 패치 {len(missing)}개 — u.gg 아카이브 결측")
+        for i in range(0, len(missing), 8):
+            print("  " + " · ".join(missing[i : i + 8]))
+        return 0
+
     if len(sys.argv) < 3:
         print(__doc__)
         return 1
@@ -59,18 +90,46 @@ def main() -> int:
         print("data/panel.sqlite 가 없다. ./scripts/build-panel 을 먼저 돌린다.")
         return 1
     rows = read_panel(PANEL)
+    # **무엇이 없는지 갈라서 말한다.** 한때 셋을 「패널에 없다」 하나로 묶었더니
+    # 패치가 결측인데도 챔피언 이름을 의심하게 됐다. u.gg 아카이브에 22패치가
+    # 없어서 흔히 걸린다.
+    if at not in PATCH_SEQUENCE:
+        print(f"{at} 은 아는 패치가 아니다. {PATCH_SEQUENCE[0]} ~ {PATCH_SEQUENCE[-1]}")
+        return 2
+
+    covered = sorted({r.patch for r in rows}, key=patch_index)
+    if at not in covered and (RANKING / f"{at}.json").exists():
+        # **패널에 없어도 지표가 있으면 본다.** 마지막 패치는 라벨을 못 만들어
+        # 빠지는 것이지 자료가 없는 것이 아니다(`predict` 와 같은 처리).
+        rows = rows + forecast_rows(
+            at,
+            rows,
+            ranking=RANKING,
+            ddragon=DDRAGON,
+            pro=read_pro(ORACLE) if ORACLE.is_dir() else None,
+        )
+        covered = sorted({r.patch for r in rows}, key=patch_index)
+    if at not in covered:
+        near = [p for p in covered if abs(patch_index(p) - patch_index(at)) <= 3]
+        print(f"{at} 은 지표가 없다 — u.gg 아카이브에 그 패치 스냅샷이 없다.")
+        print(f"  가까운 패치: {' · '.join(near) if near else covered[-5:]}")
+        print("  전부 보려면: ./scripts/ask --patches")
+        return 2
+
     target = next((r for r in rows if r.champion == champion and r.patch == at), None)
     if target is None:
         near = sorted(
             {r.champion for r in rows if champion.lower() in r.champion.lower()}
         )
         print(
-            f"패널에 {champion} @ {at} 이 없다."
+            f"{at} 에 {champion} 이 없다."
             + (f" 비슷한 이름: {near[:5]}" if near else "")
         )
+        if not near:
+            print("  이름은 영문 정식 표기다 — Nunu & Willump · Bel'Veth · K'Sante")
         return 2
 
-    nxt = next_patch(at)
+    nxt = next_patch(at) or name_after(at)
     print(f"■ {at} 지표로 볼 때 {champion} 는 {nxt} 에 조정될까, 어느 쪽으로?")
     print(f"  검색 경계 as_of={at} — 이후 정보는 검색 풀에 없다\n")
 

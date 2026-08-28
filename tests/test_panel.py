@@ -15,6 +15,7 @@ from lol_balance.panel import (
     HISTORY,
     PATCH_SEQUENCE,
     champion_names,
+    name_after,
     next_patch,
     patch_index,
     patch_rows,
@@ -205,3 +206,13 @@ def test_next_patch_stops_at_the_end() -> None:
     걸리지만, **패치 하나만 더 받으면 `IndexError` 로 죽는다.**
     """
     assert next_patch(PATCH_SEQUENCE[-1]) is None
+
+
+def test_name_after_increments_the_minor() -> None:
+    """`PATCH_SEQUENCE` 끝에서는 다음 패치 이름이 순서에 없다.
+
+    아직 안 받은 패치를 예측할 때 그 이름이 필요해서 만든다. **표시에만
+    쓴다** — 시즌이 넘어가면 그때 `PATCH_SEQUENCE` 와 같이 손본다.
+    """
+    assert name_after("16_15") == "16_16"
+    assert name_after("13_9") == "13_10"

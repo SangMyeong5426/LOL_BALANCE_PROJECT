@@ -306,7 +306,10 @@ pre-commit install
 ```bash
 ./scripts/ask Senna 16_13            # 검색기 셋이 찾아온 것
 ./scripts/ask Senna 16_13 --answer   # 실제 결과까지
+./scripts/ask --patches              # 어느 패치를 물을 수 있나
 ```
+
+**아무 챔피언이나 된다.** 다만 u.gg 아카이브에 21패치가 없어서 그 패치를 물으면 지표가 없다고 답한다 — `--patches` 가 목록을 보여 준다. 이름은 영문 정식 표기다(`Nunu & Willump` · `Bel'Veth` · `K'Sante`).
 
 `--answer` 없이는 실제 결과를 안 찍는다. **먼저 읽고 스스로 판단한 뒤 맞춰 보라는 것**이고, 그것이 이 도구를 시험하는 옳은 순서다. 검색 경계는 `as_of` 로 도구가 지키므로 물어본 패치 이후 정보는 검색 풀에 아예 없다.
 
@@ -333,7 +336,7 @@ pre-commit install
 | ruff · ruff format · mypy | 코드 형식과 타입 |
 | 문서 링크 | 상대 링크와 앵커가 실제로 가는가 ([`check-links`](scripts/check-links)) |
 | AGENTS ≡ CLAUDE | 두 규칙 문서가 한 글자도 안 다른가 |
-| 테스트 | 314개 · 커버리지 94% |
+| 테스트 | 315개 · 커버리지 94% |
 | README 수치 | 문서에 적은 수가 실제와 맞는가 |
 | 라벨 충돌 | 손 라벨이 기계 판정과 어긋나는가 |
 | 노트 검색 | R2 가 얼마나 맞히는가 ([`score-retrieval`](scripts/score-retrieval)) |
@@ -356,7 +359,7 @@ docs/spec/           데이터를 어디서 어떻게 받는가
 docs/adr/            기술 결정 기록 7건
 docs/results/        측정 결과
 data/ · runs/        원자료와 실행 산출물 (커밋하지 않는다)
-tests/               314개
+tests/               315개
 ```
 
 작업 규칙은 [`AGENTS.md`](AGENTS.md)에 있다. [`CLAUDE.md`](CLAUDE.md)와 같은 문서다.
@@ -370,7 +373,7 @@ tests/               314개
 | pydantic | 구조화 출력 강제 |
 | beautifulsoup4 | 패치 노트 HTML 파싱 |
 | sqlite (표준 라이브러리) | 패널 저장 |
-| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 314개, 커버리지 94% |
+| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 315개, 커버리지 94% |
 
 의존성은 직접 import 하는 것만 선언한다. `scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 적지 않는다.
 

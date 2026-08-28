@@ -273,3 +273,17 @@ def patch_rows(
 
     # 정렬을 고정한다. 순서가 흔들리면 「다시 만들면 같은 값」이 성립하지 않는다.
     return tuple(sorted(out, key=lambda r: r.champion_id))
+
+
+def name_after(patch: str) -> str:
+    """다음 패치의 **이름**. 부 번호를 하나 올린다.
+
+    `PATCH_SEQUENCE` 는 **수집을 확정한 범위**라 그 끝에서는 `next_patch` 가
+    `None` 이다. 아직 안 받은 패치를 예측할 때 그 이름이 필요해서 만든다.
+
+    **표시에만 쓴다.** 시즌이 넘어가면(`16_24` 다음) 부 번호가 1 로 돌아가는데,
+    그때는 `PATCH_SEQUENCE` 를 늘리면서 같이 손보면 된다. 지금 그것까지 맞히려
+    들면 안 쓰이는 규칙을 만드는 것이다.
+    """
+    major, minor = patch.split("_")
+    return f"{major}_{int(minor) + 1}"

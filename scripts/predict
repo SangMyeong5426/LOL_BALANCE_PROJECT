@@ -58,6 +58,7 @@ from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
     PATCH_SEQUENCE,
     PanelRow,
+    name_after,
     next_patch,
     patch_index,
 )
@@ -78,20 +79,6 @@ VIEWS = (
     ("너프 후보", "nerf", True),
     ("버프 후보", "buff", True),
 )
-
-
-def after(patch: str) -> str:
-    """다음 패치의 **이름**. 부 번호를 하나 올린다.
-
-    `PATCH_SEQUENCE` 는 **수집을 확정한 범위**라 `16_15` 에서 끝난다. 아직 안
-    받은 패치를 예측할 때는 그 이름이 순서에 없으므로 여기서 만든다.
-
-    **표시에만 쓴다.** 시즌이 넘어가면(`16_24` 다음) 부 번호가 1 로 돌아가는데,
-    그때는 `PATCH_SEQUENCE` 를 늘리면서 같이 손보면 된다. 지금 그것까지
-    맞히려 들면 안 쓰이는 규칙을 만드는 것이다.
-    """
-    major, minor = patch.split("_")
-    return f"{major}_{int(minor) + 1}"
 
 
 def latest_usable(rows: tuple[PanelRow, ...]) -> str:
@@ -163,7 +150,7 @@ def main() -> int:
         return 2
 
     forecast = at not in {r.patch for r in rows}
-    nxt = next_patch(at) or (after(at) if forecast else None)
+    nxt = next_patch(at) or (name_after(at) if forecast else None)
     if nxt is None:
         print(f"{at} 이 패치 순서의 끝이라 다음 패치가 없다.", file=sys.stderr)
         return 2
