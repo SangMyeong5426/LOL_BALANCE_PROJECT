@@ -52,7 +52,8 @@ def test_a_moving_win_rate_is_reported(make_row: PanelRowFactory) -> None:
 
     assert "오르는 중" in texts(reasons(up, [up]))
     assert "내리는 중" in texts(reasons(down, [down]))
-    assert "중이다" not in texts(reasons(flat, [flat]))
+    # **「중」만 찾으면 「173종 중 1위」에 걸린다.** 추세 줄 자체가 없어야 한다.
+    assert "직전 대비" not in texts(reasons(flat, [flat]))
 
 
 def test_fired_rules_are_named(make_row: PanelRowFactory) -> None:
@@ -81,7 +82,7 @@ def test_neighbour_split_is_counted(make_row: PanelRowFactory) -> None:
 
     out = texts(reasons(row, [row], cases=cases))
 
-    assert "3종 중 너프 2 · 버프 1" in out
+    assert "닮은 사례 3종 — 너프 2 · 버프 1" in out
 
 
 # --- 경고 -------------------------------------------------------------

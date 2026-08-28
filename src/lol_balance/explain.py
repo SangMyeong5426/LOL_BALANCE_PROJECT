@@ -88,19 +88,20 @@ def reasons(
     ban = row.ban_rate or 0.0
     if ban >= HIGH_BAN:
         rank = _rank_in_patch(row, patch_rows, "ban_rate")
-        out.append(Note(f"밴율 {ban:.1%} — 이 패치 {n}종 중 {rank}위"))
+        out.append(Note(f"밴율 {ban:.1%} — {n}종 중 {rank}위"))
 
     gap = row.win_rate - 0.5
     if abs(gap) >= FLAT:
-        side = "높다" if gap > 0 else "낮다"
         rank = _rank_in_patch(row, patch_rows, "win_rate")
-        out.append(Note(f"승률 {row.win_rate:.1%} — 5할보다 {side} ({rank}위)"))
+        out.append(Note(f"승률 {row.win_rate:.1%} — {n}종 중 {rank}위"))
     else:
-        out.append(Note(f"승률 {row.win_rate:.1%} — 5할에 붙어 있어 지표가 안 기운다"))
+        out.append(
+            Note(f"승률 {row.win_rate:.1%} — 5할에 붙어 있어 어느 쪽으로도 안 기운다")
+        )
 
     if row.d_win_rate is not None and abs(row.d_win_rate) >= 0.01:
         way = "오르는" if row.d_win_rate > 0 else "내리는"
-        out.append(Note(f"직전 대비 {row.d_win_rate:+.1%} — {way} 중이다"))
+        out.append(Note(f"직전 대비 {row.d_win_rate:+.1%} — {way} 중"))
 
     fired = [r for r in rules if r.fires(row)]
     if fired:
@@ -111,8 +112,8 @@ def reasons(
         nerf = sum(c.row.direction_next == "nerf" for c in directed)
         out.append(
             Note(
-                f"비슷했던 사례 {len(directed)}종 중 너프 {nerf} · 버프 "
-                f"{len(directed) - nerf}"
+                f"닮은 사례 {len(directed)}종 — 너프 {nerf} · "
+                f"버프 {len(directed) - nerf}"
             )
         )
 
