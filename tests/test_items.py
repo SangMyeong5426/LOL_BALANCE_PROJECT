@@ -95,3 +95,29 @@ def test_the_threshold_sits_at_the_ninetieth_percentile() -> None:
     (Lucian–Nami 가 무너진 패치, 완성템 30종)을 놓친다.
     """
     assert LOUD == 8
+
+
+def test_churn_by_patch_needs_both_snapshots(tmp_path: Path) -> None:
+    """**첫 패치에는 값이 없다.** 비교할 앞이 없어서다.
+
+    0 으로 채우면 「아무것도 안 바뀌었다」가 되어 조용히 틀린다 — 실제로는
+    「모른다」이고, 경고를 띄우지 않는 것과 「조용한 패치였다」는 다르다.
+    """
+    from lol_balance.items import churn_by_patch
+    from lol_balance.panel import PATCH_SEQUENCE
+
+    first, second = PATCH_SEQUENCE[0], PATCH_SEQUENCE[1]
+    write(tmp_path / f"{second.replace('_', '.')}.1.json", {"1": item("완성템", 3200)})
+
+    assert churn_by_patch(tmp_path) == {}  # 앞 스냅샷이 없다
+
+    write(tmp_path / f"{first.replace('_', '.')}.1.json", {"1": item("완성템", 3000)})
+    got = churn_by_patch(tmp_path)
+
+    assert set(got) == {second}
+    assert got[second].finished == 1
+
+
+def test_share_is_zero_when_nothing_is_purchasable() -> None:
+    """0 으로 나누지 않는다."""
+    assert churn({}, {}).share == 0.0

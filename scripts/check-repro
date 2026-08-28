@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""패널을 다시 만들어 같은지 본다.
+
+    ./scripts/check-repro
+
+`README` 의 검증표가 「패널을 두 번 만들면 같은가 — md5 동일」을 `check-leakage`
+옆에 나란히 적어 뒀는데, **재는 코드가 없어 수동 주장이었다.** 검증표에 있는
+것은 돌아야 한다.
+
+## 왜 중요한가
+
+패널이 실행마다 달라지면 **어제 낸 성적을 오늘 재현할 수 없다.** 시드를 고정하고
+정렬을 못 박아 둔 것이 그래서인데(`panel.patch_rows` 끝의 `sorted`), 지키는
+장치가 없으면 조용히 깨진다.
+
+**파일 해시와 행 내용을 둘 다 본다.** 해시만 보면 SQLite 내부 페이지 순서 같은
+것에 걸려 헛경보가 나고, 행만 보면 파일이 커지는 것을 놓친다.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+BUILD = ROOT / "scripts" / "build-panel"
+
+
+def digest(path: Path) -> str:
+    return hashlib.md5(path.read_bytes()).hexdigest()
+
+
+def main() -> int:
+    if not PANEL.exists():
+        print("data/panel.sqlite 가 없다. ./scripts/build-panel 을 먼저 돌린다.")
+        return 1
+
+    before_hash, before_rows = digest(PANEL), read_panel(PANEL)
+    print(f"지금 패널  {len(before_rows):,}행 · md5 {before_hash}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        keep = Path(tmp) / "panel.sqlite"
+        shutil.copy2(PANEL, keep)
+        print("다시 만드는 중…", flush=True)
+        done = subprocess.run([sys.executable, str(BUILD)], capture_output=True)
+        if done.returncode != 0:
+            # **원본을 되돌린다.** 검사가 데이터를 망가뜨리면 안 된다.
+            shutil.copy2(keep, PANEL)
+            print(done.stderr.decode("utf-8", "replace")[-500:], file=sys.stderr)
+            print("\n❌ build-panel 이 실패했다. 패널은 되돌렸다.")
+            return 1
+
+    after_hash, after_rows = digest(PANEL), read_panel(PANEL)
+    print(f"다시 만든 것 {len(after_rows):,}행 · md5 {after_hash}")
+
+    same_rows = before_rows == after_rows
+    print(
+        f"\n  행 내용   {'같다' if same_rows else '다르다'}"
+        f"\n  파일 해시  {'같다' if before_hash == after_hash else '다르다'}"
+    )
+    if same_rows and before_hash == after_hash:
+        print("\n✅ 두 번 만들어도 같다.")
+        return 0
+
+    if not same_rows:
+        pairs = list(zip(before_rows, after_rows, strict=False))
+        differ = [(a, b) for a, b in pairs if a != b]
+        print(f"\n❌ 행이 {len(differ)}개 다르다. 처음 셋:")
+        for a, b in differ[:3]:
+            print(f"     {a.patch} {a.champion}")
+            for field in a.__dataclass_fields__:
+                x, y = getattr(a, field), getattr(b, field)
+                if x != y:
+                    print(f"       {field}: {x} → {y}")
+        return 1
+
+    # 행은 같은데 해시가 다르면 파일 쓰기 쪽이다. 재현 자체는 깨지지 않았다.
+    print("\n⚠ 행 내용은 같은데 파일 해시가 다르다 — 저장 방식을 본다.")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
