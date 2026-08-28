@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""문서 안의 상대 링크와 앵커가 실제로 가는지 본다.
+
+    ./scripts/check-links
+
+**문서가 사슬로 이어져 있는 저장소라 링크가 곧 구조다.** 절 이름을 바꾸면
+그것을 가리키던 링크가 조용히 죽는데, 읽는 사람은 클릭해 봐야 안다.
+
+바깥 주소(`http`)는 안 본다 — 망 상태에 따라 결과가 달라지면 검사가 아니다.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SKIP = (".venv", "node_modules", "__pycache__")
+
+
+def anchor(title: str) -> str:
+    """GitHub 이 제목에서 앵커를 만드는 규칙.
+
+    소문자로 낮추고, 강조 표시와 구두점을 지우고, 공백을 하이픈으로 바꾼다.
+    **엠대시도 구두점이라 지워진다** — 그래서 `A — B` 는 `a--b` 가 된다.
+    """
+    text = title.strip().lower()
+    text = re.sub(r"[`*_]", "", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"[^\w\s가-힣-]", "", text)
+    return re.sub(r"\s", "-", text)
+
+
+def main() -> int:
+    files = [p for p in ROOT.rglob("*.md") if not any(part in SKIP for part in p.parts)]
+    headings = {
+        p: {
+            anchor(m.group(1))
+            for m in re.finditer(
+                r"^#{1,6}\s+(.*)$", p.read_text(encoding="utf-8"), re.M
+            )
+        }
+        for p in files
+    }
+    by_path = {p.resolve(): p for p in files}
+
+    missing_file: list[str] = []
+    missing_anchor: list[str] = []
+    checked = 0
+
+    for source in files:
+        for match in re.finditer(
+            r"\[[^\]]*\]\(([^)\s]+)\)", source.read_text(encoding="utf-8")
+        ):
+            link = match.group(1)
+            if link.startswith(("http://", "https://", "mailto:")):
+                continue
+            checked += 1
+            path, _, fragment = link.partition("#")
+            target = (source.parent / path).resolve() if path else source.resolve()
+            where = source.relative_to(ROOT)
+            if path and not target.exists():
+                missing_file.append(f"{where} → {link}")
+                continue
+            if (
+                fragment
+                and (key := by_path.get(target))
+                and fragment not in headings[key]
+            ):
+                missing_anchor.append(f"{where} → {link}")
+
+    print(f"문서 {len(files)}개 · 안쪽 링크 {checked}개")
+    for label, found in (
+        ("가는 곳이 없다", missing_file),
+        ("그런 절이 없다", missing_anchor),
+    ):
+        if found:
+            print(f"\n❌ {label} — {len(found)}개")
+            for line in found:
+                print(f"   {line}")
+    if missing_file or missing_anchor:
+        return 1
+    print("\n✅ 전부 간다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

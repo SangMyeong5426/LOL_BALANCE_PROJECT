@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""검사를 전부 돌린다.
+
+    ./scripts/check-all [--quick]
+
+**검사가 아홉 개인데 입구가 없었다.** 흩어져 있으면 아무도 다 돌리지 않고,
+안 돌린 검사는 없는 것과 같다.
+
+`--quick` 은 **데이터를 다시 만드는 것**(`check-repro`)과 **모델을 돌리는 것**
+(`check-leakage`)을 건너뛴다. 커밋 전에 쓰라고 둔 것이다.
+
+## 순서
+
+빠르고 정적인 것부터 돌린다. 형식이 깨졌으면 그것부터 보이는 편이 낫고,
+느린 검사를 기다린 뒤에 알면 손해다.
+
+데이터가 없으면 **건너뛴 것으로 적고 실패로 세지 않는다** — clone 직후에는
+`data/` 가 비어 있는 것이 정상이다.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PANEL = ROOT / "data" / "panel.sqlite"
+NOTES = ROOT / "data" / "patchnotes"
+
+# (이름, 명령, 이것이 있어야 돈다)
+CHECKS: tuple[tuple[str, list[str], Path | None], ...] = (
+    ("ruff", ["ruff", "check", "."], None),
+    # **파이썬만 본다.** `ruff format --check .` 는 마크다운 안의 코드 블록까지
+    # 고치려 드는데, 문서의 코드 블록은 읽으라고 손으로 정렬해 둔 것이다.
+    # pre-commit 이 넘기는 범위와 같게 맞춘다.
+    ("ruff format", ["ruff", "format", "--check", "src", "scripts", "tests"], None),
+    ("mypy", ["mypy", "src"], None),
+    ("문서 링크", ["./scripts/check-links"], None),
+    ("AGENTS ≡ CLAUDE", ["./scripts/check-rule-docs"], None),
+    ("테스트", [sys.executable, "-m", "pytest", "-q"], None),
+    ("README 수치", ["./scripts/check-docs"], PANEL),
+    ("라벨 충돌", ["./scripts/score-labels"], PANEL),
+    ("노트 검색", ["./scripts/score-retrieval"], NOTES),
+    ("누출", ["./scripts/check-leakage"], PANEL),
+    ("재현", ["./scripts/check-repro"], PANEL),
+)
+
+# `--quick` 이 건너뛰는 것. 둘 다 분 단위다.
+SLOW = {"누출", "재현"}
+
+
+def main() -> int:
+    quick = "--quick" in sys.argv
+    failed: list[str] = []
+    skipped: list[str] = []
+
+    for name, command, needs in CHECKS:
+        if quick and name in SLOW:
+            skipped.append(f"{name} (--quick)")
+            continue
+        if needs is not None and not needs.exists():
+            skipped.append(f"{name} ({needs.relative_to(ROOT)} 없음)")
+            continue
+
+        started = time.perf_counter()
+        print(f"  {name:16}", end="", flush=True)
+        done = subprocess.run(command, cwd=ROOT, capture_output=True)
+        took = time.perf_counter() - started
+        if done.returncode == 0:
+            print(f"✅  {took:>5.1f}s")
+        else:
+            print(f"❌  {took:>5.1f}s")
+            failed.append(name)
+            tail = (done.stdout + done.stderr).decode("utf-8", "replace").strip()
+            for line in tail.splitlines()[-12:]:
+                print(f"       {line}")
+
+    print()
+    if skipped:
+        print(f"건너뜀 {len(skipped)}개 — {' · '.join(skipped)}")
+    if failed:
+        print(f"❌ {len(failed)}개 실패 — {' · '.join(failed)}")
+        return 1
+    print("✅ 전부 통과.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
