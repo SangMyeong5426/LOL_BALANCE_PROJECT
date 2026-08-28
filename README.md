@@ -17,6 +17,8 @@ LLM 이 관여한 것은 **정답지 라벨 1,599종 · 규칙 12개 · 판단 3
 
 **실행 시점에 LLM API 를 한 번도 부르지 않는다.** 모델이 만든 산출물은 대화 안에서 만들어 저장소에 텍스트로 두고, 코드는 그것을 읽어 채점한다. 설계 근거는 [ADR 0003](docs/adr/0003-llm-provider-and-calling-convention.md)에 있다.
 
+API 를 부르는 코드가 한 군데 있긴 하다 — [`extract.py`](src/lol_balance/extract.py)와 [`pilot-extract`](scripts/pilot-extract)가 패치 노트를 구조화하는 파일럿이다. **키가 없어 한 번도 안 돌렸고 테스트도 없다.** 수치 추출은 세 과제 어디에도 안 들어가서 임계 경로에서 뺐다([followups 2e](docs/followups.md)).
+
 RAG 는 검색부(R1 사례 · R2 노트 · R3 수치)와 그 위의 판단(B6)으로 나눠 만들었고, 검색 품질은 [`score-retrieval`](scripts/score-retrieval)이 따로 잰다(MRR@10 0.924 · Recall@10 98.1%). 판단자가 답을 기억하는지도 [검정해서 배제했다](#llm-이-통계를-이겼는가) — AUC 0.505 로 찍기와 구별이 안 된다.
 
 ```text
