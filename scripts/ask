@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""한 챔피언을 놓고 **검색기 셋이 무엇을 찾아오는지** 보여 준다.
+
+    ./scripts/ask Senna 16_13
+    ./scripts/ask Senna 16_13 --answer     실제 결과까지 보인다
+
+`run-report` 는 성적을 재고 `predict` 는 후보를 줄 세운다. **이것은 RAG 가
+제대로 도는지 사람이 직접 보는 자리다** — 무엇을 찾아왔고 그것이 말이 되는지.
+
+## 답을 먼저 보이지 않는다
+
+`--answer` 없이는 실제 결과를 안 찍는다. **먼저 읽고 스스로 판단한 뒤 맞춰
+보라는 것**이고, 그것이 이 도구를 시험하는 옳은 순서다.
+
+## 경계는 도구가 지킨다
+
+`as_of` 를 검색기 생성자에 넘기므로 **물어본 패치 이후 정보는 검색 풀에 아예
+안 들어간다.** 여기서 빠뜨려도 미래가 새지 않는다.
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.baseline import direction_rows  # noqa: E402
+from lol_balance.explain import patch_notes, reasons  # noqa: E402
+from lol_balance.items import churn_by_patch  # noqa: E402
+from lol_balance.panel import next_patch  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+from lol_balance.retrieval import CaseSearch, NoteSearch, StatLookup  # noqa: E402
+from lol_balance.rules import read_rules  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+NOTES = ROOT / "data" / "patchnotes"
+RULES = ROOT / "rules" / "proposed.jsonl"
+ITEMS = ROOT / "data" / "items"
+
+
+def lifetime_pro(rows: tuple, champion: str) -> float | None:
+    """평생 평균 프로 픽·밴율. 한 패치만 튀는 것과 늘 나오는 것은 다르다."""
+    seen = [r.pro_presence for r in rows if r.champion == champion and r.pro_presence]
+    return sum(seen) / len(seen) if len(seen) >= 20 else None
+
+
+def main() -> int:
+    if len(sys.argv) < 3:
+        print(__doc__)
+        return 1
+    champion, at = sys.argv[1], sys.argv[2]
+    reveal = "--answer" in sys.argv
+
+    if not PANEL.exists():
+        print("data/panel.sqlite 가 없다. ./scripts/build-panel 을 먼저 돌린다.")
+        return 1
+    rows = read_panel(PANEL)
+    target = next((r for r in rows if r.champion == champion and r.patch == at), None)
+    if target is None:
+        near = sorted(
+            {r.champion for r in rows if champion.lower() in r.champion.lower()}
+        )
+        print(
+            f"패널에 {champion} @ {at} 이 없다."
+            + (f" 비슷한 이름: {near[:5]}" if near else "")
+        )
+        return 2
+
+    nxt = next_patch(at)
+    print(f"■ {at} 지표로 볼 때 {champion} 는 {nxt} 에 조정될까, 어느 쪽으로?")
+    print(f"  검색 경계 as_of={at} — 이후 정보는 검색 풀에 없다\n")
+
+    churn = churn_by_patch(ITEMS).get(nxt) if ITEMS.is_dir() else None
+    for note in patch_notes(churn):
+        print(f"  ⚠ {note.text}\n")
+
+    stat = StatLookup(rows, at)
+    print("── R3 수치 조회 ──")
+    print(
+        f"  {at:7}승률 {target.win_rate:.1%} · 픽률 {target.pick_rate:.1%} · "
+        f"밴율 {(target.ban_rate or 0):.1%} · 판수 {target.matches:,}"
+    )
+    for row in stat.champion(champion)[-4:]:
+        print(
+            f"  {row.patch:7}승률 {row.win_rate:.1%} · 픽률 {row.pick_rate:.1%} · "
+            f"밴율 {(row.ban_rate or 0):.1%}"
+        )
+
+    pool = direction_rows(rows)
+    cases = CaseSearch(pool, at).similar(target, k=10)
+    print(f"\n── R1 사례 검색 ── 지표가 비슷했던 {len(cases)}종과 그때 결과")
+    for case in cases:
+        print(
+            f"  {case.row.patch:7}{case.row.champion:16}승률 {case.row.win_rate:.1%} · "
+            f"밴율 {(case.row.ban_rate or 0):.1%}  → {case.row.direction_next}"
+        )
+
+    if NOTES.is_dir():
+        blocks: dict[str, list] = defaultdict(list)
+        for path in sorted(NOTES.glob("*.html")):
+            patch = path.stem.rsplit(".", 1)[0].replace(".", "_")
+            blocks[patch].extend(champion_changes(path.read_bytes()))
+        # **이름만으로 질의하면 스킨 버그 수정이 최상위로 올라온다.** 그래서
+        # 실제로 조정된 패치로 좁혀 묻는다 — 토크나이저가 패치 번호를 살리므로
+        # 「이름 + 패치」가 통한다(Recall@10 56.3% → 98.1%).
+        search = NoteSearch(blocks, at)
+        adjusted = [
+            next_patch(r.patch)
+            for r in stat.champion(champion)
+            if r.adjusted_next and next_patch(r.patch)
+        ]
+        print("\n── R2 노트 검색 ── 이 챔피언이 과거에 무엇 때문에 조정됐나")
+        if not adjusted:
+            print("  이 경계 안에서는 조정된 적이 없다")
+        for patch in [p for p in adjusted if p][-3:]:
+            # **스킨 절을 걸러 낸다.** 「Bewitching Senna」처럼 절 이름이 챔피언
+            # 이름을 또 담고 있어 BM25 점수가 높게 나오는데, 스킨은 밸런스
+            # 조정이 아니다. 능력치·스킬 절은 이름을 안 담는다.
+            hits = [
+                block
+                for _, block, _ in search.search(f"{champion} {patch}", k=6)
+                if champion.split()[0].lower() not in block.section.lower()
+            ]
+            for block in hits[:1]:
+                print(f"  {patch:7}{block.section[:20]:22}{block.lines[0][:70]}")
+
+    print("\n── 근거와 경고 ──")
+    patch_rows = [r for r in rows if r.patch == at]
+    notes = reasons(
+        target,
+        patch_rows,
+        CaseSearch(pool, at).similar(target, k=25),
+        read_rules(RULES) if RULES.exists() else (),
+        lifetime_pro(rows, champion),
+    )
+    for note in notes:
+        print(f"  {'⚠ ' if note.warn else '  '}{note.text}")
+
+    if reveal:
+        got = target.direction_next if target.adjusted_next else "조정 안 됨"
+        print(f"\n── 실제 {nxt} 결과 ──\n  {got}")
+    else:
+        print("\n(실제 결과를 보려면 --answer 를 붙인다)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
