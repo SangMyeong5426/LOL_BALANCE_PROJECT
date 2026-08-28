@@ -265,8 +265,16 @@ pre-commit install
 ### 다음 패치를 실제로 예측한다
 
 ```bash
-./scripts/predict --patch 16_13 --top 10          # 조정·너프·버프 후보
-./scripts/predict --patch 16_13 --top 10 --score  # 답을 아는 패치면 채점까지
+./scripts/predict                                 # 가장 최근 패치에서 다음을 예측
+./scripts/predict --patch 16_12 --top 10 --score  # 답을 아는 패치면 채점까지
+```
+
+인자 없이 부르면 **아직 답이 없는 패치를 예측한다.** 패널은 마지막 패치를 빼는데, 다음 패치 노트가 없으면 전 챔피언이 조정 안 됨으로 라벨이 붙어 조용히 틀리기 때문이다. 그 경우 행을 그 자리에서 만들고 라벨은 읽지 않는다.
+
+```text
+16_15 지표로 16_16 패치를 예측한다
+  학습 8,767행 (~16_9) · 대상 173종
+  ⚠ 아직 답이 없는 패치다 — 진짜 예측이고 채점할 수 없다
 ```
 
 순위만 내지 않는다. 왜 그런지와 놓치면 사고가 나는 것을 같이 낸다. 패치 전체에 걸리는 것은 머리말에 한 번만 낸다.
@@ -325,7 +333,7 @@ pre-commit install
 | ruff · ruff format · mypy | 코드 형식과 타입 |
 | 문서 링크 | 상대 링크와 앵커가 실제로 가는가 ([`check-links`](scripts/check-links)) |
 | AGENTS ≡ CLAUDE | 두 규칙 문서가 한 글자도 안 다른가 |
-| 테스트 | 313개 · 커버리지 94% |
+| 테스트 | 314개 · 커버리지 94% |
 | README 수치 | 문서에 적은 수가 실제와 맞는가 |
 | 라벨 충돌 | 손 라벨이 기계 판정과 어긋나는가 |
 | 노트 검색 | R2 가 얼마나 맞히는가 ([`score-retrieval`](scripts/score-retrieval)) |
@@ -348,7 +356,7 @@ docs/spec/           데이터를 어디서 어떻게 받는가
 docs/adr/            기술 결정 기록 7건
 docs/results/        측정 결과
 data/ · runs/        원자료와 실행 산출물 (커밋하지 않는다)
-tests/               313개
+tests/               314개
 ```
 
 작업 규칙은 [`AGENTS.md`](AGENTS.md)에 있다. [`CLAUDE.md`](CLAUDE.md)와 같은 문서다.
@@ -362,7 +370,7 @@ tests/               313개
 | pydantic | 구조화 출력 강제 |
 | beautifulsoup4 | 패치 노트 HTML 파싱 |
 | sqlite (표준 라이브러리) | 패널 저장 |
-| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 313개, 커버리지 94% |
+| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 314개, 커버리지 94% |
 
 의존성은 직접 import 하는 것만 선언한다. `scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 적지 않는다.
 
