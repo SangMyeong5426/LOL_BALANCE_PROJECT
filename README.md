@@ -298,14 +298,27 @@ pre-commit install
 ### 검사
 
 ```bash
-ruff check . && pytest && mypy
-pytest --cov              # 커버리지 94%
-./scripts/check-docs      # README 수치가 실제와 맞는가
-./scripts/score-retrieval # 노트 검색이 얼마나 맞히는가
-./scripts/check-repro     # 패널을 두 번 만들면 같은가
+./scripts/check-all           # 전부 (약 75초)
+./scripts/check-all --quick   # 누출·재현을 빼고 (약 40초)
 ```
 
-`pre-commit` 이 커밋 전에 ruff 를 돌린다. `pytest`(309개)와 `mypy` 는 자동으로 돌지 않으므로 직접 실행한다.
+열한 가지를 순서대로 돌린다. 형식이 깨졌으면 먼저 보이도록 **빠르고 정적인 것부터** 간다.
+
+| | 무엇을 본다 |
+| --- | --- |
+| ruff · ruff format · mypy | 코드 형식과 타입 |
+| 문서 링크 | 상대 링크와 앵커가 실제로 가는가 ([`check-links`](scripts/check-links)) |
+| AGENTS ≡ CLAUDE | 두 규칙 문서가 한 글자도 안 다른가 |
+| 테스트 | 309개 · 커버리지 94% |
+| README 수치 | 문서에 적은 수가 실제와 맞는가 |
+| 라벨 충돌 | 손 라벨이 기계 판정과 어긋나는가 |
+| 노트 검색 | R2 가 얼마나 맞히는가 ([`score-retrieval`](scripts/score-retrieval)) |
+| 누출 | 정답을 섞으면 성능이 무너지는가 |
+| 재현 | 패널을 두 번 만들면 같은가 ([`check-repro`](scripts/check-repro)) |
+
+**데이터가 없으면 건너뛴 것으로 적고 실패로 세지 않는다** — clone 직후에는 `data/` 가 비어 있는 것이 정상이다.
+
+`pre-commit` 이 커밋 전에 ruff 를 돌린다. 나머지는 자동으로 안 도므로 위를 직접 실행한다.
 
 ## 구조
 
@@ -337,7 +350,7 @@ tests/               309개
 
 의존성은 직접 import 하는 것만 선언한다. `scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 적지 않는다.
 
-실행 시점에 LLM API 를 부르지 않는다([위](#이-저장소가-실제로-하는-일)). 산출물이 어떻게 만들어졌는지는 [`ground_truth/README.md`](ground_truth/README.md)에 있다.
+실행 시점에 LLM API 를 부르지 않는다([위](#어떤-방법으로-푸는가--rag-는-목적이-아니라-갈래-하나다)). 산출물이 어떻게 만들어졌는지는 [`ground_truth/README.md`](ground_truth/README.md)에 있다.
 
 ### 도입하지 않는 것
 
