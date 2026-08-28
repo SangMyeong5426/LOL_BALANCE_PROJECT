@@ -11,7 +11,7 @@ import pytest
 from conftest import PanelRowFactory
 from lol_balance.panel import PanelRow
 from lol_balance.patchnotes import ChangeBlock
-from lol_balance.retrieval import CaseSearch, NoteSearch, StatLookup
+from lol_balance.retrieval import CaseSearch, NoteSearch, StatLookup, _tokens
 
 
 @pytest.fixture
@@ -236,3 +236,57 @@ def test_an_empty_pool_gives_empty_results(make_row: PanelRowFactory) -> None:
     search = CaseSearch((), "13_15")
 
     assert search.similar_many([make_row("13_15", 1)], k=5) == ((),)
+
+
+# --- 토큰 나누기 --------------------------------------------------------
+#
+# **한때 `[a-z]+` 였다.** 그래서 `16_13` 도 `reduced to 60 from 85` 의 60·85 도
+# 통째로 사라졌고, 색인에 패치 번호가 없으니 **어느 패치의 Ahri 인지 원리적으로
+# 못 가렸다.** 「챔피언 + 패치」로 그 블록을 찾는 과제에서 Recall@10 이 56.3%
+# 였는데, 숫자를 살리고 패치를 색인에 넣으니 98.1% 가 됐다.
+
+
+def test_numbers_survive_tokenising() -> None:
+    """수치가 사라지면 「60 에서 85 로 바뀐 그 블록」을 못 찾는다."""
+    assert _tokens("damage 60 from 85") == ["damage", "60", "from", "85"]
+
+
+def test_a_patch_id_stays_one_word() -> None:
+    """`16` 과 `13` 으로 쪼개면 아무 패치에나 걸린다."""
+    assert _tokens("Ahri 16_13 cooldown") == ["ahri", "16_13", "cooldown"]
+
+
+def test_a_decimal_stays_one_word() -> None:
+    """`0.67` 이 `0` 과 `67` 이 되면 12.5 를 겪은 것과 같은 문제가 난다."""
+    assert _tokens("reduced to 0.67 from 0.85.") == [
+        "reduced",
+        "to",
+        "0.67",
+        "from",
+        "0.85",
+    ]
+
+
+def test_a_sentence_period_does_not_join_words() -> None:
+    """마침표는 **숫자 사이에서만** 이어 붙인다."""
+    assert _tokens("Cooldown increased. Damage reduced.") == [
+        "cooldown",
+        "increased",
+        "damage",
+        "reduced",
+    ]
+
+
+def test_the_patch_is_searchable() -> None:
+    """색인 문서에 패치가 들어가야 질의로 가릴 수 있다.
+
+    같은 챔피언이 여러 패치에 나오므로, 이것이 없으면 이름으로 찾은 뒤
+    **바깥에서 패치로 좁히는 우회**밖에 없다.
+    """
+    blocks = {
+        "13_14": (ChangeBlock("Ahri", "Q", "Q", ("Damage reduced.",)),),
+        "13_15": (ChangeBlock("Ahri", "Q", "Q", ("Damage reduced.",)),),
+    }
+    found = NoteSearch(blocks, as_of="15_1").search("Ahri 13_15", k=1)
+
+    assert found[0][0] == "13_15"

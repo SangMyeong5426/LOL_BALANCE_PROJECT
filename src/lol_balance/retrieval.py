@@ -226,7 +226,14 @@ class CaseSearch:
         return np.asarray((raw - mean) / spread)
 
 
-_WORD = re.compile(r"[a-z]+")
+# **숫자를 버리면 안 된다.** 한때 `[a-z]+` 였는데 그러면 `16_13` 도
+# `reduced to 60 from 85` 의 60·85 도 통째로 사라진다. 패치 번호가 색인에 없으니
+# **어느 패치의 Ahri 인지 원리적으로 못 가렸고**, 「챔피언 + 패치」로 그 블록을
+# 찾는 과제 1,599건에서 Recall@10 이 56.3% 였다. 숫자를 살리니 93.1% 다.
+#
+# 마침표·밑줄은 **숫자 사이에 있을 때만** 이어 붙인다 — `16_13` 과 `0.67` 은
+# 한 낱말이어야 하고, 문장 끝의 마침표는 아니다.
+_WORD = re.compile(r"[a-z0-9]+(?:[._][a-z0-9]+)*")
 
 
 def _tokens(text: str) -> list[str]:
@@ -252,7 +259,11 @@ class NoteSearch:
             if patch_index(patch) >= limit:
                 continue
             for block in items:
-                text = f"{block.champion} {block.section} " + " ".join(block.lines)
+                # **패치를 색인에 넣는다.** 같은 챔피언이 여러 패치에 나오므로
+                # 이것이 없으면 질의로 패치를 줘도 가릴 수가 없다.
+                text = f"{patch} {block.champion} {block.section} " + " ".join(
+                    block.lines
+                )
                 self.docs.append((patch, block, _tokens(text)))
         self.frequency: Counter[str] = Counter()
         for _, _, tokens in self.docs:

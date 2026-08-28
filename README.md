@@ -284,9 +284,10 @@ pre-commit install
 ruff check . && pytest && mypy
 pytest --cov              # 커버리지 93%
 ./scripts/check-docs      # README 수치가 실제와 맞는가
+./scripts/score-retrieval # 노트 검색이 얼마나 맞히는가
 ```
 
-`pre-commit` 이 커밋 전에 ruff 를 돌린다. `pytest`(281개)와 `mypy` 는 자동으로 돌지 않으므로 직접 실행한다.
+`pre-commit` 이 커밋 전에 ruff 를 돌린다. `pytest`(286개)와 `mypy` 는 자동으로 돌지 않으므로 직접 실행한다.
 
 ## 구조
 
@@ -300,7 +301,7 @@ docs/spec/           데이터를 어디서 어떻게 받는가
 docs/adr/            기술 결정 기록 7건
 docs/results/        측정 결과
 data/ · runs/        원자료와 실행 산출물 (커밋하지 않는다)
-tests/               281개
+tests/               286개
 ```
 
 작업 규칙은 [`AGENTS.md`](AGENTS.md)에 있다. [`CLAUDE.md`](CLAUDE.md)와 같은 문서다.
@@ -314,7 +315,7 @@ tests/               281개
 | pydantic | 구조화 출력 강제 |
 | beautifulsoup4 | 패치 노트 HTML 파싱 |
 | sqlite (표준 라이브러리) | 패널 저장 |
-| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 281개, 커버리지 93% |
+| pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 286개, 커버리지 93% |
 
 의존성은 직접 import 하는 것만 선언한다. `scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 적지 않는다.
 
