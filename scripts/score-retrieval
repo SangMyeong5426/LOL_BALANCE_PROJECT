@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""노트 검색(R2)이 얼마나 맞히는지 잰다.
+
+    ./scripts/score-retrieval [--k 10]
+
+**과제는 「알고 있는 것 찾기」다.** 손 라벨이 「이 챔피언은 이 패치에 조정됐다」를
+알고 있으므로, 그 챔피언과 패치로 질의해 **그 블록이 상위에 오는가**를 본다.
+정답을 따로 만들 필요가 없다.
+
+## 왜 필요한가
+
+한때 `NoteSearch` 주석이 「밀집 임베딩이 희소를 이긴다는 보장이 없다」고 적어
+뒀는데 **재 보지 않은 주장이었다.** 이 저장소는 통계 베이스라인 없이 LLM 성능을
+주장하지 않기로 정해 뒀고, 반대 방향으로도 같은 기준이어야 한다.
+
+이 스크립트가 있으면 검색을 바꿀 때마다 **좋아졌는지 나빠졌는지 말할 수 있다.**
+임베딩을 넣을지 정하는 것도 여기서 한다.
+
+## 읽는 법
+
+    MRR@k       정답이 몇 번째에 오나. 1위면 1.0, 2위면 0.5
+    Recall@k    상위 k 안에 정답이 하나라도 있나
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.groundtruth import read_labels  # noqa: E402
+from lol_balance.patchnotes import champion_changes  # noqa: E402
+from lol_balance.retrieval import NoteSearch  # noqa: E402
+
+NOTES = ROOT / "data" / "patchnotes"
+LABELS = ROOT / "ground_truth" / "directions"
+
+
+def main() -> int:
+    k = int(sys.argv[sys.argv.index("--k") + 1]) if "--k" in sys.argv else 10
+    if not NOTES.is_dir():
+        print("data/patchnotes 가 없다. ./scripts/fetch-patchnotes 를 먼저 돌린다.")
+        return 1
+
+    blocks: dict[str, list] = defaultdict(list)
+    for path in sorted(NOTES.glob("*.html")):
+        patch = path.stem.rsplit(".", 1)[0].replace(".", "_")
+        blocks[patch].extend(champion_changes(path.read_bytes()))
+
+    flat = [(patch, block) for patch, items in blocks.items() for block in items]
+    where = {id(block): i for i, (_, block) in enumerate(flat)}
+
+    # 정답: 그 챔피언이 그 패치에 실제로 조정된 블록들
+    gold: dict[tuple[str, str], set[int]] = defaultdict(set)
+    for path in sorted(LABELS.glob("*.jsonl")):
+        for label in read_labels(path):
+            gold[(label.champion, label.patch)] |= {
+                i
+                for i, (patch, block) in enumerate(flat)
+                if patch == label.patch and block.champion == label.champion
+            }
+    queries = [key for key, found in gold.items() if found]
+    if not queries:
+        print("라벨이 없다. ./scripts/save-labels 로 먼저 붙인다.")
+        return 1
+
+    search = NoteSearch(blocks, as_of="16_15")
+    print(f"질의 {len(queries):,}건 · 문서 {len(flat):,}개 · k={k}\n")
+    print(f"{'질의 형태':16}{'MRR@k':>9}{'Recall@k':>11}")
+
+    # **패치를 함께 주는 것이 핵심이다.** 이름만 주면 같은 챔피언이 여러 패치에
+    # 나오므로 어느 것을 원하는지 알 도리가 없다.
+    for label, build in (
+        ("이름만", lambda c, p: c),
+        ("이름 + 패치", lambda c, p: f"{c} {p}"),
+    ):
+        rank_sum = hits = 0.0
+        for champion, patch in queries:
+            want = gold[(champion, patch)]
+            found = [
+                where[id(b)] for _, b, _ in search.search(build(champion, patch), k)
+            ]
+            for rank, index in enumerate(found, 1):
+                if index in want:
+                    rank_sum += 1 / rank
+                    hits += 1
+                    break
+        n = len(queries)
+        print(f"{label:16}{rank_sum / n:>9.3f}{hits / n:>11.1%}")
+
+    print("\n**이것은 검색부만 잰다.** 판단이 얼마나 맞는지는 `run-report` 의 B6 다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
