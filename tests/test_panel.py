@@ -14,6 +14,7 @@ from conftest import PanelRowFactory
 from lol_balance.panel import (
     HISTORY,
     PATCH_SEQUENCE,
+    as_patch,
     champion_names,
     name_after,
     next_patch,
@@ -216,3 +217,24 @@ def test_name_after_increments_the_minor() -> None:
     """
     assert name_after("16_15") == "16_16"
     assert name_after("13_9") == "13_10"
+
+
+def test_a_patch_typed_the_way_a_stats_site_shows_it_is_accepted() -> None:
+    """**화면에서 본 대로 쳐도 받는다.**
+
+    통계 사이트는 `16.15` 로 적고 이 저장소는 `16_15` 로 쓴다. 구분자만 다른
+    것이라 도구가 맞춰 준다 — 「아는 패치가 아니다」가 나오면 도구 쪽이 틀렸다.
+    """
+    assert as_patch("16.15") == "16_15"
+    assert as_patch("16-15") == "16_15"
+    assert as_patch(" 16_15 ") == "16_15"
+    assert as_patch("16_15") == "16_15"
+
+
+def test_a_data_dragon_version_is_not_folded_into_a_patch() -> None:
+    """**이름으로 잇지 않는다.** `16.16.1` 을 `16_16` 으로 바꾸는 것은 표기
+    변환이 아니라 주장이다. 그대로 두면 호출부가 「아는 패치가 아니다」로 걸러
+    안내를 낸다.
+    """
+    assert as_patch("16.16.1") == "16_16_1"
+    assert as_patch("16.16.1") not in PATCH_SEQUENCE

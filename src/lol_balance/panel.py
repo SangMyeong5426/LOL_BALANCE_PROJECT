@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -44,6 +45,20 @@ _INDEX = {patch: i for i, patch in enumerate(PATCH_SEQUENCE)}
 def patch_index(patch: str) -> int:
     """패치의 시간 순서. **문자열 정렬로는 안 된다** — `13_9` 가 `13_10` 뒤로 간다."""
     return _INDEX[patch]
+
+
+def as_patch(text: str) -> str:
+    """사람이 친 패치 이름을 내부 키로 맞춘다.
+
+    **같은 패치를 출처마다 다르게 부른다** — 통계 사이트 화면은 `16.15`, 이
+    저장소는 `16_15` 다. 구분자만 다른 것이라 받아 준다. 화면에서 본 대로
+    쳤는데 「아는 패치가 아니다」가 나오면 도구 쪽이 틀린 것이다.
+
+    세 자리(`16.16.1`)는 Data Dragon 표기인데 **여기서 패치로 잇지 않는다.**
+    이름으로 잇는 것은 표기 변환이 아니라 주장이고, 이 저장소는 이름이 아니라
+    날짜와 내부 ID 로 잇는다(`AGENTS.md` 「버전 표기를 믿지 않는다」).
+    """
+    return re.sub(r"[.\-\s]+", "_", text.strip())
 
 
 def next_patch(patch: str) -> str | None:

@@ -39,6 +39,7 @@ from lol_balance.items import churn_by_patch  # noqa: E402
 from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
     PATCH_SEQUENCE,
+    as_patch,
     name_after,
     next_patch,
     patch_index,
@@ -88,7 +89,7 @@ def main() -> int:
     if len(sys.argv) < 3:
         print(__doc__)
         return 1
-    champion, at = sys.argv[1], sys.argv[2]
+    champion, at = sys.argv[1], as_patch(sys.argv[2])
     reveal = "--answer" in sys.argv
 
     if not PANEL.exists():
@@ -100,6 +101,10 @@ def main() -> int:
     # 없어서 흔히 걸린다.
     if at not in PATCH_SEQUENCE:
         print(f"{at} 은 아는 패치가 아니다. {PATCH_SEQUENCE[0]} ~ {PATCH_SEQUENCE[-1]}")
+        if at.count("_") > 1:
+            print(
+                "  세 자리는 Data Dragon 표기다. 패치는 두 자리로 쓴다 — 16_15 · 16.15 둘 다 된다"
+            )
         return 2
 
     covered = sorted({r.patch for r in rows}, key=patch_index)
