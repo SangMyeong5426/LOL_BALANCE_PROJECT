@@ -20,6 +20,7 @@ from lol_balance.panel import (
     next_patch,
     patch_index,
     patch_rows,
+    settled_patch,
 )
 from lol_balance.ugg import parse_champion_ranking
 
@@ -238,3 +239,45 @@ def test_a_data_dragon_version_is_not_folded_into_a_patch() -> None:
     """
     assert as_patch("16.16.1") == "16_16_1"
     assert as_patch("16.16.1") not in PATCH_SEQUENCE
+
+
+# --- 기준 패치 고르기 ---------------------------------------------------
+
+
+def test_the_newest_patch_wins_when_it_has_settled() -> None:
+    """평소에는 가장 최근이 맞다."""
+    assert settled_patch({"16_12": 1_700_000, "16_13": 2_200_000}) == "16_13"
+
+
+def test_a_green_snapshot_is_skipped() -> None:
+    """**가장 최근이 가장 좋은 것은 아니다.**
+
+    아카이브가 패치마다 다른 시각에 긁혀서, 출시 직후 값만 든 패치가 있다.
+    그것을 기준으로 잡으면 아직 안 굳은 승률로 예측하게 된다.
+    """
+    sizes = {"16_13": 2_254_893, "16_15": 334_500}
+
+    assert settled_patch(sizes) == "16_13"
+
+
+def test_string_order_does_not_decide() -> None:
+    """**`16_9` 는 `16_13` 보다 앞이다.** 문자열로 고르면 뒤집힌다."""
+    assert settled_patch({"16_9": 2_000_000, "16_13": 2_000_000}) == "16_13"
+
+
+def test_an_unknown_size_does_not_block() -> None:
+    """**모른다는 것과 얇다는 것은 다르다.** 데이터가 없어도 도구는 돌아야 한다."""
+    assert settled_patch({"16_13": 2_000_000, "16_15": None}) == "16_15"
+
+
+def test_absolute_size_does_not_matter() -> None:
+    """**문턱은 이웃과 견준 값이다.** 전부 작아도 서로 비슷하면 최신이 뽑힌다.
+
+    「데이터가 적다」를 잡는 규칙이 아니라 **「이 패치만 덜 찼다」**를 잡는
+    규칙이다. 2023년 패치는 통째로 작은데 그건 그 시절이 그런 것이다.
+    """
+    assert settled_patch({"16_13": 10, "16_15": 9}) == "16_15"
+
+
+def test_nothing_to_choose_from_is_none() -> None:
+    assert settled_patch({}) is None

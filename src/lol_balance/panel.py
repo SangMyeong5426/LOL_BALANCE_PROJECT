@@ -290,6 +290,41 @@ def patch_rows(
     return tuple(sorted(out, key=lambda r: r.champion_id))
 
 
+# 그 패치 지표가 이웃의 이 비율에 못 미치면 **아직 안 굳은 스냅샷**이다.
+# `explain.THIN_PATCH` 와 같은 값이고 뜻도 같다 — 한쪽은 경고를 내고 여기서는
+# 기준 패치를 고른다.
+SETTLED = 0.4
+
+
+def settled_patch(sizes: dict[str, int | None]) -> str | None:
+    """예측 기준으로 삼을 **가장 최근의, 지표가 굳은** 패치.
+
+    **가장 최근이 가장 좋은 것은 아니다.** u.gg 아카이브는 패치마다 긁힌 시각이
+    달라서 어떤 패치는 출시 직후 값만 들어 있다(`16_15` 는 33만 판 · 이웃은
+    200만 판). 그것을 기준으로 잡으면 **아직 안 굳은 승률로 예측하게 된다.**
+
+    그래서 뒤에서부터 훑어 `SETTLED` 문턱을 넘는 첫 패치를 쓴다. 크기를 모르는
+    패치(`None`)는 **막지 않는다** — 모른다는 것과 얇다는 것은 다르고, 데이터가
+    없는 환경에서 아무것도 못 고르면 도구가 죽는다.
+
+    **문턱은 관측된 최대값 기준이라 절대 크기는 안 본다.** 전부 작아도 서로
+    비슷하면 가장 최근이 뽑힌다 — 「이 패치만 덜 찼다」를 잡는 것이지 「데이터가
+    적다」를 잡는 것이 아니다. 그래서 아무도 못 넘는 경우는 생기지 않는다.
+
+    문턱을 고정값이 아니라 **그때그때 이웃과 견줘 재는** 이유는, 아카이브가
+    나중에 다시 긁으면 저절로 최신 패치로 돌아오게 하기 위해서다.
+    """
+    order = sorted(sizes, key=patch_index, reverse=True)
+    if not order:
+        return None
+    typical = max((v for v in sizes.values() if v), default=0)
+    for patch in order:
+        got = sizes[patch]
+        if got is None or got >= typical * SETTLED:
+            return patch
+    return order[0]  # pragma: no cover — 최대값은 늘 자기 문턱을 넘는다
+
+
 def name_after(patch: str) -> str:
     """다음 패치의 **이름**. 부 번호를 하나 올린다.
 

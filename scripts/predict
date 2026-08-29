@@ -51,6 +51,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -78,10 +79,12 @@ from lol_balance.panel import (  # noqa: E402
     name_after,
     next_patch,
     patch_index,
+    settled_patch,
 )
 from lol_balance.retrieval import CaseSearch  # noqa: E402
 from lol_balance.rules import read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
+from lol_balance.ugg import parse_champion_ranking  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
 RANKING = ROOT / "data" / "ugg" / "champion_ranking"
@@ -102,15 +105,28 @@ VIEWS = (
 )
 
 
-def latest_usable(rows: tuple[PanelRow, ...]) -> str:
-    """예측할 수 있는 가장 최근 패치.
+def games_in(patch: str) -> int | None:
+    """그 패치 스냅샷이 담은 총 게임 수. 파일이 없으면 모른다."""
+    path = RANKING / f"{patch}.json"
+    if not path.exists():
+        return None
+    try:
+        return int(parse_champion_ranking(json.loads(path.read_text())).games)
+    except (ValueError, KeyError):
+        return None
 
-    **패널의 끝이 아니라 지표가 있는 끝이다.** 패널은 라벨을 못 만드는 마지막
-    패치를 빼므로, 그것까지 보려면 수집한 파일을 봐야 한다.
+
+def latest_usable(rows: tuple[PanelRow, ...]) -> str:
+    """예측할 수 있는 가장 최근 패치. **지표가 굳은 것 중에서 고른다.**
+
+    패널의 끝이 아니라 지표가 있는 끝이다 — 패널은 라벨을 못 만드는 마지막
+    패치를 빼므로, 그것까지 보려면 수집한 파일을 봐야 한다. 고르는 규칙은
+    `panel.settled_patch` 에 있다(테스트가 거기 붙는다).
     """
     have = {p.stem for p in RANKING.glob("*.json")} if RANKING.is_dir() else set()
-    usable = have or {r.patch for r in rows}
-    return max(usable, key=patch_index)
+    if not have:
+        return max({r.patch for r in rows}, key=patch_index)
+    return settled_patch({p: games_in(p) for p in have}) or max(have, key=patch_index)
 
 
 def arg(flag: str, default: str) -> str:
