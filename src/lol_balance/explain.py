@@ -49,6 +49,10 @@ THIN_MATCHES = 20_000
 # 승률이 이 폭 안이면 어느 쪽으로도 안 기운다. 규칙이 못 덮는 자리다.
 FLAT = 0.005
 
+# 그 패치 지표가 이웃 패치의 이 비율에 못 미치면 **아직 안 굳은 스냅샷**이다.
+# u.gg 아카이브는 패치마다 긁힌 시각이 달라서, 어떤 패치는 출시 직후 값만 남는다.
+THIN_PATCH = 0.4
+
 
 @dataclass(frozen=True)
 class Note:
@@ -197,6 +201,29 @@ def warnings(
         )
 
     return out
+
+
+def sample_note(games: int | None, typical: float | None) -> list[Note]:
+    """**그 패치 지표가 아직 안 굳었나.** 챔피언이 아니라 패치에 붙는다.
+
+    u.gg 아카이브는 패치마다 긁힌 시각이 다르다. 대부분은 패치가 무르익은 뒤
+    찍혔지만 몇몇은 출시 직후라, 같은 「승률 52%」가 200만 판에서 나온 것일 수도
+    33만 판에서 나온 것일 수도 있다. **뒤엣것은 아직 흔들린다.**
+
+    고치려면 나중 스냅샷을 받아야 하는데 **`16_15` 는 아카이브에 하나뿐이다**
+    (라이브는 Cloudflare 가 403, 재수집 요청은 520). 못 고치므로 적어서 낸다.
+    """
+    if games is None or typical is None or not typical:
+        return []
+    if games >= typical * THIN_PATCH:
+        return []
+    return [
+        Note(
+            f"이 패치 지표는 {games:,}판뿐이다 (최근 패치 중앙값 {int(typical):,}). "
+            "패치 초반 스냅샷이라 승률이 아직 안 굳었다",
+            warn=True,
+        )
+    ]
 
 
 def patch_notes(item_churn: Churn | None) -> list[Note]:

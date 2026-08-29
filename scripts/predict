@@ -63,7 +63,12 @@ from lol_balance.arms import rank_candidates  # noqa: E402
 from lol_balance.assemble import forecast_rows  # noqa: E402
 from lol_balance.baseline import direction_rows  # noqa: E402
 from lol_balance.config import load_settings  # noqa: E402
-from lol_balance.explain import outcome, patch_notes, reasons  # noqa: E402
+from lol_balance.explain import (  # noqa: E402
+    outcome,
+    patch_notes,
+    reasons,
+    sample_note,
+)
 from lol_balance.items import churn_by_patch  # noqa: E402
 from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
@@ -177,7 +182,10 @@ def main() -> int:
 
     print(f"{at} 지표로 {nxt} 패치를 예측한다")
     print(
-        f"  학습 {len(train):,}행 (~{max(r.patch for r in train)}) · 대상 {len(test)}종"
+        f"  학습 {len(train):,}행 "
+        # **문자열 최대값이 아니다.** `16_9` 가 `16_13` 보다 크게 나온다 —
+        # 저장소가 「버전 표기를 믿지 않는다」고 적어 둔 바로 그 함정이다.
+        f"(~{max((r.patch for r in train), key=patch_index)}) · 대상 {len(test)}종"
     )
     if forecast:
         print("  ⚠ 아직 답이 없는 패치다 — 진짜 예측이고 채점할 수 없다")
@@ -195,7 +203,19 @@ def main() -> int:
     # **패치 전체에 붙는 경고는 머리말에 한 번만 낸다.** 챔피언마다 띄우면 그
     # 패치의 후보 목록 전체에 붙어 「항상 뜨는 경고」가 된다.
     churn = churn_by_patch(ITEMS).get(nxt) if ITEMS.is_dir() else None
-    for note in patch_notes(churn):
+    notes = list(patch_notes(churn))
+
+    # **지표가 아직 안 굳은 패치인지 같이 낸다.** 아카이브가 패치마다 다른
+    # 시각에 긁혀서, 어떤 패치는 출시 직후 값만 남아 있다. 고칠 방법이 없으므로
+    # (`16_15` 는 스냅샷이 하나뿐이다) 적어서 낸다.
+    recent = sorted(
+        (sum(r.matches for r in rows if r.patch == p) for p in PATCH_SEQUENCE[-8:]),
+        reverse=True,
+    )
+    typical = next((v for v in recent if v), None)
+    notes += sample_note(sum(r.matches for r in test), typical)
+
+    for note in notes:
         print(f"  ⚠ {note.text}")
 
     for label, want, with_pro in VIEWS:
