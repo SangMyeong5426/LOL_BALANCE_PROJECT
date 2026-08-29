@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from lol_balance.arms import direction_arms, target_arms  # noqa: E402
+from lol_balance.groundtruth import read_labels  # noqa: E402
 from lol_balance.ragjudge import read_judgments  # noqa: E402
 from lol_balance.rules import read_rules  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
@@ -59,6 +60,23 @@ def arms() -> int | None:
     return len(target) + len(direction)
 
 
+def adrs() -> int:
+    """`docs/adr/` 의 결정 기록 수. **`README.md` 와 `template.md` 는 안 센다.**"""
+    return len(list((ROOT / "docs" / "adr").glob("0*.md")))
+
+
+def labels() -> int | None:
+    """방향 라벨 수. 정답지는 커밋하므로 데이터가 없어도 센다."""
+    here = ROOT / "ground_truth" / "directions"
+    total = sum(len(read_labels(f)) for f in sorted(here.glob("*.jsonl")))
+    return total or None
+
+
+def rules() -> int | None:
+    """밸런스 규칙 수."""
+    return len(read_rules(ROOT / "rules" / "proposed.jsonl")) or None
+
+
 def main() -> int:
     text = README.read_text(encoding="utf-8")
     failed: list[str] = []
@@ -67,6 +85,11 @@ def main() -> int:
     for label, pattern, actual in (
         ("arm 개수", r"(\d+)개 arm", arms()),
         ("테스트 개수", r"테스트 (\d+)개", collected()),
+        # **셀 수 있는 것은 전부 검사에 건다.** ADR 건수가 7 로 굳어 있는 동안
+        # 실제로는 8건이 됐다 — 파일을 세면 되는 것을 사람이 기억하고 있었다.
+        ("ADR 건수", r"기술 결정 기록 (\d+)건", adrs()),
+        ("규칙 개수", r"밸런스 규칙 (\d+)개", rules()),
+        ("라벨 종수", r"방향 라벨 ([\d,]+)종", labels()),
     ):
         found = re.search(pattern, text)
         if found is None:
@@ -75,7 +98,7 @@ def main() -> int:
         if actual is None:
             skipped.append(f"{label}: 셀 수 없어 건너뛴다")
             continue
-        written = int(found.group(1))
+        written = int(found.group(1).replace(",", ""))
         mark = "✅" if written == actual else "❌"
         print(f"  {mark} {label:12}README {written:5}   실제 {actual:5}")
         if written != actual:
