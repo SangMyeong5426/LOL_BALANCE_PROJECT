@@ -12,7 +12,14 @@
 from __future__ import annotations
 
 from conftest import PanelRowFactory
-from lol_balance.explain import PRO_REGULAR, outcome, patch_notes, reasons, warnings
+from lol_balance.explain import (
+    PRO_REGULAR,
+    outcome,
+    patch_notes,
+    reasons,
+    sample_note,
+    warnings,
+)
 from lol_balance.items import LOUD, Churn
 from lol_balance.retrieval import Case
 from lol_balance.rules import Condition, Rule
@@ -253,3 +260,26 @@ def test_an_adjustment_with_no_direction_is_not_called_kept(
     row = make_row("16_13", 1, adjusted_next=True, direction_next=None)
 
     assert outcome(row) == "방향 미상"
+
+
+# --- 안 굳은 스냅샷 -----------------------------------------------------
+
+
+def test_a_thin_snapshot_is_flagged_on_the_patch() -> None:
+    """**아카이브가 패치마다 다른 시각에 긁힌다.** 출시 직후 값만 남은 패치가 있다."""
+    out = sample_note(334_500, 2_254_893)
+
+    assert out and out[0].warn
+    assert "안 굳었다" in out[0].text
+
+
+def test_a_mature_snapshot_says_nothing() -> None:
+    """**항상 뜨면 경고가 아니다.** 대부분의 패치는 무르익은 뒤 찍혔다."""
+    assert sample_note(2_234_436, 2_254_893) == []
+
+
+def test_no_reference_is_not_a_warning() -> None:
+    """**모르는 것을 경고로 만들지 않는다.**"""
+    assert sample_note(334_500, None) == []
+    assert sample_note(None, 2_254_893) == []
+    assert sample_note(334_500, 0) == []
