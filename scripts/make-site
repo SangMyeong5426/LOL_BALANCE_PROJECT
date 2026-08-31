@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""배포 페이지가 읽을 자료를 만든다. **형식은 ADR 0007 의 `Judgment` 다.**
+
+    ./scripts/make-site
+
+## 왜 `Judgment` 형식인가
+
+페이지가 렌더링하는 것은 「누가 만들었는지 모르는 판단」이다. 지금은 모델 점수와
+규칙이 만들고, **에이전트가 생기면 그것이 만든다** — 형식이 같으므로 페이지는
+바뀌지 않고, 둘을 나란히 놓고 비교할 수 있다.
+
+    검색기 셋(R1·R2·R3)  →  맥락  →  판단자  →  Judgment  →  페이지
+                                        ↑
+                            지금: 모델 + 규칙   나중: 에이전트
+
+`evidence` 의 `source` 를 살려 두는 이유가 그것이다. 지금은 `R2`(노트 검색)가
+비어 있는데, **에이전트가 채우면 무엇이 늘었는지 화면에서 바로 보인다.**
+
+## 데이터가 있어야 돈다
+
+`data/panel.sqlite` 를 읽는다. 결과는 `docs/site/data.json` 하나이고 **커밋한다** —
+페이지가 정적으로 돌아야 서버 없이 살아 있기 때문이다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import rank_candidates  # noqa: E402
+from lol_balance.baseline import direction_rows  # noqa: E402
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.explain import outcome, reasons  # noqa: E402
+from lol_balance.panel import PanelRow, next_patch, patch_index  # noqa: E402
+from lol_balance.retrieval import CaseSearch  # noqa: E402
+from lol_balance.rules import read_rules  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+RULES = ROOT / "rules" / "proposed.jsonl"
+SITE = ROOT / "docs" / "site"
+OUT = SITE / "data.json"
+# 페이지가 쓰는 그림. **`docs/site/` 하나로 자족해야** 배포가 단순해진다.
+FIGURES = ("lift.svg", "buff-asymmetry.svg")
+
+SPLIT = "15_13"
+TOP = 10
+TREND = 8  # 챔피언 상세에 보일 최근 패치 수
+
+
+def lifetime(rows: tuple[PanelRow, ...]) -> dict[str, float]:
+    seen: dict[str, list[float]] = {}
+    for r in rows:
+        if r.pro_presence is not None:
+            seen.setdefault(r.champion, []).append(r.pro_presence)
+    return {c: sum(v) / len(v) for c, v in seen.items() if len(v) >= 20}
+
+
+def judge(row, patch_rows, cases, rules, pro, want, score) -> dict:
+    """한 챔피언의 판단 하나. **`Judgment` 와 같은 칸을 쓴다.**"""
+    notes = reasons(row, patch_rows, cases, rules, pro, want)
+    return {
+        "champion": row.champion,
+        "prob": int(round(score * 100)),
+        "evidence": [{"source": n.source, "text": n.text} for n in notes if not n.warn],
+        "warnings": [{"kind": "판단", "text": n.text} for n in notes if n.warn],
+        "abstain": False,
+        "actual": outcome(row),
+    }
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    rows = read_panel(PANEL)
+    if not rows:
+        print("패널이 비었다. ./scripts/build-panel 을 먼저 돌린다.", file=sys.stderr)
+        return 1
+
+    seed = load_settings().seed
+    rules = read_rules(RULES) if RULES.exists() else ()
+    pro = lifetime(rows)
+    cut = patch_index(SPLIT)
+    order = sorted({r.patch for r in rows}, key=patch_index)
+    evals = [p for p in order if patch_index(p) > cut]
+
+    views: dict[str, dict] = {}
+    listed: set[str] = set()
+    for patch in evals:
+        test = tuple(r for r in rows if r.patch == patch)
+        train = tuple(r for r in rows if r.patch_index < patch_index(patch))
+        search = CaseSearch(direction_rows(rows), patch)
+        block: dict[str, object] = {"next": next_patch(patch), "n": len(test)}
+        for want in ("nerf", "buff"):
+            score = rank_candidates(train, test, want=want, seed=seed)
+            picked = []
+            for i in np.argsort(-score)[:TOP]:
+                r = test[i]
+                listed.add(r.champion)
+                picked.append(
+                    judge(
+                        r,
+                        test,
+                        search.similar(r, k=25),
+                        rules,
+                        pro.get(r.champion),
+                        want,
+                        float(score[i]),
+                    )
+                )
+            block[want] = picked
+        block["hit"] = {
+            w: sum(1 for j in block[w] if j["actual"].startswith(w2))  # type: ignore[index]
+            for w, w2 in (("nerf", "너프"), ("buff", "버프"))
+        }
+        views[patch] = block
+
+    # 목록에 오른 챔피언만 추이를 담는다. 전부 담으면 파일이 커진다.
+    trend: dict[str, list[dict]] = {}
+    for champ in sorted(listed):
+        hist = sorted(
+            (r for r in rows if r.champion == champ), key=lambda r: r.patch_index
+        )[-TREND:]
+        trend[champ] = [
+            {
+                "patch": r.patch,
+                "wr": round(r.win_rate, 4),
+                "br": round(r.ban_rate or 0.0, 4),
+                "pro": round(r.pro_presence or 0.0, 4),
+                "adj": outcome(r),
+            }
+            for r in hist
+        ]
+
+    got = {
+        "built": evals[-1],
+        "split": SPLIT,
+        "patches": [{"id": p, "next": next_patch(p)} for p in evals],
+        "views": views,
+        "trend": trend,
+    }
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    (SITE / "img").mkdir(exist_ok=True)
+    for name in FIGURES:
+        src = ROOT / "docs" / "img" / name
+        if src.exists():
+            (SITE / "img" / name).write_bytes(src.read_bytes())
+    OUT.write_text(
+        json.dumps(got, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    print(f"{OUT.relative_to(ROOT)}  {OUT.stat().st_size / 1024:,.0f} KB")
+    print(
+        f"  패치 {len(evals)}개 · 챔피언 {len(trend)}종 · 판단 {len(evals) * TOP * 2}건"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

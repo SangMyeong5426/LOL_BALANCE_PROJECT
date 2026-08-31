@@ -56,10 +56,17 @@ THIN_PATCH = 0.4
 
 @dataclass(frozen=True)
 class Note:
-    """근거 한 줄. `warn` 이면 경고로 표시한다."""
+    """근거 한 줄. `warn` 이면 경고로 표시한다.
+
+    `source` 는 **이 줄이 어디서 왔는지**다([ADR 0007](../../docs/adr/0007-answer-schema.md)
+    의 `Note` 와 같은 값을 쓴다). 지금은 화면에 안 내지만 배포 페이지와 에이전트가
+    쓴다 — **어느 검색기가 값을 했는지 지금은 못 재는데**, 만들 때 적어 두지 않으면
+    나중에도 못 잰다.
+    """
 
     text: str
     warn: bool = False
+    source: str = "수치"
 
 
 # 방향 넷을 화면에 적는 이름. **둘만 한글이면 나머지가 오류처럼 보인다** —
@@ -111,20 +118,23 @@ def reasons(
     ban = row.ban_rate or 0.0
     if ban >= HIGH_BAN:
         rank = _rank_in_patch(row, patch_rows, "ban_rate")
-        out.append(Note(f"밴율 {ban:.1%} — {n}종 중 {rank}위"))
+        out.append(Note(f"밴율 {ban:.1%} — {n}종 중 {rank}위", source="R3"))
 
     gap = row.win_rate - 0.5
     if abs(gap) >= FLAT:
         rank = _rank_in_patch(row, patch_rows, "win_rate")
-        out.append(Note(f"승률 {row.win_rate:.1%} — {n}종 중 {rank}위"))
+        out.append(Note(f"승률 {row.win_rate:.1%} — {n}종 중 {rank}위", source="R3"))
     else:
         out.append(
-            Note(f"승률 {row.win_rate:.1%} — 5할에 붙어 있어 어느 쪽으로도 안 기운다")
+            Note(
+                f"승률 {row.win_rate:.1%} — 5할에 붙어 있어 어느 쪽으로도 안 기운다",
+                source="R3",
+            )
         )
 
     if row.d_win_rate is not None and abs(row.d_win_rate) >= 0.01:
         way = "오르는" if row.d_win_rate > 0 else "내리는"
-        out.append(Note(f"직전 대비 {row.d_win_rate:+.1%} — {way} 중"))
+        out.append(Note(f"직전 대비 {row.d_win_rate:+.1%} — {way} 중", source="R3"))
 
     # **점수를 바꾸는 값은 화면에도 나와야 한다.** 프로 픽·밴율은 `A7p` · `B5p`
     # 의 피처라 순위를 만드는 데 쓰이는데, 한때 경고로만 나왔다. 경고는 문턱
@@ -133,11 +143,17 @@ def reasons(
     # 다르고, 낮다는 것 자체가 판단 재료다.
     if row.pro_presence is not None:
         rank = _rank_in_patch(row, patch_rows, "pro_presence")
-        out.append(Note(f"프로 픽·밴율 {row.pro_presence:.1%} — {n}종 중 {rank}위"))
+        out.append(
+            Note(
+                f"프로 픽·밴율 {row.pro_presence:.1%} — {n}종 중 {rank}위", source="R3"
+            )
+        )
 
     fired = [r for r in rules if r.fires(row)]
     if fired:
-        out.append(Note("걸린 규칙 " + " · ".join(r.id for r in fired[:4])))
+        out.append(
+            Note("걸린 규칙 " + " · ".join(r.id for r in fired[:4]), source="규칙")
+        )
 
     directed = [c for c in cases if c.row.direction_next in ("nerf", "buff")]
     if directed:
@@ -145,7 +161,8 @@ def reasons(
         out.append(
             Note(
                 f"닮은 사례 {len(directed)}종 — 너프 {nerf} · "
-                f"버프 {len(directed) - nerf}"
+                f"버프 {len(directed) - nerf}",
+                source="R1",
             )
         )
 
