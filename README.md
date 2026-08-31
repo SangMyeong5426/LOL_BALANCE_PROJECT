@@ -48,7 +48,7 @@ $ ./scripts/predict --score
 flowchart LR
   U["u.gg 아카이브<br/>승률·픽률·밴율"] --> P
   O["Oracle's Elixir<br/>프로 픽·밴"] --> P["패널<br/>52패치 8,767행"]
-  D["Data Dragon<br/>버전 diff"] --> L["정답지<br/>방향 라벨 1,599종"]
+  D["Data Dragon<br/>버전 diff"] --> L["정답지<br/>실제 조정 결과 1,599건"]
   N["패치 노트<br/>공식 위키"] --> L
   L --> P
   P --> R["검색 (RAG)<br/>사례·노트·수치"]
@@ -56,6 +56,10 @@ flowchart LR
   R --> M
   M --> W["너프 5 · 버프 5<br/>+ 근거 + 경고"]
 ```
+
+**정답지**는 채점의 기준이다 — 패치마다 어느 챔피언이 실제로 어느 방향(너프·버프)으로
+조정됐는지를 Data Dragon 버전 diff 와 공식 패치 노트로 만들어 둔 것이다. 이게 없으면
+아래 성적을 아예 잴 수 없다.
 
 **실행 시점에 LLM API 를 한 번도 부르지 않는다.** 모델이 만든 산출물(라벨 1,599종 ·
 규칙 12개 · 판단 314건)은 저장소에 텍스트로 두고 코드가 읽어 채점한다
@@ -106,7 +110,7 @@ pip install -r requirements-dev.txt
 ```text
 src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증)
-ground_truth/      정답지 — 방향 라벨 1,599종 (커밋한다)
+ground_truth/      정답지 — 실제 조정 결과 1,599건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
 tests/             332개 · 커버리지 94%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
