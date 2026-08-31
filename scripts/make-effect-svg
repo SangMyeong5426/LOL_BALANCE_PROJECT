@@ -138,7 +138,7 @@ def main() -> int:
         f'<line x1="390" y1="34" x2="390" y2="278" stroke="{GRID}"/>'
         f"{left}{right}"
         f'<text x="40" y="308" font-size="12" fill="{DIM}">'
-        f"버프 {hot['n'] + cool['n']}건 · 자주 나오는 챔피언은 평생 평균 픽·밴율 "
+        f"버프 {hot['n'] + cool['n']}건 · 자주 나오는 챔피언은 통산 픽·밴율 "
         f"{PRO_REGULAR:.3f} 이상 · ./scripts/run-effect</text>"
         f"</svg>\n"
     )

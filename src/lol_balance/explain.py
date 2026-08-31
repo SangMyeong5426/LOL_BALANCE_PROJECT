@@ -34,7 +34,7 @@ from lol_balance.panel import PanelRow
 from lol_balance.retrieval import Case
 from lol_balance.rules import Rule
 
-# 「자주 나오는 챔피언」 문턱. 평생 평균 프로 픽·밴율 상위 25% 가 이 값이다.
+# 「자주 나오는 챔피언」 문턱. 통산 프로 픽·밴율 상위 25% 가 이 값이다.
 # 근거는 docs/glossary.md — 여기서 다시 계산하지 않고 넘겨받는다.
 PRO_REGULAR = 0.182
 
@@ -101,8 +101,8 @@ def reasons(
 ) -> list[Note]:
     """이 챔피언을 봐야 하는 이유와 주의할 점.
 
-    `lifetime_pro` 는 그 챔피언의 **평생 평균** 프로 픽·밴율이다. 한 패치 값이
-    아니라 평생 값으로 「프로 경기에 자주 나오는가」를 본다 — 한 패치만 튀는 것과 늘 나오는
+    `lifetime_pro` 는 그 챔피언의 **통산** 프로 픽·밴율이다. 한 패치 값이
+    아니라 통산 값으로 「프로 경기에 자주 나오는가」를 본다 — 한 패치만 튀는 것과 늘 나오는
     것은 다르고, [기전 조사](../../docs/followups.md)에서 그 둘이 갈렸다.
     """
     out: list[Note] = []
@@ -171,7 +171,7 @@ def warnings(
     if regular and considering != "nerf" and row.win_rate < 0.5:
         out.append(
             Note(
-                f"프로 경기에 자주 나오는 챔피언이다(평생 픽·밴율 {lifetime_pro:.1%}). "
+                f"프로 경기에 자주 나오는 챔피언이다(통산 픽·밴율 {lifetime_pro:.1%}). "
                 "승률이 낮아도 올려 주면 대회 출전이 크게 뛴다 — 버프 주의",
                 warn=True,
             )
@@ -179,7 +179,7 @@ def warnings(
     elif regular and considering != "buff":
         out.append(
             Note(
-                f"프로 경기에 자주 나오는 챔피언이다(평생 픽·밴율 {lifetime_pro:.1%}). "
+                f"프로 경기에 자주 나오는 챔피언이다(통산 픽·밴율 {lifetime_pro:.1%}). "
                 "너프하면 솔랭이 5할 아래로 밀릴 수 있다",
                 warn=True,
             )
