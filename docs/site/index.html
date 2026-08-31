@@ -131,7 +131,10 @@
 const $ = s => document.querySelector(s);
 let D = null;
 
-fetch('data.json').then(r => r.json()).then(d => {
+// **캐시를 그냥 믿으면 안 된다.** Pages 가 `max-age=600` 을 주므로, 자료를
+// 새로 올려도 10분 동안 옛 파일이 쓰인다. 그러면 새 칸(`names`)이 없어
+// 챔피언 이름이 영문으로 떨어진다 — 실제로 그렇게 나왔다.
+fetch('data.json', { cache: 'no-cache' }).then(r => r.json()).then(d => {
   D = d;
   $('#p').innerHTML = d.patches.map(p =>
     `<option value="${p.id}">${p.id} → ${p.next}</option>`).join('');
