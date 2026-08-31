@@ -84,25 +84,31 @@ def main() -> int:
 
     for label, pattern, actual in (
         ("arm 개수", r"(\d+)개 arm", arms()),
-        ("테스트 개수", r"테스트 (\d+)개", collected()),
+        # 배지와 본문 양쪽에 적힌다. **모든 등장을 본다** — 한 곳만 고치고
+        # 넘어간 적이 있다(315 가 두 곳, 318 이 한 곳이었다).
+        ("테스트 개수", r"테스트[ -](\d+)개", collected()),
         # **셀 수 있는 것은 전부 검사에 건다.** ADR 건수가 7 로 굳어 있는 동안
         # 실제로는 8건이 됐다 — 파일을 세면 되는 것을 사람이 기억하고 있었다.
         ("ADR 건수", r"기술 결정 기록 (\d+)건", adrs()),
         ("규칙 개수", r"밸런스 규칙 (\d+)개", rules()),
         ("라벨 종수", r"방향 라벨 ([\d,]+)종", labels()),
     ):
-        found = re.search(pattern, text)
-        if found is None:
+        found = re.findall(pattern, text)
+        if not found:
             failed.append(f"{label}: README 에서 못 찾았다 ({pattern})")
             continue
         if actual is None:
             skipped.append(f"{label}: 셀 수 없어 건너뛴다")
             continue
-        written = int(found.group(1).replace(",", ""))
-        mark = "✅" if written == actual else "❌"
-        print(f"  {mark} {label:12}README {written:5}   실제 {actual:5}")
-        if written != actual:
-            failed.append(f"{label}: README {written} ≠ 실제 {actual}")
+        seen = {int(x.replace(",", "")) for x in found}
+        ok = seen == {actual}
+        where = f" ×{len(found)}" if len(found) > 1 else ""
+        got = str(actual) if ok else " · ".join(str(v) for v in sorted(seen))
+        print(
+            f"  {'✅' if ok else '❌'} {label:12}README {got:>9}{where:4}   실제 {actual:5}"
+        )
+        if not ok:
+            failed.append(f"{label}: README {got} ≠ 실제 {actual}")
 
     for note in skipped:
         print(f"  ⏭  {note}")
