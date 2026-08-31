@@ -45,6 +45,9 @@
   .top{display:flex;align-items:baseline;gap:9px}
   .rank{color:var(--faint);font-size:13px;min-width:15px}
   .name{font-weight:600;font-size:15px}
+  /* 영문 이름을 같이 둔다. `./scripts/ask` 가 영문으로 받으므로 화면에서
+     본 것을 그대로 칠 수 있어야 한다. */
+  .en{font-size:12px;color:var(--faint);font-weight:400}
   .prob{margin-left:auto;font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
   .meter{height:3px;background:var(--chip);border-radius:2px;margin:9px 0 10px;overflow:hidden}
   .meter i{display:block;height:100%}
@@ -148,7 +151,8 @@ function card(j, kind, reveal) {
     ? `<div class="ans ${hit ? 'hit' : ''}">${hit ? '맞음 — ' : ''}실제 ${esc(j.actual)}</div>` : '';
   return `<div class="card ${kind === 'nerf' ? 'n' : 'b'}" data-c="${esc(j.champion)}">
     <div class="top"><span class="rank">${j.rank}</span>
-      <span class="name">${esc(j.champion)}</span>
+      <span class="name">${esc(ko(j.champion))}</span>
+      <span class="en">${esc(j.champion)}</span>
       <span class="prob">${(j.prob / 100).toFixed(2)}</span></div>
     <div class="meter"><i style="width:${j.prob}%"></i></div>
     ${ev}${wn}<div class="fill"></div>${ans}</div>`;
@@ -177,7 +181,7 @@ function draw() {
 
 function detail(name) {
   const t = D.trend[name]; if (!t) return;
-  $('#dn').textContent = name;
+  $('#dn').innerHTML = `${esc(ko(name))} <span class="en">${esc(name)}</span>`;
   $('#dt').innerHTML = '<tr><th>패치</th><th>승률</th><th>밴율</th><th>프로 픽·밴</th><th>조정</th></tr>'
     + t.map(r => `<tr><td>${r.patch}</td><td>${pc(r.wr)}</td><td>${pc(r.br)}</td>`
       + `<td>${pc(r.pro)}</td><td class="${r.adj === '조정 안 됨' ? '' : 'adj'}">`
@@ -185,6 +189,8 @@ function detail(name) {
   $('#dlg').showModal();
 }
 
+// 한글 이름이 없으면 영문 그대로 — 자료가 없어도 페이지가 돈다.
+const ko = n => (D.names && D.names[n]) || n;
 const pc = x => (x * 100).toFixed(1) + '%';
 const esc = s => String(s).replace(/[&<>"]/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

@@ -63,6 +63,23 @@ def main() -> int:
             failed += 1
             print(f"[{i}/{len(targets)}] {v}  실패: {exc}", flush=True)
 
+    # **한글 이름은 최신 한 버전만 받는다.** 배포 페이지가 챔피언을 한글로 보이는
+    # 데만 쓰고, 이름은 버전마다 안 바뀌므로 전량을 받을 이유가 없다.
+    korean = OUT / "ko_KR.json"
+    if targets and not korean.exists():
+        latest = targets[-1]
+        try:
+            body = get_with_retry(
+                f"{BASE}/cdn/{latest}/data/ko_KR/champion.json",
+                attempts=3,
+                base_delay=5.0,
+                validate=json.loads,
+            )
+            save(korean, body)
+            print(f"한글 이름 {latest}  {len(body):,}B", flush=True)
+        except (Retryable, ValueError) as exc:
+            print(f"한글 이름 실패: {exc}", flush=True)
+
     print(f"\n완료: 새로 받음 {done} · 건너뜀 {skipped} · 실패 {failed}", flush=True)
     return 1 if failed else 0
 
