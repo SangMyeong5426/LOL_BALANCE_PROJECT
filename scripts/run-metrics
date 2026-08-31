@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""문서에 적힌 지표를 전부 다시 낸다. **대화 중에 계산하고 안 남기지 않기 위해서다.**
+
+    ./scripts/run-metrics [--json]
+
+`run-report` 는 arm 비교표를, `run-effect` 는 조정의 효과를 낸다. 이 스크립트는
+그 둘이 안 내는 것을 맡는다 — **분류 지표 · 상위 k 표 · 점수 눈금 · 성능 상한.**
+
+## 왜 따로 두는가
+
+전부 「같은 점수를 다르게 읽는 것」이라 한자리에 모았다. `run-report` 가 arm 을
+고르는 도구라면 이것은 **고른 arm 이 실제로 어떤 물건인지** 보는 도구다.
+
+## 여기서 나오는 수치가 문서에 그대로 들어간다
+
+`check-docs` 가 README 의 수를 실제와 대조하듯, 이 값들은 여기서만 나온다.
+문서에 손으로 적은 수치가 있으면 **다음에 재현할 방법이 없어진다.**
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+from sklearn.metrics import (
+    average_precision_score,
+    balanced_accuracy_score,
+    brier_score_loss,
+    f1_score,
+    log_loss,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import (  # noqa: E402
+    _boosting,
+    _model,
+    rank_candidates,
+    split,
+)
+from lol_balance.baseline import (  # noqa: E402
+    direction_rows,
+    encode,
+    fit_encoder,
+    precision_at,
+    r_precision,
+)
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.panel import PanelRow, patch_index  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+SPLIT = "15_13"
+VIEWS = ((None, "조정"), ("nerf", "너프"), ("buff", "버프"))
+CUTS = (3, 5, 10, 20, 40)
+# 점수 구간. **눈금이 안 맞아 있다는 것을 보이는 것이 목적**이라 고르게 자른다.
+BANDS = (
+    (0.0, 0.2),
+    (0.2, 0.4),
+    (0.4, 0.5),
+    (0.5, 0.6),
+    (0.6, 0.7),
+    (0.7, 0.8),
+    (0.8, 1.01),
+)
+
+
+def label(row: PanelRow, want: str | None) -> int:
+    return int(row.adjusted_next if want is None else row.direction_next == want)
+
+
+def scored(
+    rows: tuple[PanelRow, ...], want: str | None, seed: int, cheat: bool = False
+):
+    """패치마다 점수를 낸다.
+
+    `cheat` 면 **평가 구간 전체**로 학습한다. 쓸 수 없는 값이지만 이 피처의 상한이
+    된다. 그 패치 하나로 학습하면 암기가 되어 상한이 아니라 자기 자신이 나온다.
+    """
+    # **저장소의 `split` 을 그대로 쓴다.** 분할 패치가 학습 쪽인지 평가 쪽인지가
+    # 갈리면 같은 것을 재는데 값이 달라진다 — 실제로 0.272 와 0.274 로 갈렸다.
+    early, late = split(rows, SPLIT)
+    train = late if cheat else early
+    out = []
+    for patch in sorted({r.patch for r in late}, key=patch_index):
+        test = tuple(r for r in rows if r.patch == patch)
+        y = np.array([label(r, want) for r in test])
+        if not y.sum():
+            continue
+        out.append((patch, y, rank_candidates(train, test, want=want, seed=seed)))
+    return out
+
+
+def target_metrics(rows, seed):
+    """① 대상. **문턱은 K = 그 패치의 실제 조정 수**라 정밀도=재현율=F1 이다."""
+    out = {}
+    for want, name in VIEWS:
+        acc = {k: [] for k in "auc ap rp mcc ba base".split()}
+        for _, y, s in scored(rows, want, seed):
+            k = int(y.sum())
+            pred = np.zeros_like(y)
+            pred[np.argsort(-s)[:k]] = 1
+            acc["auc"].append(roc_auc_score(y, s))
+            acc["ap"].append(average_precision_score(y, s))
+            acc["rp"].append(r_precision(y, s))
+            acc["mcc"].append(matthews_corrcoef(y, pred))
+            acc["ba"].append(balanced_accuracy_score(y, pred))
+            acc["base"].append(y.mean())
+        m = {k: float(np.nanmean(v)) for k, v in acc.items()}
+        m["lift"] = m["rp"] / m["base"]
+        out[name] = m
+    return out
+
+
+def cuts(rows, seed):
+    """상위 k 를 바꿔 가며 정밀도와 재현율. **몇 개를 낼지 정하는 근거다.**"""
+    out = {}
+    for want, name in VIEWS:
+        got = scored(rows, want, seed)
+        rows_out = []
+        for k in CUTS:
+            pr = [precision_at(y, s, k) for _, y, s in got]
+            rc = [float(y[np.argsort(-s)[:k]].sum() / y.sum()) for _, y, s in got]
+            rows_out.append(
+                {"k": k, "precision": float(np.mean(pr)), "recall": float(np.mean(rc))}
+            )
+        out[name] = {
+            "base": float(np.mean([y.mean() for _, y, _ in got])),
+            "cuts": rows_out,
+        }
+    return out
+
+
+def as_the_tool_runs(rows, seed):
+    """**`predict` 가 실제로 하는 방식.** 패치마다 그 이전 전량으로 다시 학습한다.
+
+    위의 고정 분할은 arm 을 비교하는 자리이고, 이것은 **도구를 쓸 때 나오는 값**이다.
+    둘이 다르므로 문서에서 어느 쪽을 인용하는지 밝혀야 한다.
+    """
+    _, late = split(rows, SPLIT)
+    out = {}
+    for want, name in VIEWS:
+        hit = tot = 0
+        base = []
+        for patch in sorted({r.patch for r in late}, key=patch_index):
+            test = tuple(r for r in rows if r.patch == patch)
+            y = np.array([label(r, want) for r in test])
+            if not y.sum():
+                continue
+            train = tuple(r for r in rows if r.patch_index < patch_index(patch))
+            s = rank_candidates(train, test, want=want, seed=seed)
+            hit += int(y[np.argsort(-s)[:5]].sum())
+            tot += 5
+            base.append(y.mean())
+        b = float(np.mean(base))
+        out[name] = {"top5": hit / tot, "base": b, "lift": hit / tot / b}
+    return out
+
+
+def calibration(rows, seed):
+    """점수가 확률인가. **`class_weight='balanced'` 라 부풀려져 있다.**"""
+    got = scored(rows, None, seed)
+    s = np.concatenate([x[2] for x in got])
+    y = np.concatenate([x[1] for x in got])
+    out = []
+    for lo, hi in BANDS:
+        m = (s >= lo) & (s < hi)
+        if m.sum() >= 20:
+            out.append(
+                {"from": lo, "to": hi, "n": int(m.sum()), "rate": float(y[m].mean())}
+            )
+    return {"overall": float(y.mean()), "bands": out}
+
+
+def ceiling(rows, seed):
+    """**평가 구간으로 학습한 값.** 쓸 수 없는 수치이지만 이 피처의 상한이다."""
+    out = {}
+    for cheat in (False, True):
+        vals = [r_precision(y, s) for _, y, s in scored(rows, None, seed, cheat=cheat)]
+        out["부정행위" if cheat else "정직"] = float(np.nanmean(vals))
+    return out
+
+
+def direction_metrics(rows, seed):
+    """② 방향. **조정된 챔피언만 보므로 클래스가 균형 잡혀 있다.**"""
+    tr, te = split(direction_rows(rows), SPLIT)
+    enc = fit_encoder(tr, with_trend=True, with_pro=True)
+    x, t = encode(tr, enc), encode(te, enc)
+    y = np.array([int(r.direction_next == "nerf") for r in te])
+    ytr = np.array([int(r.direction_next == "nerf") for r in tr])
+    out = {"n": len(y), "너프": int(y.sum()), "버프": int(len(y) - y.sum())}
+    for name, mk in (("부스팅", _boosting), ("회귀", _model)):
+        s = mk(seed).fit(x.x, ytr).predict_proba(t.x)[:, 1]
+        p = (s >= 0.5).astype(int)
+        out[name] = {
+            "auc": float(roc_auc_score(y, s)),
+            "pr_auc": float(average_precision_score(y, s)),
+            "accuracy": float((p == y).mean()),
+            "precision": float(precision_score(y, p, zero_division=0)),
+            "recall": float(recall_score(y, p, zero_division=0)),
+            "f1": float(f1_score(y, p, zero_division=0)),
+            "mcc": float(matthews_corrcoef(y, p)),
+            "balanced_accuracy": float(balanced_accuracy_score(y, p)),
+            "brier": float(brier_score_loss(y, s)),
+            "log_loss": float(log_loss(y, s)),
+        }
+    return out
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    rows = read_panel(PANEL)
+    if not rows:
+        print("패널이 비었다. ./scripts/build-panel 을 먼저 돌린다.", file=sys.stderr)
+        return 1
+    seed = load_settings().seed
+    got = {
+        "split": SPLIT,
+        "seed": seed,
+        "target": target_metrics(rows, seed),
+        "cuts": cuts(rows, seed),
+        "as_the_tool_runs": as_the_tool_runs(rows, seed),
+        "calibration": calibration(rows, seed),
+        "ceiling": ceiling(rows, seed),
+        "direction": direction_metrics(rows, seed),
+    }
+    if "--json" in sys.argv:
+        print(json.dumps(got, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"시간순 분할 {SPLIT} · 시드 {seed}\n")
+    print("① 대상 — 문턱은 K = 그 패치의 실제 조정 수 (정밀도=재현율=F1)")
+    print(
+        f"  {'':8}{'AUC':>7}{'PR-AUC':>8}{'R-정확도':>10}{'MCC':>7}{'균형정확도':>11}{'기준선':>8}{'배수':>7}"
+    )
+    for name, m in got["target"].items():
+        print(
+            f"  {name:8}{m['auc']:>7.3f}{m['ap']:>8.3f}{m['rp']:>10.1%}"
+            f"{m['mcc']:>7.3f}{m['ba']:>11.3f}{m['base']:>8.1%}{m['lift']:>6.1f}배"
+        )
+
+    print("\n상위 k 를 바꾸면 — 정밀도와 재현율이 반대로 움직인다")
+    for name, blk in got["cuts"].items():
+        line = "  ".join(
+            f"k={c['k']:<2} {c['precision']:>5.1%}/{c['recall']:>5.1%}"
+            for c in blk["cuts"]
+        )
+        print(f"  {name:5}(기준선 {blk['base']:.1%})  {line}")
+
+    print("\n도구가 실제로 도는 방식 — 패치마다 그 이전 전량으로 다시 학습, 상위 5")
+    for name, m in got["as_the_tool_runs"].items():
+        print(
+            f"  {name:5}적중 {m['top5']:>6.1%}   기준선 {m['base']:>6.1%}   {m['lift']:>5.1f}배"
+        )
+
+    c = got["calibration"]
+    print(f"\n점수를 확률로 읽으면 안 된다 — 전체 조정률은 {c['overall']:.1%} 다")
+    for b in c["bands"]:
+        print(
+            f"  {b['from']:.1f} ~ {b['to']:.1f}  {b['n']:>6,}행   실제 {b['rate']:>6.1%}"
+        )
+
+    ce = got["ceiling"]
+    print(f"\n성능 상한 — 정직 {ce['정직']:.1%} · 부정행위 {ce['부정행위']:.1%}")
+    print("  평가 구간으로 학습한 값이다. 쓸 수 없지만 이 피처의 상한이 된다.")
+
+    d = got["direction"]
+    print(f"\n② 방향 — 평가 {d['n']}건 (너프 {d['너프']} · 버프 {d['버프']})")
+    print(
+        f"  {'':8}{'AUC':>7}{'PR-AUC':>8}{'정확도':>9}{'F1':>7}{'MCC':>7}{'Brier':>8}{'LogLoss':>9}"
+    )
+    for name in ("부스팅", "회귀"):
+        m = d[name]
+        print(
+            f"  {name:8}{m['auc']:>7.3f}{m['pr_auc']:>8.3f}{m['accuracy']:>9.1%}"
+            f"{m['f1']:>7.3f}{m['mcc']:>7.3f}{m['brier']:>8.3f}{m['log_loss']:>9.3f}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
