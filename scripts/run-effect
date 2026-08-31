@@ -21,7 +21,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from lol_balance.effect import outcomes  # noqa: E402
+from lol_balance.effect import balance_control, outcomes  # noqa: E402
+from lol_balance.explain import PRO_REGULAR  # noqa: E402
 from lol_balance.items import LOUD, churn_by_patch  # noqa: E402
 from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
@@ -41,8 +42,17 @@ def main() -> int:
     # 아이템을 사는지 모르므로 빼지는 못하고, 어느 패치가 그런지만 표시한다.
     churn = churn_by_patch(ITEMS) if ITEMS.is_dir() else {}
 
+    # 챔피언별 **평생 평균** 프로 픽·밴율. 한 패치만 튀는 것과 늘 나오는 것은
+    # 다르므로 조정 시점 값이 아니라 평생 값으로 「프로 단골」을 가른다.
+    seen: dict[str, list[float]] = {}
+    for row in rows:
+        if row.pro_presence is not None:
+            seen.setdefault(row.champion, []).append(row.pro_presence)
+    lifetime = {c: sum(v) / len(v) for c, v in seen.items()}
+
     found = []
     loud: list[tuple[str, int, int]] = []
+    control_closer = control_total = 0
     pairs = 0
     for i in range(len(PATCH_SEQUENCE) - 1):
         a, b = PATCH_SEQUENCE[i], PATCH_SEQUENCE[i + 1]
@@ -50,6 +60,9 @@ def main() -> int:
             pairs += 1
             got = outcomes(tuple(by_patch[a]), tuple(by_patch[b]))
             found.extend(got)
+            hit, total = balance_control(tuple(by_patch[a]), tuple(by_patch[b]))
+            control_closer += hit
+            control_total += total
             c = churn.get(b)
             if c and c.finished >= LOUD:
                 loud.append((b, c.finished, len(got)))
@@ -69,6 +82,35 @@ def main() -> int:
             f"{direction:8}{len(part):>5}{raw.mean():>+9.3f}%p"
             f"{adj.mean():>+12.3f}%p{worked:>10.1%}"
         )
+
+    # ③′ **균형에 가까워졌나.** 「의도대로 갔나」와 다른 질문이라 따로 낸다.
+    base = control_closer / control_total if control_total else float("nan")
+    print(f"\n균형(5할)에 가까워졌나 — 조정 안 된 챔피언은 {base:.1%} 가 가까워진다")
+    for direction in ("nerf", "buff"):
+        part = [o for o in found if o.direction == direction]
+        got = sum(o.closer for o in part) / len(part)
+        print(
+            f"   {direction:6}{len(part):>5}건   {got:>7.1%}   대조군 대비 {got - base:>+6.1%}p"
+        )
+
+    # 프로 경기 비대칭. **%p 가 아니라 자기 값 대비 비율**이라 중앙값으로 본다.
+    print(f"\n프로 경기 픽·밴율 변화 (평생 평균 {PRO_REGULAR:.3f} 이상이면 프로 단골)")
+    print(f"   {'':22}{'n':>5}{'솔랭 승률':>12}{'프로 픽·밴율':>14}")
+    for direction in ("nerf", "buff"):
+        for regular in (True, False):
+            part = [
+                o
+                for o in found
+                if o.direction == direction
+                and o.pro_change is not None
+                and (lifetime.get(o.champion, 0.0) >= PRO_REGULAR) is regular
+            ]
+            if not part:
+                continue
+            solo = np.median([o.adjusted_shift for o in part]) * 100
+            pro = np.median([o.pro_change for o in part])
+            label = f"{direction} · {'프로 단골' if regular else '그 외'}"
+            print(f"   {label:22}{len(part):>5}{solo:>+11.2f}%p{pro:>+13.1%}")
 
     every = np.array([o.adjusted_shift for o in found]) * 100
     print("\n효과 크기 분포 (대조군 뺀 뒤, %p)")

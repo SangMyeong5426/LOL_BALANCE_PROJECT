@@ -37,6 +37,9 @@ class Outcome:
     before: float
     after: float
     baseline_shift: float
+    # 프로 경기 픽·밴율. **한쪽이라도 없으면 None** — 모르는 것을 0 으로 적지 않는다.
+    pro_before: float | None = None
+    pro_after: float | None = None
 
     @property
     def raw_shift(self) -> float:
@@ -52,6 +55,37 @@ class Outcome:
     def worked(self) -> bool:
         """의도한 방향으로 갔나. 0 이면 안 간 것으로 센다."""
         return self.adjusted_shift * _INTENDED[self.direction] > 0
+
+    @property
+    def closer(self) -> bool:
+        """**균형(5할)에 가까워졌나.** 「의도대로 갔나」와 다른 질문이다.
+
+        너프해서 승률이 내려갔어도 이미 5할 아래였으면 균형에서는 멀어진다.
+        둘이 다른 답을 내는 것이 [results](../../docs/results/README.md)의 ③′ 다.
+        """
+        return abs(self.after - 0.5) < abs(self.before - 0.5)
+
+    @property
+    def pro_change(self) -> float | None:
+        """프로 픽·밴율이 자기 값 대비 얼마나 움직였나.
+
+        **%p 가 아니라 비율이다.** 챔피언마다 자릿수가 달라(0.55 와 0.04) %p 로는
+        비교가 안 된다.
+
+        조정 전이 0 인 경우를 둘로 가른다.
+
+            0 → 0        변화 0 으로 센다. 프로 경기에 안 나오던 챔피언이
+                         조정 뒤에도 안 나온 것은 **관측된 사실**이다
+            0 → 양수      `None`. 비율이 무한이라 중앙값에 못 넣는다
+
+        **앞엣것을 빼면 「그 외」 무리가 통째로 사라진다** — 프로 경기에 거의
+        안 나오는 챔피언이 그 무리의 대부분이라, 빼면 남는 것이 편향된다.
+        """
+        if self.pro_before is None or self.pro_after is None:
+            return None
+        if self.pro_before == 0:
+            return 0.0 if self.pro_after == 0 else None
+        return self.pro_after / self.pro_before - 1
 
 
 def outcomes(
@@ -81,7 +115,30 @@ def outcomes(
             before=a.win_rate,
             after=b.win_rate,
             baseline_shift=baseline,
+            pro_before=a.pro_presence,
+            pro_after=b.pro_presence,
         )
         for a, b in paired
         if a.direction_next in _INTENDED
     )
+
+
+def balance_control(
+    current: tuple[PanelRow, ...], following: tuple[PanelRow, ...]
+) -> tuple[int, int]:
+    """**조정 안 된 챔피언도 5할에 가까워진다.** 그 비율을 세어 돌려준다.
+
+    승률은 가만 둬도 5할 쪽으로 되돌아간다(평균 회귀). 그래서 「조정 뒤 균형에
+    가까워졌다」를 성과로 읽으려면 **아무것도 안 했을 때의 비율을 빼야 한다.**
+
+    `(가까워진 수, 전체)` 를 준다 — 패치마다 세어 합쳐 쓰라고 비율이 아니라
+    개수로 돌려준다.
+    """
+    after = {r.champion_id: r for r in following}
+    pairs = [
+        (a, after[a.champion_id])
+        for a in current
+        if a.champion_id in after and not a.adjusted_next
+    ]
+    closer = sum(abs(b.win_rate - 0.5) < abs(a.win_rate - 0.5) for a, b in pairs)
+    return closer, len(pairs)
