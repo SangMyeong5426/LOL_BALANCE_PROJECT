@@ -44,6 +44,7 @@ from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
 RULES = ROOT / "rules" / "proposed.jsonl"
+DDRAGON = ROOT / "data" / "ddragon"
 SITE = ROOT / "docs" / "site"
 OUT = SITE / "data.json"
 # 페이지가 쓰는 그림. **`docs/site/` 하나로 자족해야** 배포가 단순해진다.
@@ -52,6 +53,30 @@ FIGURES = ("lift.svg", "buff-asymmetry.svg")
 SPLIT = "15_13"
 TOP = 10
 TREND = 8  # 챔피언 상세에 보일 최근 패치 수
+
+
+def korean_names() -> dict[str, str]:
+    """영문 표시 이름 → 한글 이름. **없으면 빈 지도를 준다** — 페이지가 영문으로 돈다.
+
+    두 파일을 챔피언 `id` 로 잇는다. 패널이 쓰는 것은 표시 이름(`Nunu & Willump`)
+    이라 `id`(`Nunu`)만으로는 못 맞춘다.
+    """
+    ko = DDRAGON / "ko_KR.json"
+    if not ko.exists():
+        return {}
+    versions = sorted(
+        (p for p in DDRAGON.glob("*.json") if p.stem != "ko_KR"),
+        key=lambda p: [int(x) for x in p.stem.split(".")],
+    )
+    if not versions:
+        return {}
+    english = json.loads(versions[-1].read_text(encoding="utf-8"))["data"]
+    korean = json.loads(ko.read_text(encoding="utf-8"))["data"]
+    return {
+        english[key]["name"]: korean[key]["name"]
+        for key in english
+        if key in korean and english[key]["name"] != korean[key]["name"]
+    }
 
 
 def lifetime(rows: tuple[PanelRow, ...]) -> dict[str, float]:
@@ -139,7 +164,9 @@ def main() -> int:
             for r in hist
         ]
 
+    names = korean_names()
     got = {
+        "names": {c: names[c] for c in sorted(listed) if c in names},
         "built": evals[-1],
         "split": SPLIT,
         "patches": [{"id": p, "next": next_patch(p)} for p in evals],
