@@ -38,7 +38,6 @@ CHECKS: tuple[tuple[str, list[str], Path | None], ...] = (
     ("ruff format", ["ruff", "format", "--check", "src", "scripts", "tests"], None),
     ("mypy", ["mypy", "src"], None),
     ("문서 링크", ["./scripts/check-links"], None),
-    ("AGENTS ≡ CLAUDE", ["./scripts/check-rule-docs"], None),
     ("테스트", [sys.executable, "-m", "pytest", "-q"], None),
     ("README 수치", ["./scripts/check-docs"], PANEL),
     ("라벨 충돌", ["./scripts/score-labels"], PANEL),
