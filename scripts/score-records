@@ -112,6 +112,10 @@ def score(version: str) -> tuple[int, int, int, int]:
 
 
 def main() -> int:
+    # **`--help` 가 패치 이름으로 섞이던 자리다.**
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
     wanted = sys.argv[1:] or sorted(p.stem for p in RECORDS.glob("*.jsonl"))
     if not wanted:
         print("저장된 기록이 없다. ./scripts/save-records 로 먼저 저장한다.")

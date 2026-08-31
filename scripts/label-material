@@ -128,7 +128,9 @@ def main() -> int:
     if "--sample" in sys.argv:
         show_sample(int(sys.argv[sys.argv.index("--sample") + 1]))
         return 0
-    if len(sys.argv) < 2:
+    # **`--help` 도 같은 자리로 보낸다.** 인자 없을 때만 설명을 내고 있어서
+    # `--help` 가 패치 이름으로 흘러 역추적을 뱉었다.
+    if len(sys.argv) < 2 or {"-h", "--help"} & set(sys.argv):
         print(__doc__)
         return 1
     show_patch(sys.argv[1])
