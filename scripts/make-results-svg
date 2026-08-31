@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""① 대상의 성적을 기준선과 나란히 그린다. **수치는 `run-metrics` 에서 가져온다.**
+
+    ./scripts/make-results-svg
+
+표는 27.4% 와 15.0% 를 나란히 적을 뿐이라 **「좁힐수록 잘 맞는다」가 눈에 안 들어온다.**
+방향으로 좁힐수록 기준선이 낮아지고 배수가 커지는 것을 막대로 보이는 그림이다.
+
+결과 확인은 QuickLook 으로 한다.
+
+    qlmanage -t -s 1400 -o /tmp docs/img/lift.svg
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "docs" / "img" / "lift.svg"
+
+W, H = 720, 350
+INK, DIM, GRID = "#24292f", "#6e7781", "#d8dee4"
+GOT, BASE = "#0969da", "#afb8c1"
+FONT = "'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',system-ui,sans-serif"
+
+
+def measured() -> dict[str, dict[str, float]]:
+    """`run-metrics --json` 을 그대로 읽는다. **여기서 다시 계산하지 않는다.**"""
+    import json
+
+    run = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "run-metrics"), "--json"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    if run.returncode:
+        print(run.stderr[-400:], file=sys.stderr)
+        raise SystemExit(1)
+    return json.loads(run.stdout)["target"]
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    t = measured()
+    tasks = [
+        ("누가 조정되나", "조정"),
+        ("누가 너프되나", "너프"),
+        ("누가 버프되나", "버프"),
+    ]
+    top = max(t[k]["rp"] for _, k in tasks) * 1.45
+    # `x0` 은 첫 막대가 축 왼쪽으로 안 나가게 잡는다(막대 반폭 46 + 여백).
+    base_y, height, x0, gap = 210, 125, 115, 205
+
+    parts = [
+        f'<text x="40" y="26" font-size="13" fill="{DIM}">'
+        f"물음을 좁힐수록 기준선이 낮아지고 배수가 커진다</text>",
+        f'<line x1="40" y1="{base_y}" x2="{W - 40}" y2="{base_y}" '
+        f'stroke="{GRID}" stroke-width="1.5"/>',
+    ]
+    for i, (title, key) in enumerate(tasks):
+        m = t[key]
+        cx = x0 + i * gap
+        for j, (value, colour, label) in enumerate(
+            ((m["base"], BASE, "기준선"), (m["rp"], GOT, "성적"))
+        ):
+            h = max(2.0, value / top * height)
+            bx = cx + j * 46 - 46
+            parts += [
+                f'<rect x="{bx}" y="{base_y - h:.0f}" width="42" height="{h:.0f}" '
+                f'rx="3" fill="{colour}"/>',
+                f'<text x="{bx + 21}" y="{base_y - h - 8:.0f}" font-size="13" '
+                f'font-weight="600" fill="{colour}" text-anchor="middle">{value:.1%}</text>',
+                f'<text x="{bx + 21}" y="{base_y + 18}" font-size="11" fill="{DIM}" '
+                f'text-anchor="middle">{label}</text>',
+            ]
+        parts += [
+            f'<text x="{cx - 4}" y="{base_y + 42}" font-size="13" fill="{INK}" '
+            f'text-anchor="middle">{title}</text>',
+            f'<text x="{cx - 4}" y="{base_y + 66}" font-size="17" font-weight="700" '
+            f'fill="{GOT}" text-anchor="middle">{m["lift"]:.1f}배</text>',
+        ]
+
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+        f'viewBox="0 0 {W} {H}" font-family="{FONT}">'
+        f'<rect width="100%" height="100%" fill="#ffffff"/>'
+        f"{''.join(parts)}"
+        f'<text x="40" y="{H - 12}" font-size="12" fill="{DIM}">'
+        f"R-정확도. 패치마다 실제 조정 수만큼 뽑아 잰다 · ./scripts/run-metrics</text>"
+        f"</svg>\n"
+    )
+    OUT.write_text(svg, encoding="utf-8")
+    print(f"{OUT.relative_to(ROOT)}  {OUT.stat().st_size:,} B")
+    for title, key in tasks:
+        m = t[key]
+        print(
+            f"  {title:12}{m['rp']:>7.1%}  기준선 {m['base']:>6.1%}  {m['lift']:>4.1f}배"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
