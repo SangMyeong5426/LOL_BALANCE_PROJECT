@@ -145,6 +145,7 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 | --- | --- |
 | [`docs/results/`](docs/results/README.md) | 측정 결과 전량 · 실패한 시도 · 천장 |
 | [`docs/lessons.md`](docs/lessons.md) | **막혔던 것들** — 조용히 틀리고 있던 것 넷을 무엇이 잡아냈나 |
+| [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들 — 무엇을 확인하고 접었나 |
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
 | [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 8건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어 — 여기 있는 말만 쓴다 |
