@@ -26,14 +26,21 @@
     font-size:14px;color:var(--dim);cursor:pointer;user-select:none}
   .toggle input{accent-color:var(--buff);width:15px;height:15px}
 
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:26px}
+  /* 좌우를 각각 그리면 근거 줄 수가 달라 높이가 어긋난다.
+     한 격자에 번갈아 넣어 같은 순위가 같은 행을 쓰게 한다. */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px;margin-top:26px;
+    align-items:stretch}
   @media(max-width:820px){.cols{grid-template-columns:1fr}}
   h2{font-size:14px;font-weight:650;margin:0 0 12px;letter-spacing:.02em}
   h2 .n{color:var(--nerf)} h2 .b{color:var(--buff)}
   h2 em{font-style:normal;color:var(--faint);font-weight:400;margin-left:6px}
 
-  .card{border:1px solid var(--line);border-radius:8px;padding:13px 15px;margin-bottom:9px;
-    background:#fff;cursor:pointer;transition:border-color .12s}
+  .card{border:1px solid var(--line);border-radius:8px;padding:13px 15px;
+    background:#fff;cursor:pointer;transition:border-color .12s;
+    display:flex;flex-direction:column}
+  /* 경고가 있는 카드와 없는 카드가 한 행에 서면 근거 줄이 위로 몰린다.
+     남는 자리를 근거 아래에 두어 카드 아래쪽이 나란히 끝나게 한다. */
+  .card .fill{flex:1 1 auto;min-height:0}
   .card:hover{border-color:#c8ccd2}
   .top{display:flex;align-items:baseline;gap:9px}
   .rank{color:var(--faint);font-size:13px;min-width:15px}
@@ -49,6 +56,9 @@
   .wn{font-size:13.5px;color:var(--warn);margin:7px 0 0;padding-left:0;line-height:1.5}
   .ans{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);
     font-size:13px;color:var(--dim)}
+  .head{font-size:14px;font-weight:650;margin:0 0 2px;letter-spacing:.02em}
+  .head .n{color:var(--nerf)} .head .b{color:var(--buff)}
+  .head em{font-style:normal;color:var(--faint);font-weight:400;margin-left:6px}
   .ans.hit{color:var(--buff);font-weight:600}
   .score{margin-top:10px;font-size:13px;color:var(--dim)}
 
@@ -85,10 +95,7 @@
     <label class="toggle"><input type="checkbox" id="rev"> 실제 결과 보기</label>
   </div>
 
-  <div class="cols">
-    <section><h2><span class="n">너프 후보</span><em>상위 5</em></h2><div id="nerf"></div></section>
-    <section><h2><span class="b">버프 후보</span><em>상위 5</em></h2><div id="buff"></div></section>
-  </div>
+  <div class="cols" id="grid"></div>
 
   <div class="note">
     <b>먼저 목록을 읽고, 그다음 「실제 결과 보기」를 켜 보세요.</b>
@@ -144,18 +151,26 @@ function card(j, kind, reveal) {
       <span class="name">${esc(j.champion)}</span>
       <span class="prob">${(j.prob / 100).toFixed(2)}</span></div>
     <div class="meter"><i style="width:${j.prob}%"></i></div>
-    ${ev}${wn}${ans}</div>`;
+    ${ev}${wn}<div class="fill"></div>${ans}</div>`;
 }
 
 function draw() {
   const p = $('#p').value, v = D.views[p], reveal = $('#rev').checked;
   $('#meta').textContent = `${v.next} 패치를 예측 · 대상 ${v.n}종`;
-  for (const kind of ['nerf', 'buff']) {
-    const list = v[kind].slice(0, 5).map((j, i) => ({ ...j, rank: i + 1 }));
-    $('#' + kind).innerHTML = list.map(j => card(j, kind, reveal)).join('')
-      + (reveal ? `<p class="score">상위 5 중 적중 ${
-          list.filter(j => j.actual.startsWith(kind === 'nerf' ? '너프' : '버프')).length}종</p>` : '');
+  const take = k => v[k].slice(0, 5).map((j, i) => ({ ...j, rank: i + 1 }));
+  const nerf = take('nerf'), buff = take('buff');
+
+  let html = '<p class="head"><span class="n">너프 후보</span><em>상위 5</em></p>'
+           + '<p class="head"><span class="b">버프 후보</span><em>상위 5</em></p>';
+  for (let i = 0; i < 5; i++) {
+    html += card(nerf[i], 'nerf', reveal) + card(buff[i], 'buff', reveal);
   }
+  if (reveal) {
+    const hit = (l, w) => l.filter(j => j.actual.startsWith(w)).length;
+    html += `<p class="score">상위 5 중 적중 ${hit(nerf, '너프')}종</p>`
+          + `<p class="score">상위 5 중 적중 ${hit(buff, '버프')}종</p>`;
+  }
+  $('#grid').innerHTML = html;
   document.querySelectorAll('.card').forEach(c =>
     c.onclick = () => detail(c.dataset.c));
 }
