@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""버프의 비대칭을 그림으로 만든다. **수치는 `effect.py` 에서 직접 가져온다.**
+
+    ./scripts/make-effect-svg
+
+손으로 적은 숫자로 그리면 문서와 어긋나도 모른다. `run-effect` 가 쓰는 것과 같은
+함수를 불러 그리므로 **그림과 표가 갈릴 수 없다.**
+
+## 무엇을 보이려는 그림인가
+
+같은 크기로 버프해도 **솔랭에는 양쪽에 똑같이 닿고 프로 경기에는 한쪽만 닿는다.**
+왼쪽 두 막대가 거의 같고 오른쪽 둘이 크게 갈리는 것이 요점이다.
+
+결과 확인은 QuickLook 으로 한다.
+
+    qlmanage -t -s 1400 -o /tmp docs/img/buff-asymmetry.svg
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.effect import outcomes  # noqa: E402
+from lol_balance.explain import PRO_REGULAR  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+OUT = ROOT / "docs" / "img" / "buff-asymmetry.svg"
+
+W, H = 760, 330
+INK, DIM, GRID = "#24292f", "#6e7781", "#d8dee4"
+HOT, COOL = "#cf222e", "#8c959f"
+FONT = "'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',system-ui,sans-serif"
+
+
+def gather() -> dict[str, dict[str, float]]:
+    """프로 단골과 그 외로 갈라 버프의 결과를 모은다."""
+    rows = read_panel(PANEL)
+    by: dict[str, list] = {}
+    for r in rows:
+        by.setdefault(r.patch, []).append(r)
+
+    seen: dict[str, list[float]] = {}
+    for r in rows:
+        if r.pro_presence is not None:
+            seen.setdefault(r.champion, []).append(r.pro_presence)
+    lifetime = {c: sum(v) / len(v) for c, v in seen.items()}
+
+    found = []
+    for a, b in zip(PATCH_SEQUENCE, PATCH_SEQUENCE[1:], strict=False):
+        if a in by and b in by:
+            found.extend(outcomes(tuple(by[a]), tuple(by[b])))
+
+    out = {}
+    for regular, key in ((True, "프로 단골"), (False, "그 외")):
+        part = [
+            o
+            for o in found
+            if o.direction == "buff"
+            and o.pro_change is not None
+            and (lifetime.get(o.champion, 0.0) >= PRO_REGULAR) is regular
+        ]
+        out[key] = {
+            "n": len(part),
+            "solo": float(np.median([o.adjusted_shift for o in part])) * 100,
+            "pro": float(np.median([o.pro_change for o in part])),
+        }
+    return out
+
+
+def panel(
+    x0: int, title: str, note: str, bars: list[tuple[str, float, str]], top: float
+) -> str:
+    """막대 두 개짜리 칸 하나. `top` 은 눈금 최대값이다."""
+    w, base, height = 300, 250, 150
+    out = [
+        f'<text x="{x0}" y="42" font-size="15" font-weight="600" fill="{INK}">{title}</text>',
+        f'<text x="{x0}" y="62" font-size="12" fill="{DIM}">{note}</text>',
+        f'<line x1="{x0}" y1="{base}" x2="{x0 + w}" y2="{base}" stroke="{GRID}" stroke-width="1.5"/>',
+    ]
+    for i, (name, value, colour) in enumerate(bars):
+        cx = x0 + 70 + i * 150
+        h = max(2.0, abs(value) / top * height)
+        out += [
+            f'<rect x="{cx - 38}" y="{base - h:.0f}" width="76" height="{h:.0f}" rx="3" fill="{colour}"/>',
+            f'<text x="{cx}" y="{base - h - 10:.0f}" font-size="16" font-weight="700" '
+            f'fill="{colour}" text-anchor="middle">{name.split("|")[1]}</text>',
+            f'<text x="{cx}" y="{base + 22}" font-size="13" fill="{INK}" '
+            f'text-anchor="middle">{name.split("|")[0]}</text>',
+        ]
+    return "".join(out)
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    g = gather()
+    hot, cool = g["프로 단골"], g["그 외"]
+
+    left = panel(
+        40,
+        "솔랭 승률",
+        "대조군을 뺀 뒤, %p",
+        [
+            (f"프로 단골 (n={hot['n']})|+{hot['solo']:.2f}%p", hot["solo"], COOL),
+            (f"그 외 (n={cool['n']})|+{cool['solo']:.2f}%p", cool["solo"], COOL),
+        ],
+        max(hot["solo"], cool["solo"]) * 1.35,
+    )
+    right = panel(
+        420,
+        "프로 경기 픽·밴율",
+        "자기 값 대비 비율, 중앙값",
+        [
+            (f"프로 단골|+{hot['pro']:.0%}", hot["pro"], HOT),
+            (f"그 외|{cool['pro']:+.0%}", cool["pro"], COOL),
+        ],
+        max(hot["pro"], 0.01) * 1.35,
+    )
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+        f'viewBox="0 0 {W} {H}" font-family="{FONT}">'
+        f'<rect width="100%" height="100%" fill="#ffffff"/>'
+        f'<text x="40" y="24" font-size="13" fill="{DIM}">'
+        f"같은 크기로 버프해도 프로 경기에는 한쪽만 닿는다</text>"
+        f'<line x1="390" y1="34" x2="390" y2="278" stroke="{GRID}"/>'
+        f"{left}{right}"
+        f'<text x="40" y="308" font-size="12" fill="{DIM}">'
+        f"버프 {hot['n'] + cool['n']}건 · 프로 단골은 평생 평균 픽·밴율 "
+        f"{PRO_REGULAR:.3f} 이상 · ./scripts/run-effect</text>"
+        f"</svg>\n"
+    )
+    OUT.write_text(svg, encoding="utf-8")
+    print(f"{OUT.relative_to(ROOT)}  {OUT.stat().st_size:,} B")
+    print(
+        f"  프로 단골 n={hot['n']}  솔랭 +{hot['solo']:.2f}%p  프로 +{hot['pro']:.1%}"
+    )
+    print(
+        f"  그 외    n={cool['n']}  솔랭 +{cool['solo']:.2f}%p  프로 {cool['pro']:+.1%}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
