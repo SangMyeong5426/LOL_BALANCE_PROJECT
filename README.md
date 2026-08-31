@@ -1,9 +1,7 @@
 # 리그 오브 레전드 밸런스 조정 보조 도구
 
+[![ci](https://github.com/SangMyeong5426/LOL_BALANCE_PROJECT/actions/workflows/ci.yml/badge.svg)](https://github.com/SangMyeong5426/LOL_BALANCE_PROJECT/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/테스트-332개-4c1)
-![Coverage](https://img.shields.io/badge/커버리지-94%25-4c1)
-![Checks](https://img.shields.io/badge/검사-11개-4c1)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 **밸런스 패치를 만들 때 173종을 다 볼 수는 없다.** 공개 데이터로 잡히는 것만 모아 **어느 챔피언을 봐야 하는지, 왜 그런지, 무엇을 주의해야 하는지**를 내놓는다. 조정 여부를 정하는 것은 사람이다.
@@ -338,6 +336,8 @@ pre-commit install
 | README 수치 | 문서에 적은 수가 실제와 맞는가 |
 | 라벨 충돌 | 손 라벨이 기계 판정과 어긋나는가 |
 | 노트 검색 | R2 가 얼마나 맞히는가 ([`score-retrieval`](scripts/score-retrieval)) |
+
+**CI 는 이 중 원자료 없이 도는 것만 건다**([`ci.yml`](.github/workflows/ci.yml)) — 형식·타입·테스트·규칙 문서·문서 링크. 누출·재현·라벨 충돌은 `data/` 가 있어야 하므로 로컬에서 돌린다. **늘 건너뛸 검사를 CI 에 걸어 두면 초록불이 아무 말도 안 하게 된다.**
 | 누출 | 정답을 섞으면 성능이 무너지는가 |
 | 재현 | 패널을 두 번 만들면 같은가 ([`check-repro`](scripts/check-repro)) |
 
@@ -372,6 +372,7 @@ tests/               332개
 | beautifulsoup4 | 패치 노트 HTML 파싱 |
 | sqlite (표준 라이브러리) | 패널 저장 |
 | pytest · ruff · mypy · pre-commit | 코드 품질. 테스트 332개, 커버리지 94% |
+| GitHub Actions | 푸시·PR 마다 형식·타입·테스트·문서 링크를 돌린다 |
 
 의존성은 직접 import 하는 것만 선언한다. `scipy` 는 `scikit-learn` 이 끌어오지만 우리가 직접 쓰지 않으므로 적지 않는다.
 

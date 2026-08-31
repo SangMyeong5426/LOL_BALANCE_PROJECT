@@ -1,0 +1,41 @@
+# 원자료 없이 도는 것만 건다.
+#
+# `data/` 는 커밋하지 않으므로 CI 에는 없다. 테스트는 픽스처만 쓰니 그대로 돌고,
+# 데이터가 필요한 검사(누출·재현·라벨 충돌)는 여기서 뺀다 — 늘 건너뛸 검사를
+# 걸어 두면 초록불이 아무 말도 안 하게 된다.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: 형식과 타입
+        run: |
+          ruff check src scripts tests
+          ruff format --check src scripts tests
+          mypy src
+
+      - name: 테스트
+        run: pytest -q --cov=lol_balance --cov-report=term --cov-fail-under=90
+
+      # 규칙 문서 둘이 한 글자도 달라선 안 된다. pre-commit 이 로컬에서 잡지만
+      # 훅을 건너뛴 커밋도 있을 수 있어 여기서 다시 본다.
+      - name: AGENTS ≡ CLAUDE
+        run: ./scripts/check-rule-docs AGENTS.md CLAUDE.md
+
+      - name: 문서 링크
+        run: ./scripts/check-links
