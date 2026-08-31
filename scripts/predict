@@ -136,7 +136,7 @@ def arg(flag: str, default: str) -> str:
 def lifetime_pro(rows: tuple[PanelRow, ...]) -> dict[str, float]:
     """챔피언별 **평생 평균** 프로 픽·밴율.
 
-    한 패치 값이 아니라 평생 값으로 「프로 단골인가」를 본다 — 한 패치만 튀는
+    한 패치 값이 아니라 평생 값으로 「프로 경기에 자주 나오는가」를 본다 — 한 패치만 튀는
     것과 늘 나오는 것은 다르다.
     """
     seen: dict[str, list[float]] = {}

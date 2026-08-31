@@ -53,8 +53,40 @@ def colour(line: str) -> str:
 
 
 def width(text: str) -> int:
-    """한글은 두 칸을 먹는다. **실측하니 2.0 으로는 조금 모자라** 2.1 로 잡는다."""
-    return round(sum(2.1 if ord(c) > 0x1100 and not c.isascii() else 1 for c in text))
+    """한글이 몇 칸을 먹나. **실측해서 맞춘 값이다.**
+
+    2.0 으로 잡았더니 마지막 줄이 오른쪽에 닿았고, 2.1 로도 긴 경고 줄이 잘렸다.
+    글꼴마다 다르므로 **그려 보고 늘리는 수밖에 없다** — 확인 방법은 위에 있다.
+    """
+    return round(sum(2.4 if ord(c) > 0x1100 and not c.isascii() else 1 for c in text))
+
+
+# 이보다 넓어지면 접는다. **글꼴 계수를 쫓는 대신 줄을 접는 쪽이 안전하다** —
+# 한글 폭은 보는 사람 글꼴마다 달라 계산으로는 끝까지 안 맞는다.
+WRAP = 78
+
+
+def fold(lines: list[str]) -> list[str]:
+    """긴 줄을 접는다. 이어지는 줄은 원래 들여쓰기에 맞춘다."""
+    out: list[str] = []
+    for line in lines:
+        if width(line) <= WRAP:
+            out.append(line)
+            continue
+        # **앞 공백을 따로 떼어 둔다.** 함께 쪼개면 들여쓰기가 사라져 첫 줄만
+        # 왼쪽 끝으로 튄다 — 실제로 한 번 그렇게 나왔다.
+        head = line[: len(line) - len(line.lstrip())]
+        pad = " " * (len(head) + 4)
+        cur = head
+        for word in line.split():
+            nxt = f"{cur} {word}" if cur.strip() else cur + word
+            if cur.strip() and width(nxt) > WRAP:
+                out.append(cur)
+                cur = pad + word
+            else:
+                cur = nxt
+        out.append(cur)
+    return out
 
 
 def draw(lines: list[str]) -> str:
@@ -103,7 +135,7 @@ def main() -> int:
     keep += ["", *body[buff : buff + 7]]
 
     # 줄바꿈으로 끝낸다 — `end-of-file-fixer` 가 안 그러면 커밋 때 고쳐 놓는다.
-    OUT.write_text(draw(keep) + "\n", encoding="utf-8")
+    OUT.write_text(draw(fold(keep)) + "\n", encoding="utf-8")
     print(f"{OUT.relative_to(ROOT)}  {len(keep)}줄  {OUT.stat().st_size:,} B")
     return 0
 
