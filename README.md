@@ -41,6 +41,8 @@ LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 
 
 ## 무엇을 내놓는가
 
+**[돌려 보기 →](https://sangmyeong5426.github.io/LOL_BALANCE_PROJECT/)** 패치를 고르고 후보를 읽은 뒤, 실제 결과를 켜서 맞춰 볼 수 있다.
+
 ![predict 실행 화면](docs/img/predict.svg)
 
 Azir 의 사례가 이 도구의 목적을 보여 준다. 승률이 173종 중 172위이므로 지표만
@@ -164,6 +166,7 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 
 | | |
 | --- | --- |
+| [`docs/site/`](docs/site/) | 배포 페이지. `make-site` 가 만든 판단을 브라우저에서 본다 |
 | [`docs/results/`](docs/results/README.md) | 측정 결과 전량, 실패한 시도, 성능 상한 |
 | [`docs/lessons.md`](docs/lessons.md) | 막혔던 것들. 조용히 틀리고 있던 결함 넷을 무엇이 잡아냈는가 |
 | [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들. 무엇을 확인하고 접었는가 |
