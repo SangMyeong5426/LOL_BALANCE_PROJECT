@@ -67,7 +67,7 @@ _HOTFIX_HEADING = "hotfix"
 # **위키와 Data Dragon 이 한 챔피언을 다르게 부른다.** 위키의 `data-champion` 은
 # `Nunu`, Data Dragon 과 패널은 `Nunu & Willump` 다. 이름이 안 맞으면 그 챔피언의
 # 조정이 통째로 「조정 안 됨」으로 기록된다 — 실제로 5개 패치가 그렇게 빠졌고,
-# 라벨 4건도 패널에 못 붙었다. **연결 키를 이름으로 잡은 대가다**(AGENTS.md
+# 라벨 4건도 패널에 못 붙었다. **연결 키를 이름으로 잡은 대가다**(CLAUDE.md
 # 「버전 표기를 믿지 않는다」).
 #
 # `scripts/build-panel` 이 노트 이름과 패널 이름을 대조해, 여기 없는 새 어긋남이
@@ -81,7 +81,7 @@ def champion_name(wiki_name: str) -> str:
 
 
 # **Arena·Doom Bots 는 협곡이 아니다.** 같은 형식으로 챔피언 변경을 담지만
-# 모드 전용 수치라, 협곡 지표와 이어 붙이면 값이 튄다(AGENTS.md 「출처를 섞지
+# 모드 전용 수치라, 협곡 지표와 이어 붙이면 값이 튄다(CLAUDE.md 「출처를 섞지
 # 않는다」). 그래서 제목으로 걸러 낸다.
 
 

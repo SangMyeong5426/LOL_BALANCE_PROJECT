@@ -60,6 +60,13 @@ def arms() -> int | None:
     return len(target) + len(direction)
 
 
+def checks() -> int | None:
+    """`check-all` 이 도는 검사 수. **AGENTS ≡ CLAUDE 를 뺐을 때 11 이 남아 있었다.**"""
+    text = (ROOT / "scripts" / "check-all").read_text(encoding="utf-8")
+    body = re.search(r"CHECKS[^=]*=\s*\((.*?)\n\)", text, re.S)
+    return len(re.findall(r'\("', body.group(1))) if body else None
+
+
 def adrs() -> int:
     """`docs/adr/` 의 결정 기록 수. **`README.md` 와 `template.md` 는 안 센다.**"""
     return len(list((ROOT / "docs" / "adr").glob("0*.md")))
@@ -90,6 +97,7 @@ def main() -> int:
         # **셀 수 있는 것은 전부 검사에 건다.** ADR 건수가 7 로 굳어 있는 동안
         # 실제로는 8건이 됐다 — 파일을 세면 되는 것을 사람이 기억하고 있었다.
         ("ADR 건수", r"기술 결정 기록 (\d+)건", adrs()),
+        ("검사 개수", r"검사 (\d+)개", checks()),
         ("규칙 개수", r"밸런스 규칙 (\d+)개", rules()),
         # 「정답지」·「방향 라벨」·「실제 조정 결과」가 같은 것을 가리킨다.
         # **어느 표현을 쓰든 수는 하나여야 한다.**

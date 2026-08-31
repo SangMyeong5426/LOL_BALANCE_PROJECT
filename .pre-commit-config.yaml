@@ -19,13 +19,3 @@ repos:
       # 수집한 원자료(아카이브 HTML·JSON, CSV)가 딸려 들어가는 것을 막는다.
       - id: check-added-large-files
         args: [--maxkb=2048]
-
-  - repo: local
-    hooks:
-      # AGENTS.md 와 CLAUDE.md 는 같은 문서다. 갈라지면 커밋을 막는다.
-      - id: agents-claude-identical
-        name: AGENTS.md 와 CLAUDE.md 가 같은지 검사
-        entry: scripts/check-rule-docs
-        language: system
-        pass_filenames: false
-        files: '^(AGENTS|CLAUDE)\.md$'

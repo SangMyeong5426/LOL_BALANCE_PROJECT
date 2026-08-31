@@ -90,7 +90,7 @@ flowchart LR
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 332개 · 검사 11개
+./scripts/check-all                 # 테스트 332개 · 검사 10개
 ```
 
 **API 키는 하나도 필요 없다.** 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어
@@ -148,4 +148,4 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
 | [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 8건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어 — 여기 있는 말만 쓴다 |
-| [`AGENTS.md`](AGENTS.md) | 작업 규칙 ([`CLAUDE.md`](CLAUDE.md)와 같은 문서) |
+| [`CLAUDE.md`](CLAUDE.md) | 작업 규칙 — 무엇을 만들고 무엇을 안 하는가 |
