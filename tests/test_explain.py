@@ -94,7 +94,7 @@ def test_a_low_pro_rate_is_still_reported(make_row: PanelRowFactory) -> None:
     notes = reasons(row, [row])
 
     assert "프로 픽·밴율 0.5%" in texts(notes)
-    assert "프로 단골" not in warns(notes)
+    assert "자주 나오는 챔피언" not in warns(notes)
 
 
 def test_fired_rules_are_named(make_row: PanelRowFactory) -> None:
@@ -135,7 +135,7 @@ def test_a_pro_regular_below_fifty_gets_a_buff_warning(
     """**이것이 이 도구의 값이다.**
 
     승률이 낮아 버프 후보로 올라오는데, 올려 주면 대회 출전이 크게 뛴다.
-    프로 단골 버프 시 +37% · 그 외 ±0% 라는 측정이 근거다.
+    자주 나오는 챔피언을 버프하면 +37% · 그 외 ±0% 라는 측정이 근거다.
     """
     row = make_row("16_13", 1, win_rate=0.47, matches=50_000)
 
@@ -185,7 +185,7 @@ def test_a_champion_with_no_pro_data_gets_no_pro_warning(
     """**모르는 것을 경고로 만들지 않는다.** 프로 데이터가 없으면 조용히 넘어간다."""
     row = make_row("16_13", 1, win_rate=0.47, matches=50_000)
 
-    assert "프로 단골" not in warns(warnings(row, lifetime_pro=None))
+    assert "자주 나오는 챔피언" not in warns(warnings(row, lifetime_pro=None))
 
 
 # --- 패치에 붙는 경고 ---------------------------------------------------

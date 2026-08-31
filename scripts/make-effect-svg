@@ -41,7 +41,7 @@ FONT = "'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',system-ui,sans-seri
 
 
 def gather() -> dict[str, dict[str, float]]:
-    """프로 단골과 그 외로 갈라 버프의 결과를 모은다."""
+    """자주 나오는 챔피언과 그 외로 갈라 버프의 결과를 모은다."""
     rows = read_panel(PANEL)
     by: dict[str, list] = {}
     for r in rows:
@@ -59,7 +59,7 @@ def gather() -> dict[str, dict[str, float]]:
             found.extend(outcomes(tuple(by[a]), tuple(by[b])))
 
     out = {}
-    for regular, key in ((True, "프로 단골"), (False, "그 외")):
+    for regular, key in ((True, "자주 나오는 챔피언"), (False, "그 외")):
         part = [
             o
             for o in found
@@ -103,14 +103,18 @@ def main() -> int:
         print(__doc__)
         return 0
     g = gather()
-    hot, cool = g["프로 단골"], g["그 외"]
+    hot, cool = g["자주 나오는 챔피언"], g["그 외"]
 
     left = panel(
         40,
         "솔랭 승률",
         "대조군을 뺀 뒤, %p",
         [
-            (f"프로 단골 (n={hot['n']})|+{hot['solo']:.2f}%p", hot["solo"], COOL),
+            (
+                f"자주 나오는 챔피언 (n={hot['n']})|+{hot['solo']:.2f}%p",
+                hot["solo"],
+                COOL,
+            ),
             (f"그 외 (n={cool['n']})|+{cool['solo']:.2f}%p", cool["solo"], COOL),
         ],
         max(hot["solo"], cool["solo"]) * 1.35,
@@ -120,7 +124,7 @@ def main() -> int:
         "프로 경기 픽·밴율",
         "자기 값 대비 비율, 중앙값",
         [
-            (f"프로 단골|+{hot['pro']:.0%}", hot["pro"], HOT),
+            (f"자주 나오는 챔피언|+{hot['pro']:.0%}", hot["pro"], HOT),
             (f"그 외|{cool['pro']:+.0%}", cool["pro"], COOL),
         ],
         max(hot["pro"], 0.01) * 1.35,
@@ -134,14 +138,14 @@ def main() -> int:
         f'<line x1="390" y1="34" x2="390" y2="278" stroke="{GRID}"/>'
         f"{left}{right}"
         f'<text x="40" y="308" font-size="12" fill="{DIM}">'
-        f"버프 {hot['n'] + cool['n']}건 · 프로 단골은 평생 평균 픽·밴율 "
+        f"버프 {hot['n'] + cool['n']}건 · 자주 나오는 챔피언은 평생 평균 픽·밴율 "
         f"{PRO_REGULAR:.3f} 이상 · ./scripts/run-effect</text>"
         f"</svg>\n"
     )
     OUT.write_text(svg, encoding="utf-8")
     print(f"{OUT.relative_to(ROOT)}  {OUT.stat().st_size:,} B")
     print(
-        f"  프로 단골 n={hot['n']}  솔랭 +{hot['solo']:.2f}%p  프로 +{hot['pro']:.1%}"
+        f"  자주 나오는 챔피언 n={hot['n']}  솔랭 +{hot['solo']:.2f}%p  프로 +{hot['pro']:.1%}"
     )
     print(
         f"  그 외    n={cool['n']}  솔랭 +{cool['solo']:.2f}%p  프로 {cool['pro']:+.1%}"

@@ -43,7 +43,7 @@ def main() -> int:
     churn = churn_by_patch(ITEMS) if ITEMS.is_dir() else {}
 
     # 챔피언별 **평생 평균** 프로 픽·밴율. 한 패치만 튀는 것과 늘 나오는 것은
-    # 다르므로 조정 시점 값이 아니라 평생 값으로 「프로 단골」을 가른다.
+    # 다르므로 조정 시점 값이 아니라 평생 값으로 「자주 나오는 챔피언」을 가른다.
     seen: dict[str, list[float]] = {}
     for row in rows:
         if row.pro_presence is not None:
@@ -94,7 +94,9 @@ def main() -> int:
         )
 
     # 프로 경기 비대칭. **%p 가 아니라 자기 값 대비 비율**이라 중앙값으로 본다.
-    print(f"\n프로 경기 픽·밴율 변화 (평생 평균 {PRO_REGULAR:.3f} 이상이면 프로 단골)")
+    print(
+        f"\n프로 경기 픽·밴율 변화 (평생 평균 {PRO_REGULAR:.3f} 이상이면 자주 나오는 챔피언)"
+    )
     print(f"   {'':22}{'n':>5}{'솔랭 승률':>12}{'프로 픽·밴율':>14}")
     for direction in ("nerf", "buff"):
         for regular in (True, False):
@@ -109,7 +111,7 @@ def main() -> int:
                 continue
             solo = np.median([o.adjusted_shift for o in part]) * 100
             pro = np.median([o.pro_change for o in part])
-            label = f"{direction} · {'프로 단골' if regular else '그 외'}"
+            label = f"{direction} · {'자주 나오는 챔피언' if regular else '그 외'}"
             print(f"   {label:22}{len(part):>5}{solo:>+11.2f}%p{pro:>+13.1%}")
 
     every = np.array([o.adjusted_shift for o in found]) * 100
