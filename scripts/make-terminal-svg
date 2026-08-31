@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""터미널 출력을 SVG 로 그린다. **README 의 화면 그림을 손으로 안 만들기 위해서다.**
+
+    ./scripts/make-terminal-svg
+
+`predict` 를 실제로 돌려 그 출력을 그리므로, 결과가 바뀌면 다시 돌려 갱신한다.
+캡처 도구(termtosvg·vhs)를 안 쓰는 이유는 설치 의존을 늘리지 않기 위해서다.
+
+**한글은 보는 사람의 폰트에 의존한다.** 글꼴 목록에 흔한 한글 고정폭을 나열하고
+마지막에 `monospace` 를 둔다 — 그래도 자간이 기기마다 조금씩 다르다.
+"""
+
+from __future__ import annotations
+
+import html
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "docs" / "img" / "predict.svg"
+
+# 터미널 색. 배경은 GitHub 어두운 테마와 밝은 테마 양쪽에서 읽히는 값으로 고른다.
+BG, FG, DIM = "#0d1117", "#c9d1d9", "#8b949e"
+GREEN, YELLOW, CYAN = "#3fb950", "#d29922", "#79c0ff"
+
+CH_W, LINE_H, PAD = 8.05, 21.0, 22.0
+FONT = (
+    "'SFMono-Regular','D2Coding','Menlo','Consolas',"
+    "'DejaVu Sans Mono','Apple SD Gothic Neo','Malgun Gothic',monospace"
+)
+
+
+def colour(line: str) -> str:
+    if "✅" in line:
+        return GREEN
+    if "⚠" in line:
+        return YELLOW
+    if line.startswith("==="):
+        return CYAN
+    if line.startswith("  학습") or line.startswith("$"):
+        return DIM
+    return FG
+
+
+def width(text: str) -> int:
+    """한글은 두 칸을 먹는다."""
+    return sum(2 if ord(c) > 0x1100 and not c.isascii() else 1 for c in text)
+
+
+def draw(lines: list[str]) -> str:
+    cols = max((width(x) for x in lines), default=40) + 4
+    w = cols * CH_W + PAD * 2
+    h = len(lines) * LINE_H + PAD * 2 + 28
+    rows = []
+    for i, line in enumerate(lines):
+        y = PAD + 28 + i * LINE_H
+        rows.append(
+            f'<text x="{PAD:.0f}" y="{y:.0f}" fill="{colour(line)}" '
+            f'xml:space="preserve">{html.escape(line)}</text>'
+        )
+    dots = "".join(
+        f'<circle cx="{PAD + 6 + i * 16:.0f}" cy="18" r="5.5" fill="{c}"/>'
+        for i, c in enumerate(("#ff5f56", "#ffbd2e", "#27c93f"))
+    )
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.0f}" height="{h:.0f}" '
+        f'viewBox="0 0 {w:.0f} {h:.0f}" font-family="{FONT}" font-size="13.5">'
+        f'<rect width="100%" height="100%" rx="8" fill="{BG}"/>{dots}'
+        f"{''.join(rows)}</svg>"
+    )
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    run = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "predict"), "--top", "3", "--score"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    if run.returncode:
+        print(run.stderr[-400:], file=sys.stderr)
+        return 1
+
+    body = run.stdout.splitlines()
+    keep: list[str] = ["$ ./scripts/predict --score", ""]
+    keep += body[:3] + [""]
+    nerf = body.index("=== 너프 후보 상위 3 ===")
+    keep += body[nerf : nerf + 8] + ["   ..."]
+    buff = body.index("=== 버프 후보 상위 3 ===")
+    keep += ["", *body[buff : buff + 7]]
+
+    # 줄바꿈으로 끝낸다 — `end-of-file-fixer` 가 안 그러면 커밋 때 고쳐 놓는다.
+    OUT.write_text(draw(keep) + "\n", encoding="utf-8")
+    print(f"{OUT.relative_to(ROOT)}  {len(keep)}줄  {OUT.stat().st_size:,} B")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
