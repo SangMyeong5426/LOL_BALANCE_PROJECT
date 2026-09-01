@@ -184,6 +184,11 @@ by_patch.setdefault(patch, ...)  그중 첫 번째 = 가장 이른 것
 
 그 밖에 1패치짜리가 넷 더 있다 — `silver` · `platinum` · `diamond` · `diamond_2_plus`.
 
+**아래 「전 범위 census」와 수가 다른 것은 범위 차이다** — 거기는 목록 전체이고
+여기는 `13_14` 이후만이다. `platinum_plus` 는 17 중 14 가, `master_plus` 는 9 중
+4 가 우리 구간 앞에 있다. `emerald_plus` 만 53 으로 같은데, 에메랄드가 `13_13`
+무렵 생겨 그 앞이 아예 없기 때문이다.
+
 주소는 `lol/1.5/champion_ranking/world/<패치>/ranked_solo_5x5/<티어>/1.5.0.json` 이다
 (87행과 같은 표기). **우리 구간은 전부 이 이름이다** — `1.2.6.json` 은 목록 전체에서
 4건뿐이고 모두 2019년 `9_x` 대의 옛 경로다.
