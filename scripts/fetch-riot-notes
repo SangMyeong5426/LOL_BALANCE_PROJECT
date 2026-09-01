@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""개발사 자체 패치 노트를 받는다 — **조정의 이유가 여기 있다.**
+
+    ./scripts/fetch-riot-notes
+
+정답지는 위키 전사본에서 온다(`fetch-patchnotes`). 위키는 **무엇이 바뀌었나**만
+남기고 **왜 바꿨나**를 버린다. 이 스크립트는 그 버려진 쪽을 받는다.
+
+**주소 형식이 한 가지가 아니다** — `patch-13-14-notes` 와
+`league-of-legends-patch-26-13-notes` 가 섞여 있다. `riotnotes.slugs` 가 둘을
+내고 앞에서부터 시도한다.
+
+받은 자리에서 파싱해 **이유가 붙은 블록이 하나라도 있는지** 확인한다. 형식이
+조용히 바뀌면 받기는 성공하는데 내용이 비기 때문이다.
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.fetch import Retryable, get_with_retry, save  # noqa: E402
+from lol_balance.riotnotes import parse_rationale, slugs  # noqa: E402
+
+DDRAGON = ROOT / "data" / "ddragon"
+OUT = ROOT / "data" / "riotnotes"
+BASE = "https://www.leagueoflegends.com/en-us/news/game-updates"
+DELAY = 3.0
+
+
+def _has_blocks(body: bytes) -> object:
+    """받은 것이 진짜 패치 노트인가. **아니면 다음 주소를 시도하게 한다.**"""
+    blocks = parse_rationale(body)
+    if not blocks:
+        raise ValueError(f"patch-change-block 이 없다 ({len(body)} B)")
+    return blocks
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    versions = sorted(
+        (p.stem for p in DDRAGON.glob("*.json") if p.stem[0].isdigit()),
+        key=lambda v: [int(x) for x in v.split(".")],
+    )
+    if not versions:
+        print("data/ddragon 이 비었다. ./scripts/fetch-ddragon 을 먼저 돌린다.")
+        return 1
+    print(f"패치 {len(versions)}개", flush=True)
+
+    done = skipped = failed = 0
+    for version in versions:
+        path = OUT / f"{version}.html"
+        if path.exists():
+            skipped += 1
+            continue
+        body = None
+        for slug in slugs(version):
+            try:
+                # **200 으로 404 페이지가 온다.** 2,482 B 짜리이고 `patch-change-block`
+                # 이 하나도 없다. 검사를 안 걸면 그걸 성공으로 받고 다음 주소를
+                # 시도하지 않는다 — 실제로 22패치가 그렇게 비었다.
+                body = get_with_retry(
+                    f"{BASE}/{slug}/", timeout=60, attempts=1, validate=_has_blocks
+                )
+                break
+            except Retryable:
+                continue
+        if body is None:
+            print(f"  {version:10} ✗ 두 주소 다 실패", flush=True)
+            failed += 1
+            time.sleep(DELAY)
+            continue
+        # **받은 자리에서 확인한다.** 형식이 바뀌면 파싱은 성공하고 내용만 빈다.
+        blocks = parse_rationale(body)
+        with_text = sum(1 for b in blocks if b.text)
+        if not with_text:
+            print(f"  {version:10} ⚠ 블록 {len(blocks)}개인데 이유가 0", flush=True)
+        save(path, body)
+        print(f"  {version:10} 블록 {len(blocks):>3} · 이유 {with_text:>3}", flush=True)
+        done += 1
+        time.sleep(DELAY)
+
+    print(f"\n받음 {done} · 건너뜀 {skipped} · 실패 {failed}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
