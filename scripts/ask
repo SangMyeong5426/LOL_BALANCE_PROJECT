@@ -169,7 +169,7 @@ def main() -> int:
             blocks[patch].extend(champion_changes(path.read_bytes()))
         # **이름만으로 질의하면 스킨 버그 수정이 최상위로 올라온다.** 그래서
         # 실제로 조정된 패치로 좁혀 묻는다 — 토크나이저가 패치 번호를 살리므로
-        # 「이름 + 패치」가 통한다(Recall@10 56.3% → 98.1%).
+        # 「이름 + 패치」가 통한다(Recall@10 56.3% → 99.2%).
         search = NoteSearch(blocks, at)
         adjusted = [
             n
