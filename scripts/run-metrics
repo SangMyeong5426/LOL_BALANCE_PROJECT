@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.arms import (  # noqa: E402
     _boosting,
     _model,
+    _narrow,
     rank_candidates,
     split,
 )
@@ -116,6 +117,70 @@ def target_metrics(rows, seed):
         m = {k: float(np.nanmean(v)) for k, v in acc.items()}
         m["lift"] = m["rp"] / m["base"]
         out[name] = m
+    return out
+
+
+# 부트스트랩 재표본 수. 5,000 이면 95% 구간 끝이 소수 셋째 자리에서 안 흔들린다.
+DRAWS = 5_000
+
+
+def spread(rows, seed, draws: int = DRAWS):
+    """머리 지표의 95% 구간. **흔들리는 단위를 재표본한다.**
+
+    ① 은 패치마다 재고 평균 내므로 단위가 패치다(평가 구간 20개). 행을 재표본하면
+    같은 패치 안의 행이 서로 독립인 것처럼 세어 구간이 좁아진다. ② 는 조정된 것을
+    모아 한 번에 재는 과제라 행이 단위다.
+
+    **씨앗은 이 폭에 안 들어간다.** 부스팅이 이 설정에서 결정적이라 씨앗을 바꿔도
+    값이 한 자리도 안 움직인다 — 폭은 표본에서만 온다.
+
+    `A7p` 와 `A7`(프로 피처를 뺀 것)은 **같은 재표본에서 짝지어** 뺀다. 각각의
+    구간을 겹쳐 보면 차이를 실제보다 크게 본다.
+    """
+    rng = np.random.default_rng(seed)
+    out: dict[str, dict[str, float]] = {}
+
+    for want, name in VIEWS:
+        per_patch, paired = [], []
+        early, _ = split(rows, SPLIT)
+        for patch, y, s_pro in scored(rows, want, seed):
+            test = tuple(r for r in rows if r.patch == patch)
+            train = _narrow(early, want) if want else early
+            s_solo = rank_candidates(train, test, want=want, with_pro=False, seed=seed)
+            per_patch.append(r_precision(y, s_pro))
+            paired.append(r_precision(y, s_pro) - r_precision(y, s_solo))
+        a, d = np.array(per_patch), np.array(paired)
+        pick = rng.integers(0, len(a), size=(draws, len(a)))
+        boot, bootd = np.nanmean(a[pick], axis=1), np.nanmean(d[pick], axis=1)
+        out[name] = {
+            "point": float(np.nanmean(a)),
+            "lo": float(np.percentile(boot, 2.5)),
+            "hi": float(np.percentile(boot, 97.5)),
+            "patches": len(a),
+            "pro_gain": float(np.nanmean(d)),
+            "pro_lo": float(np.percentile(bootd, 2.5)),
+            "pro_hi": float(np.percentile(bootd, 97.5)),
+        }
+
+    tr, te = split(direction_rows(rows), SPLIT)
+    enc = fit_encoder(tr, with_trend=True, with_pro=True)
+    x, t = encode(tr, enc), encode(te, enc)
+    ytr = np.array([int(r.direction_next == "nerf") for r in tr])
+    y = np.array([int(r.direction_next == "nerf") for r in te])
+    s_dir = _boosting(seed).fit(x.x, ytr).predict_proba(t.x)[:, 1]
+    pick = rng.integers(0, len(y), size=(draws, len(y)))
+    boot = []
+    for row in pick:
+        yy = y[row]
+        # 한쪽 클래스만 뽑힌 재표본은 AUC 가 정의되지 않는다. 버린다.
+        if yy.min() != yy.max():
+            boot.append(roc_auc_score(yy, s_dir[row]))
+    out["② 방향"] = {
+        "point": float(roc_auc_score(y, s_dir)),
+        "lo": float(np.percentile(boot, 2.5)),
+        "hi": float(np.percentile(boot, 97.5)),
+        "rows": int(len(y)),
+    }
     return out
 
 
@@ -227,6 +292,7 @@ def main() -> int:
         "split": SPLIT,
         "seed": seed,
         "target": target_metrics(rows, seed),
+        "spread": spread(rows, seed),
         "cuts": cuts(rows, seed),
         "as_the_tool_runs": as_the_tool_runs(rows, seed),
         "calibration": calibration(rows, seed),
@@ -247,6 +313,28 @@ def main() -> int:
             f"  {name:8}{m['auc']:>7.3f}{m['ap']:>8.3f}{m['rp']:>10.1%}"
             f"{m['mcc']:>7.3f}{m['ba']:>11.3f}{m['base']:>8.1%}{m['lift']:>6.1f}배"
         )
+
+    sp = got["spread"]
+    print(f"\n머리 지표의 폭 — 패치 {sp['조정']['patches']}개를 부트스트랩 {DRAWS:,}회")
+    print(f"  {'':10}{'점추정':>9}{'95% 구간':>22}")
+    for name in ("조정", "너프", "버프"):
+        v = sp[name]
+        print(f"  {name:10}{v['point']:>9.1%}   [{v['lo']:>6.1%}, {v['hi']:>6.1%}]")
+    d = sp["② 방향"]
+    print(
+        f"  {'② 방향':8}{d['point']:>9.3f}   [{d['lo']:>6.3f}, {d['hi']:>6.3f}]   행 {d['rows']}개 기준"
+    )
+    print("  씨앗은 이 폭에 안 들어간다 — 부스팅이 이 설정에서 결정적이다.")
+
+    print("\n프로 경기 피처의 기여 — 같은 재표본에서 짝지어 뺀다")
+    for name in ("조정", "너프", "버프"):
+        v = sp[name]
+        hit = "  ←" if v["pro_lo"] > 0 or v["pro_hi"] < 0 else ""
+        print(
+            f"  {name:10}{v['pro_gain']:>+9.4f}   "
+            f"[{v['pro_lo']:>+7.4f}, {v['pro_hi']:>+7.4f}]{hit}"
+        )
+    print("  ← 가 붙은 것만 구간이 0 을 안 품는다.")
 
     print("\n상위 k 를 바꾸면 — 정밀도와 재현율이 반대로 움직인다")
     for name, blk in got["cuts"].items():
