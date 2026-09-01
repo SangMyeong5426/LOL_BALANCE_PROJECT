@@ -147,7 +147,7 @@ LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 341개 · 검사 10개
+./scripts/check-all                 # 테스트 350개 · 검사 10개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -156,7 +156,7 @@ API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직
 ```bash
 ./scripts/fetch-ddragon && ./scripts/fetch-ugg && ./scripts/build-panel
 ./scripts/predict --score           # 너프·버프 후보 5종씩, 채점까지
-./scripts/ask Senna 16_13           # 검색기 셋이 무엇을 찾아왔는지 본다
+./scripts/ask Senna 16_13           # 검색기 셋 + 그때 개발사가 한 말
 ```
 
 `ask` 는 `--answer` 를 붙이기 전까지 실제 결과를 보여 주지 않는다. 먼저 읽고 스스로
@@ -170,7 +170,7 @@ src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증)
 ground_truth/      정답지. 실제 조정 결과 1,599건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             341개 · 커버리지 94%
+tests/             350개 · 커버리지 94%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 

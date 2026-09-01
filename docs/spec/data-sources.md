@@ -599,6 +599,50 @@ Oracle    14.01     15.09
 **원문을 저장소에 두지 않는다.** 남의 글이고, 우리가 쓰는 것은 숫자 몇 개다.
 주소와 확인 날짜만 남긴다.
 
+### 개발사 자체 패치 노트 — **왜 바꿨나가 여기 있다** (2026-09-01 추가)
+
+정답지는 위키 전사본에서 온다(위 1장). **위키는 무엇이 바뀌었나만 남기고 왜
+바꿨나를 버린다.** 개발사 노트에는 챔피언마다 한 문단이 붙는다.
+
+    "Cassiopeia has risen to the top of pro play presence, even before our
+     26.12 nerfs to her major competition."                         (26.13)
+
+    "Rek'Sai's combination of dueling power and mobility has made her too
+     successful at high ranks."                                     (26.13)
+
+**우리 지표에 없는 구간을 개발사가 글로 댄다** — 「high ranks」는
+[모집단 넷 중 둘만 본다](../results/README.md#모집단-넷-중-둘만-본다)에서
+안 보인다고 적은 그 구간이다.
+
+| | |
+| --- | --- |
+| 주소 | `leagueoflegends.com/en-us/news/game-updates/<슬러그>/` |
+| 받는 것 | `scripts/fetch-riot-notes` → `data/riotnotes/<DD 버전>.html` |
+| 커버리지 | **패널 52패치 전부.** 블록 1,805개 중 이유가 붙은 것 1,706개(95%) |
+
+#### 주소 형식이 다섯 가지다
+
+    patch-13-14-notes                      기본
+    league-of-legends-patch-26-13-notes    접두사가 붙은 것
+    lol-patch-14-13-notes                  줄인 접두사 (14.13 이 이것뿐이다)
+    patch-25-05-notes                      앞의 0 을 남긴 것 (2025년)
+    patch-25-s1-2-notes                    시즌 번호가 든 것 (2025년 초반)
+
+**그리고 없는 주소가 200 으로 온다** — 2,482 B 짜리 404 페이지이고
+`patch-change-block` 이 하나도 없다. 검사를 안 걸고 받으면 그것을 성공으로
+받아 다음 주소를 시도하지 않는다. **실제로 22패치가 그렇게 비었다가 걸렸다** —
+받는 자리에서 파싱해 확인하는 것(`fetch-ugg` 의 항등식 검사와 같은 갈래)이
+그것을 잡았다.
+
+`15_3` 하나는 다섯 형식 어디에도 없다. **패널에도 없는 패치라 손실이 없다** —
+u.gg 스냅샷이 아예 없어서 애초에 빠져 있다.
+
+#### 예측에는 안 쓴다
+
+피처로 만들어 재 봤고 **난수와 못 갈랐다**
+([results](../results/README.md#개발사가-적은-이유를-피처로-써-봤다-2026-09-01)).
+`scripts/ask` 가 사람에게 보여 주는 근거로만 쓴다.
+
 ## 7. 막힌 것과 이유
 
 | 출처 | 결과 |
