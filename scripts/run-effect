@@ -21,6 +21,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.effect import balance_control, outcomes  # noqa: E402
 from lol_balance.explain import PRO_REGULAR  # noqa: E402
 from lol_balance.items import LOUD, churn_by_patch  # noqa: E402
@@ -29,6 +30,29 @@ from lol_balance.store import read_panel  # noqa: E402
 
 PANEL = ROOT / "data" / "panel.sqlite"
 ITEMS = ROOT / "data" / "items"
+
+
+# 부트스트랩 재표본 수. 저장소가 다른 곳에서 쓰는 2만 회와 같은 자리다
+# (`docs/glossary.md` 의 `B5s` 대 `B6` 비교).
+DRAWS = 20_000
+
+
+def _gap(closer, control_hit: int, control_total: int, rng):
+    """조정 무리와 대조군의 「균형 접근」 비율 차이. 95% 구간을 돌려준다.
+
+    **카이제곱을 안 쓴다.** `scipy` 가 이 저장소 의존성이 아니고, 저장소가
+    이런 비교에 쓰는 어법이 이미 부트스트랩 구간이다 — 「구간이 0 을 안 품는다」.
+    """
+    control = np.zeros(control_total)
+    control[:control_hit] = 1.0
+    draws = np.array(
+        [
+            rng.choice(closer, len(closer)).mean()
+            - rng.choice(control, control_total).mean()
+            for _ in range(DRAWS)
+        ]
+    )
+    return float(np.percentile(draws, 2.5)), float(np.percentile(draws, 97.5))
 
 
 def main() -> int:
@@ -85,13 +109,42 @@ def main() -> int:
 
     # ③′ **균형에 가까워졌나.** 「의도대로 갔나」와 다른 질문이라 따로 낸다.
     base = control_closer / control_total if control_total else float("nan")
+    rng = np.random.default_rng(load_settings().seed)
     print(f"\n균형(5할)에 가까워졌나 — 조정 안 된 챔피언은 {base:.1%} 가 가까워진다")
     for direction in ("nerf", "buff"):
         part = [o for o in found if o.direction == direction]
         got = sum(o.closer for o in part) / len(part)
-        print(
-            f"   {direction:6}{len(part):>5}건   {got:>7.1%}   대조군 대비 {got - base:>+6.1%}p"
+        lo, hi = _gap(
+            np.array([o.closer for o in part], dtype=float),
+            control_closer,
+            control_total,
+            rng,
         )
+        mark = "  ←" if lo > 0 or hi < 0 else ""
+        print(
+            f"   {direction:6}{len(part):>5}건   {got:>7.1%}   "
+            f"대조군 대비 {got - base:>+6.1%}p   "
+            f"[{lo:>+6.1%}p, {hi:>+6.1%}p]{mark}"
+        )
+    print("   ← 가 붙은 것만 구간이 0 을 안 품는다.")
+
+    # 「의도대로」로도 둘을 대 본다. **두 열이 다른 말을 하는지 보려면 둘 다 재야 한다.**
+    n_part = [o for o in found if o.direction == "nerf"]
+    b_part = [o for o in found if o.direction == "buff"]
+    n_w = np.array([o.worked for o in n_part], dtype=float)
+    b_w = np.array([o.worked for o in b_part], dtype=float)
+    draws = np.array(
+        [
+            rng.choice(n_w, len(n_w)).mean() - rng.choice(b_w, len(b_w)).mean()
+            for _ in range(DRAWS)
+        ]
+    )
+    lo, hi = np.percentile(draws, [2.5, 97.5])
+    mark = "  ←" if lo > 0 or hi < 0 else ""
+    print(
+        f"\n의도대로 — 너프 {n_w.mean():.1%} vs 버프 {b_w.mean():.1%}   "
+        f"차이 {n_w.mean() - b_w.mean():>+5.1%}p   [{lo:>+5.1%}p, {hi:>+5.1%}p]{mark}"
+    )
 
     # 프로 경기 비대칭. **%p 가 아니라 자기 값 대비 비율**이라 중앙값으로 본다.
     print(
