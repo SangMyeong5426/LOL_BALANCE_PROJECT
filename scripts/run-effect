@@ -150,7 +150,12 @@ def main() -> int:
     print(
         f"\n프로 경기 픽·밴율 변화 (통산 평균 {PRO_REGULAR:.3f} 이상이면 자주 나오는 챔피언)"
     )
-    print(f"   {'':22}{'n':>5}{'솔랭 승률':>12}{'프로 픽·밴율':>14}")
+    # **조정 전과 절대 변화도 같이 낸다.** 상대 변화만 내면 「자주 나오는 챔피언은
+    # 조정 전 값이 높아 절대 변화가 클 수밖에 없다」를 문서가 손으로 적게 된다.
+    print(
+        f"   {'':22}{'n':>5}{'솔랭 승률':>12}{'조정 전':>10}"
+        f"{'절대 변화':>12}{'프로 픽·밴율':>14}"
+    )
     for direction in ("nerf", "buff"):
         for regular in (True, False):
             part = [
@@ -164,8 +169,13 @@ def main() -> int:
                 continue
             solo = np.median([o.adjusted_shift for o in part]) * 100
             pro = np.median([o.pro_change for o in part])
+            before = np.median([o.pro_before for o in part])
+            shift = np.median([o.pro_after - o.pro_before for o in part])
             label = f"{direction} · {'자주 나오는 챔피언' if regular else '그 외'}"
-            print(f"   {label:22}{len(part):>5}{solo:>+11.2f}%p{pro:>+13.1%}")
+            print(
+                f"   {label:22}{len(part):>5}{solo:>+11.2f}%p"
+                f"{before:>10.3f}{shift:>+12.4f}{pro:>+13.1%}"
+            )
 
     every = np.array([o.adjusted_shift for o in found]) * 100
     print("\n효과 크기 분포 (대조군 뺀 뒤, %p)")
