@@ -290,3 +290,33 @@ def test_the_patch_is_searchable() -> None:
     found = NoteSearch(blocks, as_of="15_1").search("Ahri 13_15", k=1)
 
     assert found[0][0] == "13_15"
+
+
+def test_a_long_block_that_matches_more_wins() -> None:
+    """**길이 정규화가 정확 일치를 누르면 안 된다.**
+
+    한때 `B=0.75` 였다. 그래서 「Heimerdinger 13_15」로 물으면 두 낱말을 다 맞힌
+    68토큰짜리 `13_15` 블록(6.17)이 `heimerdinger` 하나만 맞힌 10토큰짜리 `16_3`
+    블록(7.77)에 밀렸다. 놓친 질의 31건의 정답 블록이 유독 길었던 것도(중앙값
+    75토큰 · 전체 20토큰) 같은 기전이다.
+
+    **채우는 블록이 있어야 재현된다.** 문서가 둘뿐이면 챔피언 이름이 양쪽에
+    있어 흔한 낱말이 되고, 실제 코퍼스의 관계(`heimerdinger` idf 5.44 >
+    `13_15` 4.27)가 뒤집힌다. 길이 비도 실제에 맞춘다 — 정답 블록이 평균의
+    두세 배일 때가 문제 되는 자리다.
+    """
+    filler = tuple(f"w{i} tweak" for i in range(10))
+    patches: dict[str, list[ChangeBlock]] = {
+        f"14_{i}": [
+            ChangeBlock(f"Other{i}{j}", "Stats", None, filler) for j in range(5)
+        ]
+        for i in range(1, 12)
+    }
+    patches["13_15"] = [
+        ChangeBlock("Ahri", "Q", None, tuple(f"value {i} changed" for i in range(20)))
+    ]
+    patches["14_3"].append(ChangeBlock("Ahri", "Stats", None, ("health up",)))
+
+    top = NoteSearch(patches, as_of="16_15").search("Ahri 13_15", k=2)[0]
+
+    assert top[0] == "13_15"
