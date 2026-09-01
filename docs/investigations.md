@@ -116,8 +116,8 @@ CommunityDragon 전량 수집(2,795쌍)에서 `15_19/sivir` 하나가 실패했�
 구조가 이렇게 돼 있다.
 
 ```python
-body = get_with_retry(url, attempts=3)  # HTTP 실패만 재시도한다
-json.loads(body)  # ← 여기서 깨져도 재시도가 안 붙는다
+body = get_with_retry(url, attempts=3)   # HTTP 실패만 재시도한다
+json.loads(body)                         # ← 여기서 깨져도 재시도가 안 붙는다
 ```
 
 잘린 응답은 HTTP 로는 성공이라 `get_with_retry` 를 그냥 통과하고, 바깥의 `json.loads` 에서 `ValueError` 로 죽는다. **한 번 더 부르면 멀쩡히 온다.** `fetch-ugg-rankings` 도 같은 모양이다.
