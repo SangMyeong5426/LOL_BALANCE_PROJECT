@@ -433,7 +433,7 @@ def direction_arms(
         )
     )
 
-    # `B6` — **검색부 위에 판단을 올린다.** `B5` 와 같은 이웃 25종을 보고 대화
+    # `B6` — **검색부 위에 판단을 올린다.** 이웃 25종과 대상 지표를 보고 대화
     # 안에서 매긴 점수를 읽어 채점한다. 실행 시점 API 호출은 0회다.
     # 근거는 `docs/adr/0006-rag-generation-and-contamination-control.md`.
     if judgments:
