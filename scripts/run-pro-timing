@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""프로 경기 지표를 **그때 알 수 있었던 경기만으로** 다시 재고 기존 성적과 견준다.
+
+    ./scripts/run-pro-timing [--split 15_13]
+
+## 왜
+
+`read_pro` 는 경기를 패치 번호로만 묶는다. 프로 리그는 라이브 패치를 늦게
+따라가서, 패치 t 로 치른 경기의 절반가량이 **t+1 이 이미 나온 뒤**에 열렸다.
+t → t+1 을 예측하는 날에는 아직 없던 경기다. 그리고 머리 숫자 셋이 전부 프로를
+쓴다 — ① `A7p` · ①′ `A7nerfp` · ② `B5p`.
+
+## 견주는 집계
+
+    현재           패치 t 로 치른 경기 전부 (`read_pro`)
+    출시일 경계     그중 t+1 출시일 전에 열린 경기만
+    7일 전         그중 t+1 출시일 7일 전까지 — 개발사는 출시 전에 이미 정한다
+    최근 14일       t+1 출시일 직전 14일에 열린 경기, 패치 무관 — 그날 보이던 것
+    최근 14일 · 7일 전   위와 같되 경계를 7일 앞당긴다
+
+「7일 전」은 경계 전 경기가 없는 패치가 많아 **프로 지표가 비는 행이 크게 는다.**
+그래서 떨어지면 「미래가 섞여서」인지 「비어서」인지 못 가른다. 창으로 세는
+「최근 14일 · 7일 전」은 비는 행 없이 같은 경계를 준다 — 둘을 가르는 줄이다.
+
+프로를 안 쓰는 arm(`A7` · `B5` …)은 넷 모두 같으므로 기준으로 한 번만 낸다.
+
+**출시일은 위키 노트의 「Release Date (US)」다.** 날짜 단위로만 가른다.
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import defaultdict
+from datetime import date, timedelta
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import (  # noqa: E402
+    _RETRIEVAL_K,
+    _boosting,
+    _narrow,
+    _retrieved,
+    direction_arms,
+    split,
+    target_arms,
+)
+from lol_balance.baseline import (  # noqa: E402
+    direction_rows,
+    encode,
+    fit_encoder,
+    r_precision,
+    roc_auc,
+)
+from lol_balance.oracle import (  # noqa: E402
+    ProRates,
+    before_release,
+    read_games,
+    read_pro,
+    recent,
+)
+from lol_balance.panel import (  # noqa: E402
+    PATCH_SEQUENCE,
+    PanelRow,
+    patch_index,
+    with_pro_rates,
+)
+from lol_balance.patchnotes import release_date  # noqa: E402
+from lol_balance.retrieval import CASE_FEATURES_PRO  # noqa: E402
+from lol_balance.rules import read_rules  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+NOTES = ROOT / "data" / "patchnotes"
+ORACLE = ROOT / "data" / "oracle"
+RULES = ROOT / "rules" / "proposed.jsonl"
+SEED = 20260824
+DRAWS = 20_000
+
+Pro = dict[str, dict[str, ProRates]]
+
+
+def releases() -> dict[str, date]:
+    """패치 → 출시일. 위키 노트 파일 이름이 곧 패치다 (`16.15.1.html` → `16_15`)."""
+    out = {}
+    for path in NOTES.glob("*.html"):
+        day = release_date(path.read_bytes())
+        if day is not None:
+            out[path.stem.rsplit(".", 1)[0].replace(".", "_")] = day
+    return out
+
+
+def cutoffs(release: dict[str, date]) -> dict[str, date]:
+    """프로 집계의 패치 이름(`14.1`) → **다음 패치의 출시일**."""
+    out = {}
+    for here, after in zip(PATCH_SEQUENCE, PATCH_SEQUENCE[1:], strict=False):
+        if after in release:
+            out[here.replace("_", ".")] = release[after]
+    return out
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def a7p_per_patch(
+    rows: tuple[PanelRow, ...], at: str, want: str | None = None
+) -> dict[str, float]:
+    """`A7p`(또는 `want` 로 좁힌 `A7nerfp`)의 패치별 R-정확도.
+
+    `arms.target_arms` 와 같은 모델 · 같은 분할 · 같은 좁히기다.
+    """
+    train, test = split(rows, at)
+    if want is not None:
+        train, test = _narrow(train, want), _narrow(test, want)
+    enc = fit_encoder(train, with_trend=True, with_pro=True)
+    tr, ts = encode(train, enc), encode(test, enc)
+    score = _boosting(SEED).fit(tr.x, tr.y).predict_proba(ts.x)[:, 1]
+    out = {}
+    for patch in sorted(set(ts.patches), key=patch_index):
+        mask = ts.patches == patch
+        out[str(patch)] = r_precision(ts.y[mask], score[mask])
+    return out
+
+
+def b5p_scores(rows: tuple[PanelRow, ...], at: str) -> tuple[np.ndarray, np.ndarray]:
+    """`B5p` 의 행별 점수 — `arms.direction_arms` 와 같은 검색 · 같은 분할."""
+    pool = direction_rows(rows)
+    train, test = split(pool, at)
+    _, found = _retrieved(
+        pool,
+        test,
+        at,
+        k=_RETRIEVAL_K,
+        expanding=False,
+        features=CASE_FEATURES_PRO,
+        weighted=True,
+    )
+    truth = np.array([1 if r.direction_next == "nerf" else 0 for r in test])
+    return truth, np.array(found, dtype=float)
+
+
+def interval(diffs: list[float]) -> str:
+    d = np.array(diffs)
+    low, high = np.percentile(d, [2.5, 97.5])
+    verdict = "유의" if low > 0 or high < 0 else "유의하지 않다"
+    return f"{np.mean(d):+.3f}  95% [{low:+.3f}, {high:+.3f}]  {verdict}"
+
+
+def patch_bootstrap(base: dict[str, float], other: dict[str, float]) -> str:
+    """① — **패치를** 다시 뽑는다. 평가 단위가 패치다(결과 문서와 같다)."""
+    patches = sorted(set(base) & set(other), key=patch_index)
+    gap = np.array([other[p] - base[p] for p in patches])
+    rng = np.random.default_rng(SEED)
+    means = [
+        float(gap[rng.integers(0, len(gap), len(gap))].mean()) for _ in range(DRAWS)
+    ]
+    return (
+        f"{gap.mean():+.3f} (패치 {len(gap)}개) · " + interval(means).split("  ", 1)[1]
+    )
+
+
+def row_bootstrap(truth: np.ndarray, base: np.ndarray, other: np.ndarray) -> str:
+    """② — **행을** 짝지어 다시 뽑는다. `B6` 대 `B5s` 를 잰 방법과 같다."""
+    rng = np.random.default_rng(SEED)
+    diffs = []
+    for _ in range(DRAWS):
+        i = rng.integers(0, len(truth), len(truth))
+        if truth[i].min() == truth[i].max():
+            continue
+        diffs.append(roc_auc(truth[i], other[i]) - roc_auc(truth[i], base[i]))
+    point = roc_auc(truth, other) - roc_auc(truth, base)
+    return f"{point:+.3f} · " + interval(diffs).split("  ", 1)[1]
+
+
+def main() -> int:
+    if not PANEL.exists() or not ORACLE.is_dir() or not NOTES.is_dir():
+        print("data/ 의 panel.sqlite · oracle · patchnotes 가 있어야 한다.")
+        return 1
+    at = arg("--split", "15_13")
+    rows = read_panel(PANEL)
+    rules = read_rules(RULES) if RULES.exists() else ()
+    release = releases()
+    cut = cutoffs(release)
+    games = read_games(ORACLE)
+
+    # ── 얼마나 늦게 열렸나 ────────────────────────────────────────────
+    late: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for game in games.values():
+        boundary = cut.get(game.patch)
+        if boundary is None or game.day is None:
+            continue
+        era = "2023–2024" if game.patch.startswith(("13.", "14.")) else "2025–2026"
+        for key in ("전체", era):
+            late[key][0] += 1
+            late[key][1] += game.day >= boundary
+    print(
+        f"출시일을 읽은 패치 {len(release)}개 · 날짜가 있는 프로 경기 {len(games):,}\n"
+    )
+    print("패치 t 로 치른 경기 중 t+1 출시일 이후에 열린 것")
+    for key in ("전체", "2023–2024", "2025–2026"):
+        n, k = late[key]
+        print(f"  {key:10}{k:>7,} / {n:>6,} = {k / n:.1%}")
+
+    # ── 네 가지 집계 ───────────────────────────────────────────────────
+    whole = read_pro(ORACLE)
+    variants: dict[str, Pro] = {
+        "현재": whole,
+        "출시일 경계": before_release(games, cut),
+        "7일 전": before_release(games, cut, offset=7),
+        "최근 14일": recent(games, cut, days=14),
+        "최근14·7일전": recent(
+            games, {p: d - timedelta(days=7) for p, d in cut.items()}, days=14
+        ),
+    }
+    panels = {name: with_pro_rates(rows, pro) for name, pro in variants.items()}
+
+    # 하네스 확인 — 「현재」를 갈아 끼운 패널이 원래 패널과 같아야 한다
+    same = sum(
+        (a.pro_pick_rate, a.pro_ban_rate) == (b.pro_pick_rate, b.pro_ban_rate)
+        for a, b in zip(rows, panels["현재"], strict=True)
+    )
+    print(
+        f"\n하네스 — 「현재」를 다시 끼운 패널이 원래와 같은 행 {same:,} / {len(rows):,}"
+    )
+
+    train_rows, test_rows = split(rows, at)
+    print("\n프로 지표가 비는 행 (학습 · 평가)")
+    for name, panel in panels.items():
+        tr, te = split(panel, at)
+        empty = [
+            sum(r.pro_presence is None for r in part) / len(part) for part in (tr, te)
+        ]
+        print(f"  {name:10}{empty[0]:>7.1%} · {empty[1]:.1%}")
+
+    # ── 표 ─────────────────────────────────────────────────────────────
+    names = list(variants)
+    target = {
+        n: {r.arm: r.scores for r in target_arms(p, at, SEED, rules)[0]}
+        for n, p in panels.items()
+    }
+    direction = {
+        n: {r.arm: r.scores for r in direction_arms(p, at, SEED, rules)[0]}
+        for n, p in panels.items()
+    }
+
+    header = f"{'arm':9}" + "".join(f"{n:>12}" for n in names)
+    print("\n① 대상 — R-정확도 (패치 평균)")
+    print(header)
+    for arm in ("A7", "A7p", "A2", "A2p", "A7nerf", "A7nerfp", "A7buff", "A7buffp"):
+        if arm not in target["현재"]:
+            continue
+        print(
+            f"{arm:9}"
+            + "".join(f"{target[n][arm]['r_precision']:>12.1%}" for n in names)
+        )
+    print("\n② 방향 — AUC")
+    print(header)
+    for arm in ("B5", "B5p", "B1", "B1p", "B2", "B2p"):
+        if arm not in direction["현재"]:
+            continue
+        print(f"{arm:9}" + "".join(f"{direction[n][arm]['auc']:>12.3f}" for n in names))
+
+    # ── 머리 숫자 — 현재 대비 ───────────────────────────────────────────
+    print(f"\n머리 숫자 — 「현재」에서 뺀 값 · 짝지은 부트스트랩 {DRAWS:,}회")
+    base_a7p = a7p_per_patch(panels["현재"], at)
+    base_nerf = a7p_per_patch(panels["현재"], at, want="nerf")
+    truth, base_b5p = b5p_scores(panels["현재"], at)
+    for name in names[1:]:
+        other_truth, other_b5p = b5p_scores(panels[name], at)
+        assert (other_truth == truth).all()  # 방향 표본은 프로와 무관하다
+        print(f"  {name}")
+        a7p = a7p_per_patch(panels[name], at)
+        nerf = a7p_per_patch(panels[name], at, want="nerf")
+        print(f"    ①  A7p      R-정확도  {patch_bootstrap(base_a7p, a7p)}")
+        print(f"    ①′ A7nerfp  R-정확도  {patch_bootstrap(base_nerf, nerf)}")
+        print(f"    ②  B5p      AUC       {row_bootstrap(truth, base_b5p, other_b5p)}")
+    print(
+        f"\n학습 {len(train_rows):,}행 · 평가 {len(test_rows):,}행 · 분할 {at} · 시드 {SEED}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

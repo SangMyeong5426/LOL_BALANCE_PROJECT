@@ -11,9 +11,15 @@ AUC 0.658 로 갈리는데 버프된 챔피언은 0.473 이다 — 합치면 0.5
 **부스팅(`A7p` 25.8% → 27.9%)이나 방향을 좁힌 arm(`A7buffp` AUC 0.703 → 0.727)
 에서는 살아난다.** 「신호가 없다」가 아니라 「묻는 방식이 신호를 지웠다」였다.
 
-**본 분석 밖이다.** 이 프로젝트의 질문은 「지금 솔랭 지표로 다음 패치를 예측할
-수 있는가」라서, 프로 경기를 쓰는 arm 은 확장 분석으로 따로 둔다. 용어는
-[glossary](../../docs/glossary.md) 참조.
+**본 분석에 들어간다.** 한때 확장 분석으로 따로 뒀는데 도구가 이미 프로를 쓰고
+있어 문서만 어긋나 있었다([ADR 0008](../../docs/adr/0008-pro-play-in-the-main-analysis.md)).
+용어는 [glossary](../../docs/glossary.md) 참조.
+
+## 날짜 — 패치로만 묶으면 절반이 다음 패치 출시 뒤다
+
+`read_pro` 는 패치 번호로 묶고 날짜를 안 본다. 그날 알 수 있었던 경기만 세려면
+`read_games` 로 경기 단위로 읽어 `before_release` · `recent` 로 자른다. 머리
+숫자는 그렇게 세도 유지됐다(`scripts/run-pro-timing`).
 
 ## 표기를 믿지 않는다
 
@@ -36,7 +42,9 @@ from __future__ import annotations
 
 import csv
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 # 팀 줄을 알아보는 표시. 나머지는 선수 줄이다.
@@ -128,4 +136,122 @@ def read_pro(root: Path) -> dict[str, dict[str, ProRates]]:
             name: ProRates(picks[(patch, name)] / total, bans[(patch, name)] / total)
             for name in names
         }
+    return out
+
+
+# ── 경기 단위 — 「그때 알 수 있었던 것」만 세려고 ─────────────────────────
+#
+# `read_pro` 는 경기를 **패치 번호로만** 묶는다. 프로 리그는 라이브 패치를 늦게
+# 따라가므로, 패치 t 로 치른 경기의 절반가량이 **t+1 이 이미 나온 뒤**에 열렸다
+# (2026-09-18 실측 49.5%). 그 경기들은 t → t+1 예측을 하는 시점에는 아직 없다.
+# 아래는 그것을 가려 세는 길이다. `read_pro` 는 그대로 둔다 — 결과를 견주려면
+# 기존 집계가 그대로 있어야 한다.
+
+
+@dataclass(frozen=True)
+class Game:
+    """프로 경기 하나 — 어느 패치로, 언제, 누가 뽑히고 밴당했나."""
+
+    patch: str
+    day: date | None
+    picks: tuple[str, ...]
+    bans: tuple[str, ...]
+
+
+def _day(text: str | None) -> date | None:
+    try:
+        return datetime.strptime((text or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def read_games(root: Path) -> dict[str, Game]:
+    """`data/oracle/*.csv` → `gameid` → 경기. **픽은 선수 줄에서, 밴은 팀 줄에서.**"""
+    patch_of: dict[str, str] = {}
+    day_of: dict[str, date | None] = {}
+    picks: defaultdict[str, list[str]] = defaultdict(list)
+    bans: defaultdict[str, list[str]] = defaultdict(list)
+
+    csv.field_size_limit(FIELD_LIMIT)
+    for path in sorted(root.glob("*.csv")):
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                patch = normalise(row.get("patch", ""))
+                game = row.get("gameid", "")
+                if not patch:
+                    continue
+                patch_of.setdefault(game, patch)
+                if game not in day_of or day_of[game] is None:
+                    day_of[game] = _day(row.get("date"))
+                if (row.get("position") or "") == TEAM_ROW:
+                    for slot in range(1, BAN_SLOTS + 1):
+                        banned = (row.get(f"ban{slot}") or "").strip()
+                        if banned:
+                            bans[game].append(banned)
+                else:
+                    champion = (row.get("champion") or "").strip()
+                    if champion:
+                        picks[game].append(champion)
+
+    return {
+        game: Game(patch, day_of.get(game), tuple(picks[game]), tuple(bans[game]))
+        for game, patch in patch_of.items()
+    }
+
+
+def rates(games: Iterable[Game]) -> dict[str, ProRates]:
+    """경기 묶음 → 챔피언별 비율. **분모는 그 묶음의 경기 수다** — `read_pro` 와 같다."""
+    chosen = list(games)
+    if not chosen:
+        return {}
+    picked: Counter[str] = Counter()
+    banned: Counter[str] = Counter()
+    for game in chosen:
+        picked.update(game.picks)
+        banned.update(game.bans)
+    total = len(chosen)
+    return {
+        name: ProRates(picked[name] / total, banned[name] / total)
+        for name in set(picked) | set(banned)
+    }
+
+
+def before_release(
+    games: Mapping[str, Game],
+    cutoffs: Mapping[str, date],
+    offset: int = 0,
+) -> dict[str, dict[str, ProRates]]:
+    """패치 → **그 패치로 치른 경기 중 경계 전에 열린 것만**으로 낸 비율.
+
+    경계는 `cutoffs[패치]` — 다음 패치의 출시일이다. `offset` 일만큼 더 앞당길 수
+    있다(개발사는 출시 전에 이미 정한다). 경계 전 경기가 하나도 없는 패치는 빠진다
+    — 그때는 프로 지표가 **없었던** 것이다. 날짜를 못 읽은 경기도 뺀다.
+    """
+    kept: defaultdict[str, list[Game]] = defaultdict(list)
+    for game in games.values():
+        cutoff = cutoffs.get(game.patch)
+        if cutoff is None or game.day is None:
+            continue
+        if game.day < cutoff - timedelta(days=offset):
+            kept[game.patch].append(game)
+    return {patch: rates(chosen) for patch, chosen in kept.items()}
+
+
+def recent(
+    games: Mapping[str, Game],
+    cutoffs: Mapping[str, date],
+    days: int,
+) -> dict[str, dict[str, ProRates]]:
+    """패치 → **경계 직전 `days` 일 동안 열린 경기**로 낸 비율. 패치를 가리지 않는다.
+
+    예측하는 날 볼 수 있던 「최근 프로 흐름」이다. 프로 리그가 앞 패치로 치르고
+    있어도 그 경기들이 들어간다 — 그것이 그날 실제로 보이던 것이다.
+    """
+    dated = [g for g in games.values() if g.day is not None]
+    out: dict[str, dict[str, ProRates]] = {}
+    for patch, cutoff in cutoffs.items():
+        start = cutoff - timedelta(days=days)
+        window = [g for g in dated if g.day is not None and start <= g.day < cutoff]
+        if window:
+            out[patch] = rates(window)
     return out

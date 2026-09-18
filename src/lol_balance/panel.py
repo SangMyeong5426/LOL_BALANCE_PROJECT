@@ -14,7 +14,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from lol_balance.ddragon import standard_champions
@@ -195,6 +196,28 @@ def _pro_pick(pro: dict[str, ProRates], champion: str) -> float:
 def _pro_ban(pro: dict[str, ProRates], champion: str) -> float:
     entry = pro.get(champion)
     return entry.ban_rate if entry else 0.0
+
+
+def with_pro_rates(
+    rows: tuple[PanelRow, ...], pro: Mapping[str, dict[str, ProRates]]
+) -> tuple[PanelRow, ...]:
+    """패널의 프로 픽·밴율만 **다른 집계로 갈아 끼운다.** 나머지 칸은 그대로다.
+
+    `build-panel` 과 같은 규약이다 — 그 패치에 경기가 없으면 None, 경기는 있는데
+    안 뽑힌 챔피언은 0. 날짜 경계를 둔 집계와 기존 집계를 **같은 행 위에서**
+    견주려고 둔다.
+    """
+    out = []
+    for row in rows:
+        rates = pro.get(row.patch.replace("_", "."))
+        out.append(
+            replace(
+                row,
+                pro_pick_rate=None if rates is None else _pro_pick(rates, row.champion),
+                pro_ban_rate=None if rates is None else _pro_ban(rates, row.champion),
+            )
+        )
+    return tuple(out)
 
 
 def patch_rows(
