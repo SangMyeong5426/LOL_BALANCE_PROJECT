@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""직접 집계를 솔랭 지표와 견준다 — ADR 0010 의 판정.
+
+    ./scripts/run-riot-check 16_15 16_13 16_18
+
+u.gg 스냅샷이 있는 패치는 승률 · 픽률 · 밴율마다 z 를 보고, **재기 전에 정한
+기준**으로 「잡음 안 / 잡음 밖」을 가른다. 플랫폼마다 따로도 본다 — 지역을 섞는
+비율이 차이를 만드는지 가늠하려고.
+
+u.gg 가 없는 패치(현재 패치)는 받은 것을 요약만 한다. **솔랭 지표에 잇지 않는다.**
+
+키가 필요 없다 — `data/riot/` 에 받아 둔 것을 읽기만 한다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.panel import champion_names  # noqa: E402
+from lol_balance.riot import (  # noqa: E402
+    MEAN_Z_LIMIT,
+    SD_Z_LIMIT,
+    Agreement,
+    Match,
+    compare,
+    loads,
+    rates,
+    tally,
+)
+from lol_balance.ugg import parse_champion_ranking  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+RIOT = ROOT / "data" / "riot"
+UGG = ROOT / "data" / "ugg" / "champion_ranking"
+DDRAGON = ROOT / "data" / "ddragon"
+
+# 선수 단위 부트스트랩 횟수. 표준오차를 내는 데는 이만하면 된다.
+DRAWS = 2_000
+# 현재 패치 요약에서 승률을 보여 줄 최소 판수
+MIN_SHOWN = 100
+METRICS = ("승률", "픽률", "밴율")
+
+
+def read(patch: str) -> list[Match]:
+    out: list[Match] = []
+    for path in sorted((RIOT / patch).glob("*.jsonl")):
+        out += [loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return out
+
+
+def names() -> dict[int, str]:
+    """가장 최근 Data Dragon 의 이름. 그 뒤에 나온 챔피언은 번호로 남는다."""
+    versions = sorted(
+        (p for p in DDRAGON.glob("*.json") if p.stem[:1].isdigit()),
+        key=lambda p: tuple(int(x) for x in p.stem.split(".")),
+    )
+    if not versions:
+        return {}
+    return champion_names(json.loads(versions[-1].read_text())["data"])
+
+
+def when(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000, UTC).strftime("%m-%d %H:%MZ")
+
+
+def describe(patch: str, matches: list[Match]) -> None:
+    t = tally(matches)
+    platforms = Counter(m.platform for m in matches)
+    players = len({(m.platform, m.player) for m in matches})
+    versions = Counter(".".join(m.version.split(".")[:3]) for m in matches)
+    starts = [m.start_ms for m in matches]
+    picks, wins = sum(t.picks.values()), sum(t.wins.values())
+    print(f"## {patch} — 직접 집계 {t.games:,}판 · 뽑은 선수 {players:,}명")
+    print("  플랫폼  " + " · ".join(f"{p} {n:,}" for p, n in sorted(platforms.items())))
+    print(f"  기간    {when(min(starts))} ~ {when(max(starts))}")
+    print("  버전    " + " · ".join(f"{v} {n:,}" for v, n in versions.most_common(4)))
+    ok = "맞다" if picks == 10 * t.games else "**어긋난다**"
+    print(f"  항등식  픽 {picks:,} = 10 × 판수 — {ok} · 전체 승률 {wins / picks:.4%}")
+
+
+def line(label: str, a: Agreement | None) -> str:
+    if a is None:
+        return f"  {label:<9} 두 쪽 다 30판을 넘는 챔피언이 모자라 견주지 않는다"
+    verdict = "잡음 안" if a.within_noise else "잡음 밖"
+    return (
+        f"  {label:<9} {a.champions:>3}종  r {a.r:.3f}  "
+        f"평균 차이 {a.mean_diff * 100:+.2f}%p  평균 |차이| {a.mean_abs_diff * 100:.2f}%p  "
+        f"z 평균 {a.mean_z:+.2f}  z 표준편차 {a.sd_z:.2f}  |z|>2 {a.over_two:.0%}  "
+        f"계통 차이 {a.systematic * 100:.2f}%p  → {verdict}"
+    )
+
+
+def summarize(matches: list[Match], champion: dict[int, str]) -> None:
+    r = rates(tally(matches))
+
+    def name(c: int) -> str:
+        return champion.get(c, f"#{c}")
+
+    shown = [c for c, n in r.win_n.items() if n >= MIN_SHOWN]
+    by_win = sorted(shown, key=lambda c: r.win[c])
+    by_ban = sorted(r.ban, key=lambda c: r.ban[c], reverse=True)
+
+    def fmt(c: int) -> str:
+        return f"{name(c)} {r.win[c]:.1%}({r.win_n[c]})"
+
+    print("\n  u.gg 가 없어 견줄 수 없다 — 받아진다는 것만 본다(ADR 0010)")
+    print(
+        f"  승률 높은 다섯 (판수 ≥ {MIN_SHOWN})  "
+        + " · ".join(map(fmt, by_win[::-1][:5]))
+    )
+    print(f"  승률 낮은 다섯 (판수 ≥ {MIN_SHOWN})  " + " · ".join(map(fmt, by_win[:5])))
+    print(
+        "  밴율 높은 다섯               "
+        + " · ".join(f"{name(c)} {r.ban[c]:.1%}" for c in by_ban[:5])
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("patches", nargs="+", help="예: 16_15 16_13 16_18")
+    args = parser.parse_args()
+
+    seed = load_settings().seed
+    champion = names()
+    for patch in args.patches:
+        matches = read(patch)
+        if not matches:
+            print(
+                f"## {patch} — 받은 경기가 없다. ./scripts/fetch-riot 을 먼저 돌린다\n"
+            )
+            continue
+        describe(patch, matches)
+
+        path = UGG / f"{patch}.json"
+        if not path.exists():
+            summarize(matches, champion)
+            print()
+            continue
+
+        ranking = parse_champion_ranking(json.loads(path.read_text()))
+        print(f"  u.gg    {ranking.games:,}판 · 스냅샷 {ranking.updated_at[:16]}Z")
+        print(
+            f"\n  판정 기준(ADR 0010 · 재기 전에 정함): |z 평균| ≤ {MEAN_Z_LIMIT}"
+            f" 이고 z 표준편차 ≤ {SD_Z_LIMIT}"
+        )
+        for label, a in zip(
+            METRICS, compare(matches, ranking, DRAWS, seed), strict=True
+        ):
+            print(line(label, a))
+
+        print("\n  플랫폼마다 — 지역 하나만으로 견주면")
+        for platform in sorted({m.platform for m in matches}):
+            subset = [m for m in matches if m.platform == platform]
+            results = compare(subset, ranking, DRAWS, seed)
+            for label, a in zip(METRICS, results, strict=True):
+                print(line(f"{platform} {label}", a))
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

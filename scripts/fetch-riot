@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Riot API 로 한 패치의 경기를 받는다 — **직접 집계**의 원자료.
+
+**키가 필요하다** — `.env` 의 `RIOT_API_KEY`(개인 키). 근거는
+docs/adr/0010-riot-api-direct-aggregation.md. 없어도 기존 결과는 전부 나온다.
+
+    ./scripts/fetch-riot 16_15 --since 2026-07-28 --until 2026-07-31T14:05:23Z --per-region 2500
+    ./scripts/fetch-riot 16_18 --since 2026-09-11 --per-region 1500
+
+플랫폼(`kr` · `euw1` · `na1`)마다 따로 돈다. 요청 한도가 권역마다 따로 걸리므로
+셋을 동시에 돌리면 세 배 빠르다.
+
+**이어받기가 된다.** `data/riot/<패치>/<플랫폼>.jsonl` 에 이미 있는 경기는 다시
+받지 않고, 목표 판수에서 모자란 만큼만 더 받는다. 쓸 수 없던 경기(다른 패치 ·
+리메이크 · 창 밖)는 `.skip` 에 적어 다음에도 건너뛴다.
+
+**선수를 가리키는 것은 파일에 남지 않는다** — `riot.slim` 이 버린다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import random
+import sys
+import threading
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.riot import (  # noqa: E402
+    ROUTES,
+    Match,
+    RiotClient,
+    RiotError,
+    Window,
+    collect,
+    dumps,
+    loads,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "data" / "riot"
+
+_lock = threading.Lock()
+
+
+def log(line: str) -> None:
+    stamp = datetime.now().strftime("%H:%M:%S")
+    with _lock:
+        print(f"{stamp} {line}", flush=True)
+
+
+def parse_time(text: str) -> int:
+    """`2026-07-28` 이나 `2026-07-31T14:05:23Z` → epoch 초. 시간대가 없으면 UTC."""
+    value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return int(value.timestamp())
+
+
+def iso(seconds: int) -> str:
+    return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%d %H:%MZ")
+
+
+def run(
+    platform: str,
+    window: Window,
+    target: int,
+    key: str,
+    seed: int,
+    results: dict[str, str],
+) -> None:
+    folder = OUT / window.patch
+    folder.mkdir(parents=True, exist_ok=True)
+    data = folder / f"{platform}.jsonl"
+    skipped = folder / f"{platform}.skip"
+
+    have = (
+        [loads(line) for line in data.read_text().splitlines() if line.strip()]
+        if data.exists()
+        else []
+    )
+    seen = {m.match_id for m in have}
+    if skipped.exists():
+        seen |= {x.strip() for x in skipped.read_text().splitlines() if x.strip()}
+    remaining = target - len(have)
+    if remaining <= 0:
+        results[platform] = f"{len(have):,}판 — 이미 있다"
+        log(f"[{platform}] {results[platform]}")
+        return
+
+    client = RiotClient(key)
+    rng = random.Random(f"{seed}:{window.patch}:{platform}:{len(have)}")
+    first = max((m.player for m in have), default=0)
+    started = time.monotonic()
+    with data.open("a") as out, skipped.open("a") as skip_out:
+
+        def write(m: Match) -> None:
+            out.write(dumps(m) + "\n")
+            out.flush()
+
+        def skip(match_id: str) -> None:
+            skip_out.write(match_id + "\n")
+            skip_out.flush()
+
+        try:
+            got = collect(
+                client, platform, window, remaining, seen, first, rng, write, skip, log
+            )
+        except RiotError as exc:
+            results[platform] = f"멈춤 — {exc}"
+            log(f"[{platform}] {results[platform]}")
+            return
+    minutes = (time.monotonic() - started) / 60
+    results[platform] = (
+        f"{len(have) + got:,}판 · 요청 {client.requests:,} · 429 {client.throttled}회"
+        f" · {minutes:.0f}분"
+    )
+    log(f"[{platform}] 끝 — {results[platform]}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("patch", help="우리 패치 표기 — 예: 16_15")
+    parser.add_argument("--since", required=True, help="창 시작(UTC). 출시일 전날")
+    parser.add_argument("--until", help="창 끝(UTC). 비우면 지금")
+    parser.add_argument("--per-region", type=int, required=True, help="플랫폼마다 판수")
+    parser.add_argument("--platforms", default=",".join(ROUTES))
+    args = parser.parse_args()
+
+    settings = load_settings()
+    if not settings.riot_api_key:
+        print("RIOT_API_KEY 가 비어 있다 — .env 에 개인 키를 넣는다 (ADR 0010)")
+        return 2
+    platforms = [p.strip() for p in args.platforms.split(",") if p.strip()]
+    unknown = sorted(set(platforms) - set(ROUTES))
+    if unknown:
+        print(f"모르는 플랫폼: {unknown} — 쓸 수 있는 것은 {sorted(ROUTES)}")
+        return 2
+
+    until = parse_time(args.until) if args.until else int(time.time())
+    window = Window(args.patch, parse_time(args.since), until)
+    log(
+        f"{window.patch} · 창 {iso(window.start)} ~ {iso(window.end)} · "
+        f"{' · '.join(platforms)} 에서 {args.per_region:,}판씩"
+    )
+
+    results: dict[str, str] = {}
+    threads = [
+        threading.Thread(
+            target=run,
+            args=(
+                p,
+                window,
+                args.per_region,
+                settings.riot_api_key,
+                settings.seed,
+                results,
+            ),
+        )
+        for p in platforms
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    print()
+    for p in platforms:
+        print(f"  {p:5} {results.get(p, '결과 없음')}")
+    stopped = [p for p in platforms if not results.get(p, "멈춤").endswith("분")]
+    stopped = [p for p in stopped if "이미 있다" not in results.get(p, "")]
+    return 1 if stopped else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
