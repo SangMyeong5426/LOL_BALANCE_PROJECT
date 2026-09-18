@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""한 챔피언을 에이전트(`B8`)에게 맡기고 **도구를 부를 때마다** 찍는다.
+
+    ./scripts/ask-agent Senna 16_13
+    ./scripts/ask-agent Senna 16_13 --model ollama:qwen3.5:2b
+    ./scripts/ask-agent Senna 16_13 --no-think      로컬 모델의 thinking 을 끈다
+    ./scripts/ask-agent Senna 16_13 --answer        실제 결과까지
+
+`ask` 의 에이전트판이다. `ask` 는 검색기 셋이 무엇을 찾는지 사람이 보는 자리고,
+이것은 **에이전트가 무엇을 골라 찾는지** 보는 자리다.
+
+기본 모델은 로컬(`ollama:qwen3.5:9b`)이라 **API 키가 필요 없다.** `ollama serve`
+가 떠 있어야 한다. 이름을 주고 묻는 시연이라 성적으로 읽지 않는다 — 성적은
+`run-agent` 가 익명 조건으로 잰다.
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.agent.data import PANEL, available, load  # noqa: E402
+from lol_balance.agent.judge import (  # noqa: E402
+    MODEL,
+    build_agent,
+    build_context,
+    stream,
+    task,
+)
+from lol_balance.agent.schema import Judgment  # noqa: E402
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def main() -> int:
+    if len(sys.argv) < 3:
+        print(__doc__)
+        return 1
+    if not available():
+        print(
+            f"{PANEL.relative_to(ROOT)} 가 없다 — 수집부터 한다(README 「시작하기」)."
+        )
+        return 1
+    champion, at = sys.argv[1], sys.argv[2].replace(".", "_")
+    model = arg("--model", MODEL)
+    kwargs = {"reasoning": False} if "--no-think" in sys.argv else {}
+
+    corpus = load()
+    ctx = build_context(corpus, champion, at)
+    print(f"■ {champion} · {at} → {ctx.nxt}   모델 {model} {kwargs or ''}\n")
+    print(task(corpus, ctx), "\n")
+
+    agent = build_agent(corpus, ctx, model, **kwargs)
+    start = time.time()
+    shown = 0
+    run = None
+    for run in stream(agent, task(corpus, ctx)):
+        for step in run.steps[shown:]:
+            if not step.output:
+                continue
+            args = ", ".join(f"{k}={v!r}" for k, v in step.args.items())
+            print(f"[{time.time() - start:5.1f}s] 🔧 {step.tool}({args})")
+            for line in step.output.splitlines()[:4]:
+                print(f"          {line}")
+            shown += 1
+
+    print(f"\n[{time.time() - start:5.1f}s] 끝")
+    if run is None or run.error:
+        print(f"실패: {run.error if run else '응답 없음'}")
+        return 1
+    if not isinstance(run.judgment, Judgment):
+        print("구조화된 답이 안 왔다")
+        return 1
+    j = run.judgment
+    print(
+        f"\n조정 {j.adjust_prob}% · 조정된다면 너프 {j.nerf_prob}%"
+        + ("  (기권)" if j.abstain else "")
+    )
+    print(f"이유: {j.reason}")
+    for e in j.evidence:
+        print(f"  [{e.source}] {e.text}")
+    b = ctx.baseline
+    print(
+        f"\n베이스라인  조정 {b['조정'][0]:.2f}({b['조정'][1]}위) · "
+        f"너프 {b['너프'][0]:.2f} · 버프 {b['버프'][0]:.2f}"
+    )
+    if "--answer" in sys.argv:
+        print(f"답: {ctx.nxt} → {ctx.answer}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

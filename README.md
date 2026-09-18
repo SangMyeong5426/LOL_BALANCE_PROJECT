@@ -143,7 +143,8 @@ AUC 0.837 로 로지스틱 회귀와 사실상 동률이고, 검색 위에 올�
 
 LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 314건이다. 셋 다
 대화 안에서 만들어 저장소에 텍스트로 두었고 코드는 그것을 읽어 채점만 한다.
-실행 시점에 API 를 호출하지 않으므로 **키 없이 전부 재현된다.**
+실행 시점에 API 를 호출하지 않으므로 **키 없이 전부 재현된다.** 에이전트(`B8`)의
+판단 1,029건은 로컬 모델이 만들었고, 이것도 텍스트로 두어 채점만 한다.
 
 판단자가 답을 기억하는지도 검정했다. 지표를 빼고 이름과 패치만 주면 AUC **0.505**
 로 찍기와 구별되지 않는다. 검색 경계는 `as_of` 로 도구가 지켜, 예측하려는 패치
@@ -154,7 +155,7 @@ LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 350개 · 검사 11개
+./scripts/check-all                 # 테스트 391개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -173,11 +174,11 @@ API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직
 ## 구조
 
 ```text
-src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가
-scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증)
+src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전트(agent/)
+scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
 ground_truth/      정답지. 실제 조정 결과 1,599건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             350개 · 커버리지 94%
+tests/             391개 · 커버리지 95%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
@@ -186,6 +187,7 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 | 통계·ML | numpy · scikit-learn (부스팅 · 로지스틱 회귀 · k-NN) |
 | 검색 (RAG) | BM25 노트 검색 · 수치 k-NN 사례 검색 · 수치 조회 |
 | LLM | 라벨·규칙·판단을 대화로 만들고 텍스트로 저장. 실행 시 호출 0회 |
+| 에이전트 | LangChain · 로컬 모델(Ollama, 키 없음) · Gradio 화면. 판단을 텍스트로 저장해 채점만 한다 |
 | 품질 | pytest · ruff · mypy · pre-commit · GitHub Actions |
 
 벡터 DB 는 쓰지 않는다. 검색 둘 다 이미 벡터 공간 모델이고, 밀집 행렬 3,843×256 을 전수
@@ -204,11 +206,26 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 [results](docs/results/README.md)에 남아 있다 — 지우면 다음에 같은 자리에서
 같은 착각을 한다.
 
-## 여기까지 하고, 다음은 에이전트
+## 에이전트 — 만들었고, 다수결을 못 이겼다
 
-검색(RAG)까지 만들고 마무리했다. 조회 → 검색 → 판단을 반복하는 에이전트는 다음
-단계로 둔다. 검색기 셋([`retrieval.py`](src/lol_balance/retrieval.py))이 완성돼 있고
-`as_of` 로 미래도 막혀 있으므로, 루프가 생기면 그대로 쓰인다.
+조회 → 검색 → 판단을 반복하는 에이전트(`B8`)를 LangChain 으로 만들어 **로컬
+모델로 키 없이** 돌렸다. 검색기 셋([`retrieval.py`](src/lol_balance/retrieval.py))을
+도구로 쥐고, 경계는 `as_of` 로 도구가 지킨다.
+
+`B5` 와 **같은 이웃 25종**을 주고 판단만 맡겼는데 다수결에 졌다 — 0.727 대 0.854,
+차이 −0.127, 95% 구간 −0.191 ~ −0.067
+([results](docs/results/README.md#같은-이웃으로-다시-쟀다--에이전트-b8-2026-09-18)).
+그래서 예측은 통계 모델에 두고, 에이전트에는 **베이스라인을 해설하는 일**을 맡긴다.
+해설이 베이스라인을 거꾸로 읽거나 경고를 바꿔 옮기면 코드가 잡는다.
+
+```bash
+ollama pull qwen3.5:9b && ollama serve
+./scripts/app                       # 후보 · 경고 · 해설 · 후속 질문 → http://127.0.0.1:7861
+./scripts/score-agent               # 저장한 판단 기록을 채점만 한다
+```
+
+쓰는 법과 설계는 [`docs/agent.md`](docs/agent.md), 왜 LangChain 인지는
+[ADR 0009](docs/adr/0009-agent-framework-and-local-model.md)에 있다.
 
 ## 문서
 
@@ -219,6 +236,7 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 | [`docs/lessons.md`](docs/lessons.md) | 막혔던 것들. 조용히 틀리고 있던 결함 넷을 무엇이 잡아냈는가 |
 | [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들. 무엇을 확인하고 접었는가 |
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
-| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 8건 |
+| [`docs/agent.md`](docs/agent.md) | 에이전트(`B8`) — 화면 · 해설 · 코드 대조 · 평가 |
+| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 9건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어. 여기 있는 말만 쓴다 |
 | [`CLAUDE.md`](CLAUDE.md) | 작업 규칙. 무엇을 만들고 무엇을 안 하는가 |

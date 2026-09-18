@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""저장한 에이전트(`B8`) 판단 기록을 **채점만** 한다. 모델을 부르지 않는다.
+
+    ./scripts/score-agent                                전부 — ground_truth/agent/*.jsonl
+    ./scripts/score-agent ground_truth/agent/test-….jsonl  한 벌만
+
+`run-agent` 가 로컬 모델로 만든 판단을 텍스트로 커밋해 두었다. B6 의 판단을
+`ground_truth/rag/` 에 두고 `run-report` 가 채점만 하는 것과 같다 — **9b 를 한 시간
+다시 돌리지 않고** 결과 문서의 수치를 재현한다.
+
+표본(평가 229건 · 개발 114건)은 기록의 `as_of` 로 가린다. 정답과 `B5` 점수는
+패널에서 다시 계산하므로 `data/` 가 있어야 한다.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.agent.data import PANEL, available, load  # noqa: E402
+from lol_balance.agent.evaluate import (  # noqa: E402
+    DEV_SPLIT,
+    RECORDS,
+    cases,
+    dev_cases,
+    read_records,
+    report,
+)
+
+
+def main() -> int:
+    if not available():
+        print(f"{PANEL.relative_to(ROOT)} 가 없다 — 정답과 B5 점수를 못 만든다.")
+        return 1
+    files = [Path(a) for a in sys.argv[1:]] or sorted(RECORDS.glob("*.jsonl"))
+    if not files:
+        print(f"{RECORDS.relative_to(ROOT)} 에 판단 기록이 없다.")
+        return 1
+
+    corpus = load()
+    samples = {"test": cases(corpus), "dev": dev_cases(corpus)}
+    for path in files:
+        lines = read_records(path)
+        sample = "dev" if lines and lines[0]["as_of"] == DEV_SPLIT else "test"
+        print(f"■ {path.name}")
+        print("\n".join(report(samples[sample], lines)))
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
