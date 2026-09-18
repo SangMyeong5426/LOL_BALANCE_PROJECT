@@ -28,3 +28,4 @@
 - [ADR 0007: 판단을 어떤 형식으로 적는가](0007-answer-schema.md)
 - [ADR 0008: 프로 경기 데이터를 본 분석에 넣는다](0008-pro-play-in-the-main-analysis.md)
 - [ADR 0009: 에이전트를 LangChain 으로 만들고 로컬 모델로 돌린다](0009-agent-framework-and-local-model.md)
+- [ADR 0010: u.gg 가 끊긴 뒤를 Riot API 로 직접 센다 — 키가 필요한 선택 경로](0010-riot-api-direct-aggregation.md)
