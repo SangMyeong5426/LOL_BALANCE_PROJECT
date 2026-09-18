@@ -6,6 +6,7 @@ docs/adr/0010-riot-api-direct-aggregation.md. 없어도 기존 결과는 전부 
 
     ./scripts/fetch-riot 16_15 --since 2026-07-28 --until 2026-07-31T14:05:23Z --per-region 2500
     ./scripts/fetch-riot 16_18 --since 2026-09-11 --per-region 1500
+    ./scripts/fetch-riot 16_18 --since 2026-09-17 --add 300     # 매일 쌓기
 
 플랫폼(`kr` · `euw1` · `na1`)마다 따로 돈다. 요청 한도가 권역마다 따로 걸리므로
 셋을 동시에 돌리면 세 배 빠르다.
@@ -86,7 +87,7 @@ def run(
     seen = {m.match_id for m in have}
     if skipped.exists():
         seen |= {x.strip() for x in skipped.read_text().splitlines() if x.strip()}
-    remaining = target - len(have)
+    remaining = target - len(have) if target > 0 else -target
     if remaining <= 0:
         results[platform] = f"{len(have):,}판 — 이미 있다"
         log(f"[{platform}] {results[platform]}")
@@ -125,9 +126,13 @@ def run(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("patch", help="우리 패치 표기 — 예: 16_15")
-    parser.add_argument("--since", required=True, help="창 시작(UTC). 출시일 전날")
+    parser.add_argument("--since", required=True, help="창 시작(UTC). 출시일 0시")
     parser.add_argument("--until", help="창 끝(UTC). 비우면 지금")
-    parser.add_argument("--per-region", type=int, required=True, help="플랫폼마다 판수")
+    size = parser.add_mutually_exclusive_group(required=True)
+    size.add_argument("--per-region", type=int, help="플랫폼마다 모두 합쳐 이만큼")
+    size.add_argument(
+        "--add", type=int, help="있는 것과 상관없이 플랫폼마다 더 받을 판수"
+    )
     parser.add_argument("--platforms", default=",".join(ROUTES))
     args = parser.parse_args()
 
@@ -143,9 +148,12 @@ def main() -> int:
 
     until = parse_time(args.until) if args.until else int(time.time())
     window = Window(args.patch, parse_time(args.since), until)
+    # 음수는 「더 받을 판수」다 — run() 이 둘을 가른다
+    target = args.per_region if args.per_region else -args.add
+    how = f"{args.per_region:,}판까지" if args.per_region else f"{args.add:,}판 더"
     log(
         f"{window.patch} · 창 {iso(window.start)} ~ {iso(window.end)} · "
-        f"{' · '.join(platforms)} 에서 {args.per_region:,}판씩"
+        f"{' · '.join(platforms)} 에서 {how}"
     )
 
     results: dict[str, str] = {}
@@ -155,7 +163,7 @@ def main() -> int:
             args=(
                 p,
                 window,
-                args.per_region,
+                target,
                 settings.riot_api_key,
                 settings.seed,
                 results,
