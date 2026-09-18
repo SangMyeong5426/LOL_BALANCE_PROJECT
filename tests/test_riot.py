@@ -24,6 +24,7 @@ import pytest
 from lol_balance import riot
 from lol_balance.riot import (
     Match,
+    Origin,
     RateLimiter,
     RiotClient,
     RiotError,
@@ -49,6 +50,27 @@ KEY = "RGAPI-00000000-0000-0000-0000-000000000000"
 POSITIONS = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY")
 START_MS = 1_785_400_000_000  # 2026-07-30 무렵
 TEN = tuple(range(1, 11))
+ORIGIN = Origin("EMERALD", "II", 1_789_700_000)
+PERKS = {
+    "statPerks": {"defense": 5011, "flex": 5008, "offense": 5005},
+    "styles": [
+        {
+            "description": "primaryStyle",
+            "style": 8100,
+            "selections": [
+                {"perk": 8112},
+                {"perk": 8139},
+                {"perk": 8138},
+                {"perk": 8135},
+            ],
+        },
+        {
+            "description": "subStyle",
+            "style": 8300,
+            "selections": [{"perk": 8345}, {"perk": 8347}],
+        },
+    ],
+}
 WINDOW = Window("16_15", START_MS // 1000 - 86_400, START_MS // 1000 + 86_400)
 
 
@@ -73,6 +95,18 @@ def payload(
             "teamPosition": POSITIONS[i % 5],
             "win": (i < 5) == blue_wins,
             "gameEndedInEarlySurrender": remake,
+            **{f"item{k}": 3000 + 10 * i + k for k in range(6)},
+            "item6": 3340,
+            "summoner1Id": 4,
+            "summoner2Id": 14,
+            "perks": PERKS,
+            "goldEarned": 12_000 + i,
+            "totalMinionsKilled": 180,
+            "neutralMinionsKilled": 12,
+            "totalDamageDealtToChampions": 25_000,
+            "kills": 5,
+            "deaths": 3,
+            "assists": 7,
         }
         for i, champion in enumerate(champions)
     ]
@@ -99,10 +133,11 @@ def payload(
 
 
 def test_slim_keeps_only_what_is_counted() -> None:
-    m = slim(payload(), "kr", 7)
+    m = slim(payload(), "kr", 7, ORIGIN)
 
     assert m is not None
     assert (m.match_id, m.platform, m.player, m.patch) == ("KR_1", "kr", 7, "16_15")
+    assert m.origin == ORIGIN
     assert [p.champion_id for p in m.picks] == list(range(1, 11))
     assert [p.win for p in m.picks] == [True] * 5 + [False] * 5
     assert m.picks[0].position == "TOP"
@@ -110,10 +145,41 @@ def test_slim_keeps_only_what_is_counted() -> None:
     assert "secret" not in dumps(m)
 
 
+def test_slim_keeps_the_build_and_the_numbers() -> None:
+    m = slim(payload(), "kr", 7, ORIGIN)
+    assert m is not None
+    p = m.picks[1]
+
+    assert p.items == (3010, 3011, 3012, 3013, 3014, 3015, 3340)  # 마지막 칸이 장신구
+    assert p.spells == (4, 14)
+    # 주 계열 · 주 계열 넷 · 보조 계열 · 보조 둘 · 능력치(공격 · 유연 · 방어)
+    assert p.runes == (8100, 8112, 8139, 8138, 8135, 8300, 8345, 8347, 5005, 5008, 5011)
+    assert (p.gold, p.minions + p.monsters, p.damage) == (12_001, 192, 25_000)
+    assert (p.kills, p.deaths, p.assists) == (5, 3, 7)
+
+
+def test_missing_runes_are_empty_not_a_crash() -> None:
+    game = payload()
+    for p in game["info"]["participants"]:
+        p["perks"] = {"styles": []}
+
+    m = slim(game, "kr", 1, ORIGIN)
+
+    assert m is not None
+    assert all(p.runes == () for p in m.picks)
+
+
 def test_saved_line_round_trips() -> None:
-    m = slim(payload(), "kr", 3)
+    m = slim(payload(), "kr", 3, ORIGIN)
     assert m is not None
     assert loads(dumps(m)) == m
+
+
+def test_old_narrow_lines_are_refused() -> None:
+    """형식 1 은 아이템 · 룬 칸이 없다. 섞이면 빈 칸이 0 으로 읽힌다."""
+    old = '{"id":"KR_1","platform":"kr","version":"16.15.1.1","start":1,"duration":1,"player":1,"picks":[],"bans":[]}'
+    with pytest.raises(ValueError, match="저장 형식"):
+        loads(old)
 
 
 @pytest.mark.parametrize(
@@ -126,7 +192,7 @@ def test_saved_line_round_trips() -> None:
     ids=["not-solo-queue", "remake", "nine-players"],
 )
 def test_slim_rejects_games_we_do_not_count(game: dict[str, Any]) -> None:
-    assert slim(game, "kr", 1) is None
+    assert slim(game, "kr", 1, ORIGIN) is None
 
 
 def test_patch_of_reads_the_game_version() -> None:
@@ -386,6 +452,10 @@ def test_collect_keeps_only_the_patch_and_skips_the_rest(
     assert sorted(m.match_id for m in written) == ["KR_1", "KR_2"]
     assert sorted(skipped) == ["KR_3", "KR_4"]
     assert all(m.player > 10 for m in written)  # 이어받기 번호 뒤부터
+    # 어느 단계에서 뽑았는지가 경기마다 남는다 — 조회한 시각의 랭크다
+    origins = {(m.origin.tier, m.origin.division) for m in written}
+    assert origins <= {("EMERALD", "IV"), ("CHALLENGER", "")}
+    assert all(m.origin.looked_up > 0 for m in written)
     assert "더 뽑을 선수가 없다" in lines[-1]
     # 랭킹은 플랫폼에, 경기는 권역에 묻는다
     hosts = {host for host, path in small_ladder.calls if "/league/" in path}
@@ -438,7 +508,7 @@ def random_matches(n: int, players: int, seed: int) -> list[Match]:
             blue_wins=rng.random() < 0.5,
             bans=chosen[10:],
         )
-        m = slim(game, "kr", i % players)
+        m = slim(game, "kr", i % players, ORIGIN)
         assert m is not None
         out.append(m)
     return out
