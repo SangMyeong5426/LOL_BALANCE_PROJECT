@@ -27,3 +27,4 @@
 - [ADR 0006: 검색 위에 판단을 올리고, 판단자의 오염을 어떻게 다루는가](0006-rag-generation-and-contamination-control.md)
 - [ADR 0007: 판단을 어떤 형식으로 적는가](0007-answer-schema.md)
 - [ADR 0008: 프로 경기 데이터를 본 분석에 넣는다](0008-pro-play-in-the-main-analysis.md)
+- [ADR 0009: 에이전트를 LangChain 으로 만들고 로컬 모델로 돌린다](0009-agent-framework-and-local-model.md)
