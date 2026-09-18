@@ -154,7 +154,7 @@ LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 350개 · 검사 10개
+./scripts/check-all                 # 테스트 350개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
