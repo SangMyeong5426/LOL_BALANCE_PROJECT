@@ -2,6 +2,7 @@
 """노트 검색(R2)이 얼마나 맞히는지 잰다.
 
     ./scripts/score-retrieval [--k 10]
+    ./scripts/score-retrieval --embed ollama:nomic-embed-text     임베딩과 견준다(키 없음)
 
 **과제는 「알고 있는 것 찾기」다.** 손 라벨이 「이 챔피언은 이 패치에 조정됐다」를
 알고 있으므로, 그 챔피언과 패치로 질의해 **그 블록이 상위에 오는가**를 본다.
@@ -20,13 +21,29 @@
 
     MRR@k       정답이 몇 번째에 오나. 1위면 1.0, 2위면 0.5
     Recall@k    상위 k 안에 정답이 하나라도 있나
+
+## 임베딩과 견준다 — `--embed`
+
+로컬 모델(Ollama)로 **같은 문서 텍스트 · 같은 질의 · 같은 채점**을 한다. BM25 가
+색인하는 문자열(`패치 챔피언 절 문장들`)을 그대로 임베딩하고, 코사인으로 줄 세운다.
+모델이 권하는 앞말(질의·문서)이 있으면 붙인다 — 없이 재면 모델에 불리하다.
+
+`BM25 + 임베딩` 은 둘의 순위를 섞는다(RRF, k=60). 벡터 DB 는 안 쓴다 — 문서
+3,843개는 전수 비교가 빠르다(용어집 「벡터 DB 를 안 만드는 근거」).
+
+2026-09-18 에 로컬 임베딩 둘(`nomic-embed-text` · `qwen3-embedding:0.6b`)을 쟀고
+BM25 가 크게 이겼다. 섞어도 나빠졌다 — 용어집 「밀집 임베딩이 희소를 못 이겼다」.
 """
 
 from __future__ import annotations
 
 import sys
+import time
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 from pathlib import Path
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -37,6 +54,54 @@ from lol_balance.retrieval import NoteSearch  # noqa: E402
 
 NOTES = ROOT / "data" / "patchnotes"
 LABELS = ROOT / "ground_truth" / "directions"
+
+# 모델이 권하는 앞말 (질의, 문서). 모델 카드에 적힌 대로다.
+PREFIX = {
+    "nomic-embed-text": ("search_query: ", "search_document: "),
+    "qwen3-embedding": (
+        "Instruct: Given a champion name and a patch, retrieve the patch note "
+        "block that changes that champion in that patch\nQuery: ",
+        "",
+    ),
+}
+BATCH = 64
+RRF_K = 60
+
+
+def score(
+    queries: Sequence[tuple[str, str]],
+    gold: dict[tuple[str, str], set[int]],
+    ranked: Callable[[str, str], list[int]],
+) -> tuple[float, float]:
+    """(MRR@k, Recall@k). `ranked` 는 질의 하나에 문서 번호를 순위대로 낸다."""
+    rank_sum = hits = 0.0
+    for champion, patch in queries:
+        want = gold[(champion, patch)]
+        for rank, index in enumerate(ranked(champion, patch), 1):
+            if index in want:
+                rank_sum += 1 / rank
+                hits += 1
+                break
+    n = len(queries)
+    return rank_sum / n, hits / n
+
+
+def embedder(spec: str) -> tuple[Callable[[list[str]], np.ndarray], str, str]:
+    """`ollama:모델` → (문장 목록을 단위 벡터로 바꾸는 함수, 질의 앞말, 문서 앞말)."""
+    from langchain_ollama import OllamaEmbeddings
+
+    name = spec.split(":", 1)[1] if spec.startswith("ollama:") else spec
+    model = OllamaEmbeddings(model=name)
+    query_prefix, doc_prefix = PREFIX.get(name.split(":")[0], ("", ""))
+
+    def embed(texts: list[str]) -> np.ndarray:
+        rows: list[list[float]] = []
+        for start in range(0, len(texts), BATCH):
+            rows += model.embed_documents(texts[start : start + BATCH])
+        matrix = np.asarray(rows, dtype=np.float64)
+        return matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
+
+    return embed, query_prefix, doc_prefix
 
 
 def main() -> int:
@@ -73,23 +138,64 @@ def main() -> int:
 
     # **패치를 함께 주는 것이 핵심이다.** 이름만 주면 같은 챔피언이 여러 패치에
     # 나오므로 어느 것을 원하는지 알 도리가 없다.
-    for label, build in (
+    forms: tuple[tuple[str, Callable[[str, str], str]], ...] = (
         ("이름만", lambda c, p: c),
         ("이름 + 패치", lambda c, p: f"{c} {p}"),
-    ):
-        rank_sum = hits = 0.0
-        for champion, patch in queries:
-            want = gold[(champion, patch)]
-            found = [
-                where[id(b)] for _, b, _ in search.search(build(champion, patch), k)
-            ]
-            for rank, index in enumerate(found, 1):
-                if index in want:
-                    rank_sum += 1 / rank
-                    hits += 1
-                    break
-        n = len(queries)
-        print(f"{label:16}{rank_sum / n:>9.3f}{hits / n:>11.1%}")
+    )
+    for label, build in forms:
+        mrr, recall = score(
+            queries,
+            gold,
+            lambda c, p, build=build: [
+                where[id(b)] for _, b, _ in search.search(build(c, p), k)
+            ],
+        )
+        print(f"{label:16}{mrr:>9.3f}{recall:>11.1%}")
+
+    specs = [sys.argv[i + 1] for i, a in enumerate(sys.argv) if a == "--embed"]
+    for spec in specs:
+        embed, query_prefix, doc_prefix = embedder(spec)
+        # BM25 가 색인하는 것과 **같은 문서 · 같은 문자열**이다(`NoteSearch.__init__`).
+        docs = [(patch, block) for patch, block, _ in search.docs]
+        texts = [
+            f"{patch} {block.champion} {block.section} " + " ".join(block.lines)
+            for patch, block in docs
+        ]
+        started = time.perf_counter()
+        matrix = embed([doc_prefix + t for t in texts])
+        took = time.perf_counter() - started
+        index_of = [where[id(block)] for _, block in docs]
+        print(
+            f"\n임베딩 {spec} — 문서 {len(texts):,}개 {took:.0f}초 · {matrix.shape[1]}차원"
+        )
+
+        for label, build in forms:
+            started = time.perf_counter()
+            vectors = embed([query_prefix + build(c, p) for c, p in queries])
+            per_query = (time.perf_counter() - started) / len(queries) * 1000
+            top = np.argsort(-(vectors @ matrix.T), axis=1)[:, :k]
+            ranked = {
+                q: [index_of[j] for j in row]
+                for q, row in zip(queries, top, strict=True)
+            }
+            mrr, recall = score(queries, gold, lambda c, p, r=ranked: r[(c, p)])
+            print(f"{label:16}{mrr:>9.3f}{recall:>11.1%}   질의당 {per_query:.0f} ms")
+
+            if label != "이름 + 패치":
+                continue
+            # 둘을 섞는다 — 순위의 역수를 더한다(RRF). 각자 상위 100개를 본다.
+            wide = np.argsort(-(vectors @ matrix.T), axis=1)[:, :100]
+            fused: dict[tuple[str, str], list[int]] = {}
+            for q, row in zip(queries, wide, strict=True):
+                votes: dict[int, float] = defaultdict(float)
+                for rank, j in enumerate(row, 1):
+                    votes[index_of[j]] += 1 / (RRF_K + rank)
+                lexical = search.search(build(*q), 100)
+                for rank, (_, b, _) in enumerate(lexical, 1):
+                    votes[where[id(b)]] += 1 / (RRF_K + rank)
+                fused[q] = sorted(votes, key=lambda i: -votes[i])[:k]
+            mrr, recall = score(queries, gold, lambda c, p, f=fused: f[(c, p)])
+            print(f"{'BM25 + 임베딩':16}{mrr:>9.3f}{recall:>11.1%}   (RRF)")
 
     print("\n**이것은 검색부만 잰다.** 판단이 얼마나 맞는지는 `run-report` 의 B6 다.")
     return 0
