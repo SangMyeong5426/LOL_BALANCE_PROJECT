@@ -155,11 +155,26 @@ LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 405개 · 검사 11개
+./scripts/check-all                 # 테스트 461개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
 데이터가 필요한 검사는 건너뛴 것으로 기록하며 실패로 세지 않는다.
+
+**예외가 하나 있고, 선택이다.** u.gg 아카이브가 `16_15` 에서 끊겨 그 뒤 패치는 Riot
+개인 키로 직접 센다(`.env` 의 `RIOT_API_KEY`). 기존 결과는 이것 없이 그대로 나온다
+([ADR 0010](docs/adr/0010-riot-api-direct-aggregation.md)).
+
+```bash
+./scripts/fetch-riot 16_18 --since 2026-09-11 --per-region 1000   # 키 필요
+./scripts/run-riot-check 16_18                                    # 키 불필요
+./scripts/run-builds 16_17                                        # 챔피언별 주요 아이템 · 키 불필요
+./scripts/install-riot-daily                                      # 매일 05:10 에 현재 패치를 더 쌓는다
+```
+
+직접 집계는 경기마다 최종 아이템까지 남겨, 패치 단위였던 아이템 경고를 챔피언
+단위로 낸다 — 「앞 패치의 주요 아이템이 이번 패치에 바뀌었다」
+([ADR 0011](docs/adr/0011-champion-item-usage.md)).
 
 ```bash
 ./scripts/fetch-ddragon && ./scripts/fetch-ugg && ./scripts/build-panel
@@ -178,7 +193,7 @@ src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전�
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
 ground_truth/      정답지. 실제 조정 결과 1,599건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             405개 · 커버리지 95%
+tests/             461개 · 커버리지 96%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
@@ -238,6 +253,6 @@ ollama pull qwen3.5:9b && ollama serve
 | [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들. 무엇을 확인하고 접었는가 |
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
 | [`docs/agent.md`](docs/agent.md) | 에이전트(`B8`) — 화면 · 해설 · 코드 대조 · 평가 |
-| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 9건 |
+| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 11건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어. 여기 있는 말만 쓴다 |
 | [`CLAUDE.md`](CLAUDE.md) | 작업 규칙. 무엇을 만들고 무엇을 안 하는가 |
