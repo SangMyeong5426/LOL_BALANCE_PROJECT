@@ -146,7 +146,15 @@ def main() -> int:
             continue
 
         ranking = parse_champion_ranking(json.loads(path.read_text()))
-        print(f"  u.gg    {ranking.games:,}판 · 스냅샷 {ranking.updated_at[:16]}Z")
+        # u.gg 는 스냅샷 시각까지를 셌다. 그 뒤 경기는 견주지 않는다 — 아이템
+        # 사용을 보려고 같은 패치를 끝까지 더 받아도 판정이 흔들리지 않게.
+        cut = datetime.fromisoformat(ranking.updated_at.replace("Z", "+00:00"))
+        before = len(matches)
+        matches = [m for m in matches if m.start_ms <= cut.timestamp() * 1000]
+        print(
+            f"  u.gg    {ranking.games:,}판 · 스냅샷 {ranking.updated_at[:16]}Z"
+            f" — 그 전 경기 {len(matches):,} / {before:,}판으로 견준다"
+        )
         print(
             f"\n  판정 기준(ADR 0010 · 재기 전에 정함): |z 평균| ≤ {MEAN_Z_LIMIT}"
             f" 이고 z 표준편차 ≤ {SD_Z_LIMIT}"
