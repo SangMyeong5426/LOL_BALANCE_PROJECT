@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""챔피언별 주요 아이템과 「앞 패치의 주요 아이템이 이번 패치에 바뀌었다」 — ADR 0011.
+
+    ./scripts/run-builds 16_16                  # 16_16 의 주요 아이템 + 16_15→16_16 경고
+    ./scripts/run-builds 16_16 --champion Jinx  # 한 챔피언만 자세히
+
+직접 집계(`data/riot/<패치>/`)에서 센다. **키가 필요 없다** — 받아 둔 것을 읽기만
+한다. 완성템 경계와 바뀐 값은 Data Dragon `data/items/<버전>.json` 에서 온다.
+
+**시간 경계를 지킨다.** 그 패치의 경기 중 다음 패치 출시일 전에 시작한 것만 센다.
+다음 패치 노트가 아직 없으면(현재 패치) 받은 경기 전부를 센다.
+
+**사용률이 높다고 그 아이템이 이기게 했다고 말하지 않는다.**
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import UTC, datetime, time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from lol_balance.builds import (  # noqa: E402
+    MIN_GAMES,
+    Usage,
+    core_item_changes,
+    finished_items,
+    item_usage,
+)
+from lol_balance.items import read_items  # noqa: E402
+from lol_balance.panel import champion_names  # noqa: E402
+from lol_balance.patchnotes import release_date  # noqa: E402
+from lol_balance.riot import Match, loads  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+RIOT = ROOT / "data" / "riot"
+ITEMS = ROOT / "data" / "items"
+NOTES = ROOT / "data" / "patchnotes"
+DDRAGON = ROOT / "data" / "ddragon"
+
+
+def version(patch: str) -> str:
+    return patch.replace("_", ".") + ".1"
+
+
+def neighbour(patch: str, step: int) -> str:
+    major, minor = (int(x) for x in patch.split("_"))
+    return f"{major}_{minor + step}"
+
+
+def read(patch: str) -> list[Match]:
+    out: list[Match] = []
+    for path in sorted((RIOT / patch).glob("*.jsonl")):
+        out += [loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return out
+
+
+def boundary(patch: str) -> int | None:
+    """다음 패치 출시일 0시(UTC) — 그 전에 시작한 경기만 센다. 모르면 None.
+
+    우리 구간 밖 패치의 노트는 `data/patchnotes/live/` 에 있다(`fetch-patchnotes`).
+    """
+    name = f"{version(neighbour(patch, 1))}.html"
+    found = [p for p in (NOTES / name, NOTES / "live" / name) if p.exists()]
+    day = release_date(found[0].read_bytes()) if found else None
+    if day is None:
+        return None
+    return int(datetime.combine(day, time(0), UTC).timestamp() * 1000)
+
+
+def usage_of(patch: str) -> tuple[dict[int, Usage], dict[str, dict], int | None]:
+    items = read_items(ITEMS / f"{version(patch)}.json")
+    cut = boundary(patch)
+    return item_usage(read(patch), finished_items(items), cut), items, cut
+
+
+def names() -> dict[int, str]:
+    versions = sorted(
+        (p for p in DDRAGON.glob("*.json") if p.stem[:1].isdigit()),
+        key=lambda p: tuple(int(x) for x in p.stem.split(".")),
+    )
+    if not versions:
+        return {}
+    return champion_names(json.loads(versions[-1].read_text())["data"])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("patch", help="기준 패치 — 예: 16_16")
+    parser.add_argument("--champion", help="이 챔피언만 자세히 (영문 이름)")
+    args = parser.parse_args()
+
+    patch, previous = args.patch, neighbour(args.patch, -1)
+    if not (RIOT / patch).exists():
+        print(f"{patch}: 직접 집계가 없다. ./scripts/fetch-riot 을 먼저 돌린다")
+        return 1
+    champion = names()
+
+    def name(c: int) -> str:
+        return champion.get(c, f"#{c}")
+
+    usage, items, cut = usage_of(patch)
+    item_name = {int(k): v.get("name", k) for k, v in items.items()}
+    games = sum(u.games for u in usage.values()) // 10
+    enough = [u for u in usage.values() if u.enough]
+    edge = (
+        datetime.fromtimestamp(cut / 1000, UTC).strftime("%Y-%m-%d") + " 전 경기만"
+        if cut
+        else "다음 패치가 아직 없어 경기 전부"
+    )
+    print(f"## {patch} — 직접 집계 {games:,}판 · {edge}")
+    print(
+        f"  주요 아이템을 말할 수 있는 챔피언 {len(enough)} / {len(usage)}종"
+        f" (판수 ≥ {MIN_GAMES}). 나머지는 표본 부족"
+    )
+
+    if args.champion:
+        found = [u for u in usage.values() if name(u.champion_id) == args.champion]
+        if not found:
+            print(f"  {args.champion}: 이 패치 직접 집계에 없다")
+            return 1
+        u = found[0]
+        print(f"\n  {args.champion} {u.games}판" + ("" if u.enough else " — 표본 부족"))
+        for item in u.top(8):
+            mark = " ← 주요" if item in u.core() else ""
+            print(f"    {item_name.get(item, item)} {u.share(item):.0%}{mark}")
+        return 0
+
+    print("\n  판수 많은 열 챔피언의 주요 아이템")
+    for u in sorted(enough, key=lambda u: -u.games)[:10]:
+        core = " · ".join(f"{item_name.get(i, i)} {u.share(i):.0%}" for i in u.core())
+        print(
+            f"    {name(u.champion_id):14} {u.games:>4}판  {core or '(20% 넘는 것 없음)'}"
+        )
+
+    before_path = ITEMS / f"{version(previous)}.json"
+    if not (RIOT / previous).exists() or not before_path.exists():
+        print(f"\n  {previous} 의 직접 집계나 아이템 스냅샷이 없어 경고를 못 낸다")
+        return 0
+    old_usage, old_items, _ = usage_of(previous)
+    flagged = core_item_changes(old_usage, old_items, items)
+    print(
+        f"\n  경고 — {previous} 의 주요 아이템이 {patch} 에 바뀌었다: {len(flagged)}건"
+    )
+    for c in flagged:
+        detail = " · ".join(
+            f"{x.field} {x.before:g}→{x.after:g}"
+            for x in c.changes
+            if x.before is not None and x.after is not None
+        )
+        print(
+            f"    {name(c.champion_id):14} {item_name.get(c.item_id, c.item_id)}"
+            f" (사용률 {c.share:.0%} · {c.games}판)  {detail}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
