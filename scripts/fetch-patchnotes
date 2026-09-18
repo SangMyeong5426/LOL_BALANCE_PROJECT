@@ -4,7 +4,8 @@
 **이것이 정답지다.** 정확한 변경 전/후 수치가 본문에 있다 — Data Dragon 에는
 대부분 스킬의 피해량이 없다(`docs/spec/ddragon-format.md`).
 
-    ./scripts/fetch-patchnotes
+    ./scripts/fetch-patchnotes                    # data/ddragon 의 버전 전부
+    ./scripts/fetch-patchnotes 16.16.1 16.17.1    # 준 버전만
 """
 
 from __future__ import annotations
@@ -16,10 +17,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from lol_balance.fetch import Retryable, get_with_retry, save  # noqa: E402
+from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
 from lol_balance.patchnotes import wiki_url, wiki_version  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "patchnotes"
+# **우리 구간 밖 패치는 하위 폴더에 둔다.** 이 폴더의 `*.html` 을 통째로 읽는 코드가
+# 여럿이고(에이전트 · ask · check-all) 모두 구간 안 패치만 안다 — 16.16~16.18 을
+# 여기 넣었다가 노트 검색기가 `KeyError: '16_16'` 로 죽었다(2026-09-18).
+# 직접 집계(ADR 0011)가 출시일을 읽으려고 받는 것이라 이렇게 떼어 둔다.
+LIVE = OUT / "live"
 DDRAGON = ROOT / "data" / "ddragon"
 
 # 실제 변경이 담긴 페이지인지 보는 최소 기준. 위키의 안내·리다이렉트 페이지는
@@ -32,8 +39,11 @@ CHANGE_MARKS = ("⇒", " to ", "increased", "reduced", "decreased")
 
 
 def main() -> int:
-    versions = sorted(
-        (p.stem for p in DDRAGON.glob("*.json")),
+    # 버전을 주면 그것만 받는다 — 우리 구간 뒤 패치의 출시일이 필요할 때(직접 집계).
+    # `data/ddragon` 에는 버전이 아닌 파일(`ko_KR.json`)도 있어 숫자로 시작하는 것만 센다.
+    wanted = [a for a in sys.argv[1:] if not a.startswith("-")]
+    versions = wanted or sorted(
+        (p.stem for p in DDRAGON.glob("*.json") if p.stem[:1].isdigit()),
         key=lambda v: tuple(int(x) for x in v.split(".")),
     )
     if not versions:
@@ -43,7 +53,8 @@ def main() -> int:
 
     done = skipped = failed = 0
     for i, v in enumerate(versions, 1):
-        path = OUT / f"{v}.html"
+        inside = "_".join(v.split(".")[:2]) in PATCH_SEQUENCE
+        path = (OUT if inside else LIVE) / f"{v}.html"
         if path.exists():
             skipped += 1
             continue
