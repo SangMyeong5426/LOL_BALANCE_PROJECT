@@ -154,7 +154,7 @@ LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 350개 · 검사 11개
+./scripts/check-all                 # 테스트 391개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -173,11 +173,11 @@ API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직
 ## 구조
 
 ```text
-src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가
-scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증)
+src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전트(agent/)
+scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
 ground_truth/      정답지. 실제 조정 결과 1,599건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             350개 · 커버리지 94%
+tests/             391개 · 커버리지 95%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
@@ -186,6 +186,7 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 | 통계·ML | numpy · scikit-learn (부스팅 · 로지스틱 회귀 · k-NN) |
 | 검색 (RAG) | BM25 노트 검색 · 수치 k-NN 사례 검색 · 수치 조회 |
 | LLM | 라벨·규칙·판단을 대화로 만들고 텍스트로 저장. 실행 시 호출 0회 |
+| 에이전트 | LangChain · 로컬 모델(Ollama, 키 없음) · Gradio 화면. 판단을 텍스트로 저장해 채점만 한다 |
 | 품질 | pytest · ruff · mypy · pre-commit · GitHub Actions |
 
 벡터 DB 는 쓰지 않는다. 검색 둘 다 이미 벡터 공간 모델이고, 밀집 행렬 3,843×256 을 전수
@@ -219,6 +220,7 @@ data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 | [`docs/lessons.md`](docs/lessons.md) | 막혔던 것들. 조용히 틀리고 있던 결함 넷을 무엇이 잡아냈는가 |
 | [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들. 무엇을 확인하고 접었는가 |
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
+| [`docs/agent.md`](docs/agent.md) | 에이전트(`B8`) — 화면 · 해설 · 코드 대조 · 평가 |
 | [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 9건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어. 여기 있는 말만 쓴다 |
 | [`CLAUDE.md`](CLAUDE.md) | 작업 규칙. 무엇을 만들고 무엇을 안 하는가 |

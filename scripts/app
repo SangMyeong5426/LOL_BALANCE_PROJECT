@@ -1,0 +1,482 @@
+#!/usr/bin/env python3
+"""밸런스 조정 판단 보조 화면 — 에이전트(`B8`) × Gradio.  교재 8·9장.
+
+    ./scripts/app        → http://127.0.0.1:7861
+
+화면이 세 덩어리로 갈린다. **누가 만든 것인지를 섞지 않는다.**
+
+    ⚠ 경고 · 근거 · 베이스라인    코드 (explain · arms)
+    해설 · 대조 · 호출 기록        에이전트가 쓰고 코드가 대조한다
+    답                             패널 라벨 — 누르기 전에는 안 보인다
+
+`scripts/ask` 의 순서를 따른다 — *근거를 읽고 스스로 판단한 뒤, 모델과 맞춰
+보고, 그다음 답을 연다.*
+
+기본 모델은 로컬(`ollama:qwen3.5:9b`)이라 **API 키가 필요 없다.** `ollama serve`
+가 떠 있어야 한다. 다른 제공자는 모델 칸에 직접 적는다(`openai:gpt-4o-mini` 등) —
+그 제공자의 LangChain 통합 패키지와 키가 따로 있어야 한다. 쓰는 법은 `docs/agent.md`.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import uuid
+from pathlib import Path
+
+import gradio as gr
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.agent import followup  # noqa: E402
+from lol_balance.agent.data import PANEL, available, load  # noqa: E402
+from lol_balance.agent.judge import (  # noqa: E402
+    MODEL,
+    RUNS,
+    build_context,
+    build_explain_chain,
+    build_explainer,
+    candidates,
+    explain_task,
+    invented_tension,
+    misquoted_warning,
+    misread_baseline,
+    save,
+    stream,
+    unverified,
+)
+from lol_balance.config import DEFAULT_AGENT_MODEL, load_settings  # noqa: E402
+
+if not available():
+    raise SystemExit(
+        f"{PANEL.relative_to(ROOT)} 가 없다 — 수집부터 한다(README 「시작하기」)."
+    )
+
+load_settings()  # `.env` 를 읽는다 — 아래 키 확인이 그 값을 본다
+CORPUS = load()
+# 교재 7장 Backend — 후속 대화를 파일에 남긴다. 화면을 껐다 켜도 이어진다.
+SAVER = followup.checkpointer(RUNS / "followup.sqlite")
+PATCHES = CORPUS.patches
+# 키 없이 도는 모델. 기본값을 다른 제공자로 바꿔 둬도 이것으로 되돌릴 수 있다.
+LOCAL = MODEL if MODEL.startswith("ollama:") else DEFAULT_AGENT_MODEL
+MODELS = list(dict.fromkeys([MODEL, LOCAL, "ollama:qwen3.5:2b"]))
+DEFAULT_MODEL = MODEL
+
+# 제공자 → 필요한 키. 로컬 모델(ollama)은 키가 필요 없다.
+NEEDS_KEY = {
+    "openai": "OPENAI_API_KEY",
+    "google_genai": "GOOGLE_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
+def has_key(name: str) -> bool:
+    return bool(os.environ.get(name, "").strip())
+
+
+def missing_key(model: str) -> str | None:
+    key = NEEDS_KEY.get(model.split(":", 1)[0])
+    return key if key and not has_key(key) else None
+
+
+def _bar(p: float) -> str:
+    return "█" * round(p * 20) + "░" * (20 - round(p * 20))
+
+
+# ── 코드 쪽 ─────────────────────────────────────────────────────────────
+
+
+def patch_info(at: str) -> str:
+    if at in CORPUS.labeled:
+        return f"**{at}** — 답이 있는 패치. 판단 뒤 「답 열기」로 맞춰 볼 수 있다."
+    return (
+        f"**{at}** — 가장 최근 지표. **답이 아직 없다** (다음 패치 지표가 u.gg "
+        "아카이브에 없다 — 2026-09-18 확인). 예측만 된다."
+    )
+
+
+def candidate_table(at: str, want_label: str):
+    want = WANT[want_label]
+    rows = candidates(CORPUS, at, want=want, n=10)
+    return [[i + 1, name, round(score, 2)] for i, (name, score) in enumerate(rows)]
+
+
+# **후보 기준의 기본값은 너프다.** LOL 결과 문서 — ① 조정의 AUC 0.625, ①′ 너프 0.794.
+# 같은 10종이라도 너프 목록의 순서가 훨씬 믿을 만하다. 조정·버프는 한 번 누르면 된다.
+DEFAULT_WANT = "너프"
+WANT = {"조정": None, "너프": "nerf", "버프": "buff"}
+
+
+def on_patch(at: str, want_label: str):
+    champs = CORPUS.champions(at)
+    first = candidates(CORPUS, at, want=WANT[want_label], n=1)[0][0]
+    return (
+        gr.update(choices=champs, value=first),
+        candidate_table(at, want_label),
+        patch_info(at),
+        gr.update(interactive=at in CORPUS.labeled, value=False),
+    )
+
+
+def on_pick(evt: gr.SelectData):
+    row = evt.row_value if getattr(evt, "row_value", None) else None
+    return row[1] if row else gr.update()
+
+
+def code_side(champion: str, at: str) -> tuple[str, str]:
+    ctx = build_context(CORPUS, champion, at)
+    if ctx.warnings:
+        warn = "### ⚠ 주의\n" + "\n".join(f"- **{w}**" for w in ctx.warnings)
+    else:
+        warn = "### 주의할 점 없음\n경고는 조건이 걸릴 때만 뜬다 (ADR 0007)."
+
+    lines = [
+        f"### 베이스라인 — {at} → {ctx.nxt}",
+        "| 과제 | 점수 | 순위 |",
+        "| --- | --- | --- |",
+    ]
+    for label, (score, place, total) in ctx.baseline.items():
+        lines.append(f"| {label} | `{score:.2f}` {_bar(score)} | {place}위 / {total} |")
+    lines.append(
+        f"\n조정 안 됨 `{1 - ctx.baseline['조정'][0]:.2f}` — 조정의 여집합이라 따로 재지 않는다."
+    )
+    lines.append("\n**근거**\n" + "\n".join(f"- {f}" for f in ctx.facts))
+    return warn, "\n".join(lines)
+
+
+# ── 에이전트 쪽 ─────────────────────────────────────────────────────────
+
+
+def _trace(steps) -> str:
+    if not steps:
+        return "_아직 부른 도구가 없다._"
+    out = []
+    for i, s in enumerate(steps, 1):
+        args = ", ".join(f"{k}={v!r}" for k, v in s.args.items())
+        out.append(f"**{i}. `{s.tool}`**({args})")
+        out.append("```text\n" + (s.output or "…실행 중") + "\n```")
+    return "\n".join(out)
+
+
+STANCE = {"동의": "🟢", "부분 동의": "🟡", "반대": "🔴", "판단 보류": "⚪"}
+
+
+def _checks(ctx, e, fake: list[str] | None = None) -> str:
+    """코드가 해설을 대조한 결과. **모델에게 묻지 않고 코드가 잰다.**"""
+    flags = []
+    side = misread_baseline(e, ctx)
+    if side:
+        flags.append(
+            f"베이스라인을 **거꾸로 읽었다** — 실제로는 **{side}** 쪽 점수가 높다"
+        )
+    if misquoted_warning(e, ctx):
+        flags.append("경고를 **바꿔 옮겼다** — 인용한 문구가 코드가 낸 경고에 없다")
+    if invented_tension(e, ctx):
+        flags.append("경고가 없는데 **부딪히는 지점을 만들어 냈다**")
+    if fake:
+        flags.append(f"부르지 않은 도구를 **출처로 적었다**: {', '.join(fake)}")
+    if not flags:
+        return "> ✅ 코드 대조 통과 — 베이스라인 방향·경고 인용·출처가 맞다\n\n"
+    return "".join(f"> ⚠ {f}\n" for f in flags) + "> **이 해설은 믿지 않는다.**\n\n"
+
+
+def _explanation(ctx, e) -> str:
+    """해설. **확률을 두지 않는다** — 검증 안 된 숫자를 검증된 베이스라인 옆에 같은
+    무게로 놓으면 오독된다(점검 결과). 근거와 다른 신호를 나눠 보인다."""
+    lines = [
+        f"### 에이전트 해설 — {ctx.champion} · {ctx.at} → {ctx.nxt}",
+        f"**베이스라인에 {STANCE.get(e.stance, '')} {e.stance}**",
+        "",
+        e.summary,
+        "",
+        "**뒷받침하는 근거**",
+    ]
+    lines += [f"- `{p.source}` {p.text}" for p in e.supporting] or ["- (없음)"]
+    lines += ["", "**베이스라인과 다른 신호**"]
+    lines += [f"- `{p.source}` {p.text}" for p in e.against] or ["- 없다고 봤다"]
+    if e.tension.strip():
+        lines += ["", f"**⚠ 경고와 부딪히는 지점** — {e.tension}"]
+    return "\n".join(lines)
+
+
+def explain(champion: str, at: str, model: str, mode: str = "체인"):
+    """체인이면 조회를 코드가 한 번에 하고, 에이전트면 모델이 골라 부른다."""
+    ctx = build_context(CORPUS, champion, at)
+    need = missing_key(model)
+    if need:
+        yield (
+            f"### {need} 가 없다\n`.env` 에 넣고 화면을 다시 시작하거나, 모델을 "
+            f"**`{LOCAL}`** 로 바꾼다 — 로컬 모델은 키 없이 돈다. "
+            "왼쪽의 경고·베이스라인은 키 없이도 나온다.",
+            "",
+            None,
+        )
+        return
+
+    # 로컬 모델은 thinking 을 끈다 — qwen3.5:2b 에서 76초 → 18초였다.
+    kwargs = {"reasoning": False} if model.startswith("ollama:") else {}
+    if mode == "체인":
+        yield "### 조회 중 — R1·R2·R3 를 한꺼번에…", "", None
+        try:
+            out = build_explain_chain(CORPUS, ctx, model, **kwargs).invoke({})
+        except Exception as exc:
+            yield f"### 실패\n`{type(exc).__name__}: {exc}`", "", None
+            return
+        found = "\n".join(
+            f"**{k}**\n```text\n{v}\n```" for k, v in out["found"].items()
+        )
+        e = out["answer"]
+        line = {
+            "at": at,
+            "champion": champion,
+            "model": model,
+            "mode": mode,
+            **e.model_dump(),
+            "misread_baseline": misread_baseline(e, ctx),
+            "misquoted_warning": misquoted_warning(e, ctx),
+            "invented_tension": invented_tension(e, ctx),
+            "warnings": ctx.warnings,
+        }
+        save(line, "explain-demo.jsonl")
+        yield _checks(ctx, e) + _explanation(ctx, e), found, line
+        return
+
+    yield "### 해설 중…", _trace([]), None
+    try:
+        agent = build_explainer(CORPUS, ctx, model, **kwargs)
+    except Exception as exc:
+        yield f"### 모델을 못 만들었다\n`{type(exc).__name__}: {exc}`", "", None
+        return
+
+    run = None
+    for run in stream(agent, explain_task(CORPUS, ctx)):
+        status = (
+            "### 해설 중…" if run.judgment is None else _explanation(ctx, run.judgment)
+        )
+        yield status, _trace(run.steps), None
+
+    if run is None or run.error:
+        yield (
+            f"### 실패\n`{run.error if run else '응답 없음'}`",
+            _trace(run.steps if run else []),
+            None,
+        )
+        return
+    if run.judgment is None:
+        yield (
+            "### 구조화된 답이 안 왔다\n모델이 형식을 따르지 않았다. 다시 누르거나 "
+            "더 큰 모델로 바꾼다.",
+            _trace(run.steps),
+            None,
+        )
+        return
+
+    fake = unverified(run)
+    line = {
+        "at": at,
+        "champion": champion,
+        "model": model,
+        **run.judgment.model_dump(),
+        "tools": [s.tool for s in run.steps],
+        "unverified_sources": fake,
+        "warnings": ctx.warnings,  # 코드가 낸 것 — 모델이 쓴 칸이 아니다
+    }
+    line["misread_baseline"] = misread_baseline(run.judgment, ctx)
+    line["misquoted_warning"] = misquoted_warning(run.judgment, ctx)
+    save(line, "explain-demo.jsonl")
+    yield (
+        _checks(ctx, run.judgment, fake) + _explanation(ctx, run.judgment),
+        _trace(run.steps),
+        line,
+    )
+
+
+def clear():
+    """다른 챔피언·패치로 넘어가면 이전 판단을 지운다.
+
+    남겨 두면 **이전 챔피언의 판단이 새 챔피언 옆에 붙어** 읽힌다.
+    """
+    return "_「에이전트에게 해설 맡기기」를 누른다._", "", None, ""
+
+
+def visitor_id(current: str | None) -> str:
+    """이 브라우저의 대화 열쇠. **브라우저 저장소(localStorage)에 남는다.**
+
+    한때 Gradio 의 `session_hash` 를 썼는데, 그것은 **새로고침할 때마다 바뀐다** —
+    대화는 파일에 남는데 화면이 그 대화를 못 찾았다(2026-09-18 실측). 브라우저에
+    남는 값이라야 「껐다 켜도 이어진다」가 참이 된다.
+    """
+    return current or uuid.uuid4().hex[:12]
+
+
+def load_followup(champion: str, at: str, visitor: str | None):
+    """같은 챔피언을 다시 고르면 **저장된 대화를 되살린다.**"""
+    if not visitor:  # 첫 방문 — 열쇠를 막 만드는 중이다
+        return []
+    return followup.saved_history(SAVER, followup.thread_id(visitor, at, champion))
+
+
+def ask_followup(question, champion, at, model, explanation, visitor):
+    """교재 7장 — 같은 thread_id 로 부르면 앞 대화를 이어 간다."""
+    thread = followup.thread_id(visitor or "local", at, champion)
+    shown = followup.saved_history(SAVER, thread)
+    if not question.strip():
+        return shown, "", ""
+    need = missing_key(model)
+    if need:
+        return (
+            shown,
+            "",
+            f"`{need}` 가 없다. 모델을 **`{LOCAL}`** 로 바꾸면 키 없이 된다.",
+        )
+    ctx = build_context(CORPUS, champion, at)
+    kwargs = {"reasoning": False} if model.startswith("ollama:") else {}
+    agent = followup.build_followup(CORPUS, ctx, SAVER, model, **kwargs)
+    if not explanation and not followup.started(agent, thread):
+        return (
+            shown,
+            question,
+            "먼저 **해설**을 받는다 — 후속 질문은 그 해설을 이어 받는다.",
+        )
+    try:
+        _, steps = followup.ask(agent, thread, question, CORPUS, ctx, explanation)
+    except Exception as exc:
+        return shown, question, f"실패: `{type(exc).__name__}: {exc}`"
+    used = ", ".join(f"`{s.tool}`" for s in steps) or "없음"
+    note = f"이번 답에 부른 도구: {used} · **코드 대조를 거치지 않은 자유 서술이다**"
+    return followup.history(agent, thread), "", note
+
+
+def reveal(champion: str, at: str, opened: bool) -> str:
+    if not opened:
+        return ""
+    ctx = build_context(CORPUS, champion, at)
+    if ctx.answer is None:
+        return f"**{at}** 는 답이 아직 없다."
+    return f"### 답 — {ctx.nxt} 에서 {champion} → **{ctx.answer}**"
+
+
+# ── 화면 ────────────────────────────────────────────────────────────────
+
+with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
+    gr.Markdown(
+        "# 리그 오브 레전드 밸런스 조정 판단 보조\n"
+        "**172종을 10종으로 좁히고, 근거와 주의할 점을 붙인다. 최종 판단은 사람이 한다.**  \n"
+        "경고·베이스라인은 코드가, 해설은 에이전트(`B8`)가 쓰고 코드가 대조한다."
+    )
+
+    with gr.Row():
+        at = gr.Dropdown(PATCHES, value=PATCHES[0], label="기준 패치", scale=1)
+        want = gr.Radio(
+            ["너프", "버프", "조정"], value=DEFAULT_WANT, label="후보 기준", scale=1
+        )
+        model = gr.Dropdown(
+            MODELS, value=DEFAULT_MODEL, label="모델", allow_custom_value=True, scale=2
+        )
+    info = gr.Markdown(patch_info(PATCHES[0]))
+
+    with gr.Row():
+        with gr.Column(scale=2):
+            gr.Markdown("### 베이스라인 후보 10종\n행을 누르면 그 챔피언을 고른다")
+            table = gr.Dataframe(
+                headers=["순위", "챔피언", "점수"],
+                value=candidate_table(PATCHES[0], DEFAULT_WANT),
+                interactive=False,
+            )
+        with gr.Column(scale=3):
+            champion = gr.Dropdown(
+                CORPUS.champions(PATCHES[0]),
+                value=candidates(CORPUS, PATCHES[0], want=WANT[DEFAULT_WANT], n=1)[0][
+                    0
+                ],
+                label="챔피언",
+            )
+            mode = gr.Radio(
+                ["체인", "에이전트"],
+                value="체인",
+                label="해설 방식",
+                info="체인: 코드가 R1·R2·R3 를 한꺼번에 조회 · 에이전트: 모델이 골라 조회",
+            )
+            run_btn = gr.Button("에이전트에게 해설 맡기기", variant="primary")
+            warn = gr.Markdown()
+
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("## 코드가 낸 것")
+            base = gr.Markdown()
+        with gr.Column():
+            gr.Markdown("## 에이전트 해설")
+            verdict = gr.Markdown("_「에이전트에게 해설 맡기기」를 누른다._")
+
+    with gr.Accordion("조회 기록 — 무엇을 찾아봤나", open=False):
+        trace = gr.Markdown()
+
+    explained = gr.State("")
+    # **암호화 열쇠를 고정한다.** 안 주면 Gradio 가 켤 때마다 새로 만들어, 껐다 켜면
+    # 브라우저에 남은 값을 못 읽는다. 이 값은 대화 파일을 찾는 이름일 뿐 비밀이 아니다.
+    visitor = gr.BrowserState(
+        None, storage_key="lol-balance-visitor", secret="lol-balance-followup"
+    )
+    with gr.Accordion(
+        "해설에 대해 더 묻기 — 대화가 이어진다 (Checkpointer)", open=True
+    ):
+        gr.Markdown(
+            "같은 브라우저에서 같은 챔피언을 다시 고르면 **이전 대화를 잇는다** — 새로고침해도, "
+            "화면을 껐다 켜도 된다(`SqliteSaver`). 후속 답은 **코드 대조를 거치지 않는** 자유 서술이다."
+        )
+        chat = gr.Chatbot(label="후속 대화", height=320)
+        with gr.Row():
+            question = gr.Textbox(
+                placeholder="예: 버프 쪽 신호는 없었어?", label="질문", scale=4
+            )
+            ask_btn = gr.Button("묻기", scale=1)
+        ask_note = gr.Markdown()
+
+    with gr.Row():
+        opened = gr.Checkbox(
+            label="답 열기 (근거와 판단을 먼저 읽은 뒤에)",
+            value=False,
+            interactive=PATCHES[0] in CORPUS.labeled,
+        )
+    answer = gr.Markdown()
+
+    with gr.Accordion("저장된 기록", open=False):
+        saved = gr.JSON()
+
+    # **패치를 바꾸면 챔피언이 그대로여도 전부 다시 그린다.** 1위 후보가 같은
+    # 챔피언이면 `champion.change` 가 안 불려, 이전 패치의 경고·점수가 남았다.
+    at.change(on_patch, [at, want], [champion, table, info, opened]).then(
+        code_side, [champion, at], [warn, base]
+    ).then(clear, None, [verdict, trace, saved, answer])
+    want.change(candidate_table, [at, want], table)
+    table.select(on_pick, None, champion)
+    champion.change(code_side, [champion, at], [warn, base]).then(
+        clear, None, [verdict, trace, saved, answer]
+    ).then(lambda: False, None, opened)
+    run_btn.click(explain, [champion, at, model, mode], [verdict, trace, saved]).then(
+        lambda text: text, verdict, explained
+    )
+    ask_btn.click(
+        ask_followup,
+        [question, champion, at, model, explained, visitor],
+        [chat, question, ask_note],
+    )
+    question.submit(
+        ask_followup,
+        [question, champion, at, model, explained, visitor],
+        [chat, question, ask_note],
+    )
+    champion.change(load_followup, [champion, at, visitor], chat).then(
+        lambda: ("", ""), None, [explained, ask_note]
+    )
+    at.change(load_followup, [champion, at, visitor], chat)
+    demo.load(visitor_id, visitor, visitor).then(
+        load_followup, [champion, at, visitor], chat
+    )
+    opened.change(reveal, [champion, at, opened], answer)
+    demo.load(code_side, [champion, at], [warn, base])
+
+
+if __name__ == "__main__":
+    demo.launch(server_port=7861)

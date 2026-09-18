@@ -22,3 +22,28 @@ python-dotenv==1.2.3
 # extract.py 가 TYPE_CHECKING 아래에서만 쓰고, pilot-extract 는 지연 import 한다.
 # mypy 가 타입을 풀려면 필요하다.
 anthropic==1.0.0
+
+# ── 에이전트(B8) ─────────────────────────────────────────────────────
+# 근거는 docs/adr/0009-agent-framework-and-local-model.md.
+# **기본은 로컬 모델이라 키가 필요 없다.** 다른 제공자는 그 통합 패키지를
+# 따로 넣는다(langchain-openai 등) — 여기에는 적지 않는다.
+
+# 에이전트 루프 · 구조화 출력 · 호출 상한 (create_agent · init_chat_model)
+langchain==1.4.1
+
+# 메시지 · 프롬프트 틀 · Runnable · @tool — 직접 import 한다
+langchain-core==1.6.3
+
+# 해설에 대해 더 묻기 — 대화를 파일에 남긴다 (SqliteSaver)
+langgraph-checkpoint-sqlite==3.1.1
+
+# 로컬 모델(Ollama). **직접 import 하지 않는다** — init_chat_model 이
+# 「ollama:」 접두사를 보고 불러온다. 이것이 키 없는 길이다
+langchain-ollama==1.1.0
+
+# 에이전트 화면 (scripts/app). 과정 과제가 Gradio 를 쓴다
+gradio==6.27.0
+
+# 판단 기록에 OpenAI 기준 토큰 수를 적는다 — 키를 쓸 때의 비용 추정용.
+# 판단에는 안 쓴다
+tiktoken==0.14.0
