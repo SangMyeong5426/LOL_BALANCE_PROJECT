@@ -281,3 +281,20 @@ def test_absolute_size_does_not_matter() -> None:
 
 def test_nothing_to_choose_from_is_none() -> None:
     assert settled_patch({}) is None
+
+
+def test_with_pro_rates_swaps_only_the_pro_columns(make_row: PanelRowFactory) -> None:
+    """다른 집계로 갈아 끼워도 **프로 두 칸 말고는 그대로다.** 규약은 `build-panel` 과 같다."""
+    from lol_balance.oracle import ProRates
+    from lol_balance.panel import with_pro_rates
+
+    rows = (
+        make_row("14_1", 1, champion="Ahri", pro_pick_rate=0.9, pro_ban_rate=0.9),
+        make_row("14_1", 2, champion="Zed", pro_pick_rate=0.9, pro_ban_rate=0.9),
+        make_row("14_2", 1, champion="Ahri", pro_pick_rate=0.9, pro_ban_rate=0.9),
+    )
+    swapped = with_pro_rates(rows, {"14.1": {"Ahri": ProRates(0.25, 0.5)}})
+    assert (swapped[0].pro_pick_rate, swapped[0].pro_ban_rate) == (0.25, 0.5)
+    assert (swapped[1].pro_pick_rate, swapped[1].pro_ban_rate) == (0.0, 0.0)
+    assert swapped[2].pro_pick_rate is None and swapped[2].pro_presence is None
+    assert swapped[0].win_rate == rows[0].win_rate and swapped[0].patch == "14_1"
