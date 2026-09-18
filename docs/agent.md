@@ -130,7 +130,7 @@ ollama pull qwen3.5:9b && ollama serve   # 한 번. 약 6.6 GB
 | 3 Streaming · Memory | 에이전트 방식에서 도구를 부를 때마다 갱신 / 후속 대화 |
 | 4 LCEL · Runnable | 해설 체인 — `RunnableParallel` 로 조회 넷을 동시에 → 프롬프트 → 모델 |
 | 5 Agent · Tool | R1·R2·R3 를 `@tool` 로, `create_agent` 가 루프를 돈다 |
-| 6 검색 → 생성 | R1 = 표준화 피처 k-NN, R2 = BM25 → 모델이 해설을 생성한다 |
+| 6 검색 → 생성 | R1 = 표준화 피처 k-NN, R2 = BM25 → 모델이 해설을 생성한다. 임베딩(`OllamaEmbeddings`)은 R2 와 견줘 보고 안 썼다 — `score-retrieval --embed` |
 | 7 Middleware · Checkpointer · Backend | 호출 8회·도구 12회 제한 / `thread_id` / `SqliteSaver` |
 | 8·9 Gradio | 후보 표 → 챔피언 → 경고·베이스라인·해설·대조·후속 대화·답 |
 
