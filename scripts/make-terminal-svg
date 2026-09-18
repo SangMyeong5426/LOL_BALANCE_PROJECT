@@ -2,9 +2,17 @@
 """터미널 출력을 SVG 로 그린다. **README 의 화면 그림을 손으로 안 만들기 위해서다.**
 
     ./scripts/make-terminal-svg
+    ./scripts/make-terminal-svg --only ask
 
-`predict` 를 실제로 돌려 그 출력을 그리므로, 결과가 바뀌면 다시 돌려 갱신한다.
-캡처 도구(termtosvg·vhs)를 안 쓰는 이유는 설치 의존을 늘리지 않기 위해서다.
+둘을 만든다. `predict.svg` 는 **무엇을 내는가**를, `ask.svg` 는 **무엇을 보고
+그렇게 내는가**를 보인다 — 검색기 셋이 실제로 찾아온 것이 거기 있다.
+
+`predict` 와 `ask` 를 실제로 돌려 그 출력을 그리므로, 결과가 바뀌면 다시 돌려
+갱신한다. 캡처 도구(termtosvg·vhs)를 안 쓰는 이유는 설치 의존을 늘리지 않기
+위해서다.
+
+**긴 절은 잘라 낸다.** `ask` 전문은 56줄이라 그대로 그리면 README 에서 아무도 안
+읽는다. 자른 자리에는 `...` 을 남긴다 — 접었다는 것이 보여야 한다.
 
 **한글은 보는 사람의 폰트에 의존한다.** 글꼴 목록에 흔한 한글 고정폭을 나열하고
 마지막에 `monospace` 를 둔다 — 그래도 자간이 기기마다 조금씩 다르다.
@@ -14,6 +22,7 @@
 만들어 놓고 안 보면 글자가 잘렸는지 모른다. macOS 에 딸린 QuickLook 으로 그린다.
 
     qlmanage -t -s 1400 -o /tmp docs/img/predict.svg   # /tmp/predict.svg.png
+    qlmanage -t -s 1400 -o /tmp docs/img/ask.svg
 
 **실제로 이걸로 둘을 잡았다** — 빈 줄이 겹쳐 있었고, 경고 줄이 오른쪽 끝에
 바짝 붙어 있었다.
@@ -27,7 +36,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "docs" / "img" / "predict.svg"
+IMG = ROOT / "docs" / "img"
+
+# `ask` 그림은 이 하나로 그린다. **바꾸면 그림의 수치가 통째로 달라진다.**
+# 세나 `16_13` 은 검색기 셋이 전부 무언가를 찾아오는 자리다 — 노트도 있고
+# 닮은 사례도 있고 예측도 갈린다.
+ASK = ("Senna", "16_13")
 
 # 터미널 색. 배경은 GitHub 어두운 테마와 밝은 테마 양쪽에서 읽히는 값으로 고른다.
 BG, FG, DIM = "#0d1117", "#c9d1d9", "#8b949e"
@@ -45,9 +59,13 @@ def colour(line: str) -> str:
         return GREEN
     if "⚠" in line:
         return YELLOW
-    if line.startswith("==="):
+    # `predict` 는 `===` 로, `ask` 는 `──` · `■` 로 절을 연다.
+    if line.startswith(("===", "──", "■")):
         return CYAN
     if line.startswith("  학습") or line.startswith("$"):
+        return DIM
+    # 접은 자리와 꼬리말은 본문보다 흐리게 둔다.
+    if line.strip() in {"...", "답을 보려면 --answer"}:
         return DIM
     return FG
 
@@ -66,11 +84,11 @@ def width(text: str) -> int:
 WRAP = 78
 
 
-def fold(lines: list[str]) -> list[str]:
+def fold(lines: list[str], wrap: int = WRAP) -> list[str]:
     """긴 줄을 접는다. 이어지는 줄은 원래 들여쓰기에 맞춘다."""
     out: list[str] = []
     for line in lines:
-        if width(line) <= WRAP:
+        if width(line) <= wrap:
             out.append(line)
             continue
         # **앞 공백을 따로 떼어 둔다.** 함께 쪼개면 들여쓰기가 사라져 첫 줄만
@@ -80,13 +98,28 @@ def fold(lines: list[str]) -> list[str]:
         cur = head
         for word in line.split():
             nxt = f"{cur} {word}" if cur.strip() else cur + word
-            if cur.strip() and width(nxt) > WRAP:
+            if cur.strip() and width(nxt) > wrap:
                 out.append(cur)
                 cur = pad + word
             else:
                 cur = nxt
         out.append(cur)
     return out
+
+
+def clip(line: str, wrap: int = WRAP) -> str:
+    """표 한 줄을 폭에 맞춰 자른다.
+
+    **표는 접으면 안 된다.** `fold` 는 낱말로 다시 이어 붙이느라 이어진 빈칸을
+    하나로 합치는데, 그러면 칸 맞춤이 통째로 무너진다 — `조정 이력` 이
+    `16_1 Absolution New Effect:` 처럼 한 줄로 눌렸다.
+    """
+    if width(line) <= wrap:
+        return line
+    cut = line
+    while width(cut) > wrap - 3:
+        cut = cut[:-1]
+    return cut.rstrip() + "..."
 
 
 def draw(lines: list[str]) -> str:
@@ -112,31 +145,92 @@ def draw(lines: list[str]) -> str:
     )
 
 
-def main() -> int:
-    if {"-h", "--help"} & set(sys.argv):
-        print(__doc__)
-        return 0
+def output(script: str, *args: str) -> list[str]:
+    """스크립트를 돌려 출력 줄을 준다. 실패하면 멈춘다."""
     run = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "predict"), "--top", "3", "--score"],
+        [sys.executable, str(ROOT / "scripts" / script), *args],
         capture_output=True,
         text=True,
         cwd=ROOT,
     )
     if run.returncode:
         print(run.stderr[-400:], file=sys.stderr)
-        return 1
+        raise SystemExit(1)
+    return run.stdout.splitlines()
 
-    body = run.stdout.splitlines()
+
+def section(body: list[str], head: str) -> list[str]:
+    """`──` 절 하나를 통째로 준다. **절은 빈 줄에서 끝난다.**
+
+    줄 번호로 자르면 `ask` 출력이 조금만 바뀌어도 엉뚱한 곳이 잘린다.
+    """
+    start = next(i for i, x in enumerate(body) if x.startswith(head))
+    end = start + 1
+    while end < len(body) and body[end].strip():
+        end += 1
+    return body[start:end]
+
+
+def predict_lines() -> list[str]:
+    body = output("predict", "--top", "3", "--score")
     keep: list[str] = ["$ ./scripts/predict --score", ""]
     keep += body[:2] + [""]  # body[2] 가 이미 빈 줄이다
     nerf = body.index("=== 너프 후보 상위 3 ===")
     keep += body[nerf : nerf + 8] + ["   ..."]
     buff = body.index("=== 버프 후보 상위 3 ===")
     keep += ["", *body[buff : buff + 7]]
+    return keep
 
-    # 줄바꿈으로 끝낸다 — `end-of-file-fixer` 가 안 그러면 커밋 때 고쳐 놓는다.
-    OUT.write_text(draw(fold(keep)) + "\n", encoding="utf-8")
-    print(f"{OUT.relative_to(ROOT)}  {len(keep)}줄  {OUT.stat().st_size:,} B")
+
+def ask_lines() -> list[str]:
+    """**검색기 셋이 각각 무엇을 찾아왔는지**를 남긴다.
+
+    `ask` 는 절마다 다른 검색기를 부른다 — 「지표」가 `StatLookup`, 「조정 이력」이
+    `NoteSearch`, 「닮은 사례」가 `CaseSearch` 다. 셋이 다 보여야 그림이
+    [README](../README.md) 의 검색부 표와 같은 것을 가리킨다.
+
+    **「그때 개발사가 한 말」과 「근거」는 뺀다.** 개발사 노트는 검색기가 아니라
+    따로 읽어 오는 자료이고 예측에도 안 들어간다. 근거는 배포 페이지 그림에 있다.
+    """
+    champion, patch = ASK
+    body = output("ask", champion, patch)
+    keep: list[str] = [f"$ ./scripts/ask {champion} {patch}", ""]
+    keep += body[:2]
+
+    stat = section(body, "── 지표")
+    keep += ["", stat[0], stat[1], "  ...", *stat[-2:]]
+
+    note = section(body, "── 조정 이력")
+    keep += ["", note[0], *(clip(x) for x in note[1:3]), "  ..."]
+
+    case = section(body, "── 닮은 사례")
+    keep += ["", *case[:5], "  ..."]
+
+    guess = section(body, "── 예측")
+    keep += ["", *guess]
+    keep += ["", body[-1]]
+    return keep
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+
+    only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
+    wanted = {"predict": predict_lines, "ask": ask_lines}
+    if only is not None and only not in wanted:
+        print(f"--only 는 {' 또는 '.join(wanted)} 다: {only!r}", file=sys.stderr)
+        return 1
+
+    for name, lines in wanted.items():
+        if only is not None and name != only:
+            continue
+        keep = lines()
+        out = IMG / f"{name}.svg"
+        # 줄바꿈으로 끝낸다 — `end-of-file-fixer` 가 안 그러면 커밋 때 고쳐 놓는다.
+        out.write_text(draw(fold(keep)) + "\n", encoding="utf-8")
+        print(f"{out.relative_to(ROOT)}  {len(keep)}줄  {out.stat().st_size:,} B")
     return 0
 
 
