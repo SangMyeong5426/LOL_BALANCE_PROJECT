@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""에이전트(`B8`)를 `B6` 과 같은 229건에 돌려 `B5s` · `B6` 과 나란히 잰다 — ② 방향.
+
+    ./scripts/run-agent                                             검증 — 규칙이 B5s 를 재현해야 한다
+    ./scripts/run-agent --model ollama:qwen3.5:9b --no-think --dev  개발 표본(학습 구간 안 114건)
+    ./scripts/run-agent --model … --strict                          「50」 금지 — 모르면 기권
+    ./scripts/run-agent --model … --variant r1r3                    변형 — v1 · r1 · r1r3 (기본 r1)
+    ./scripts/run-agent --model … --limit 20                        앞에서 20건만
+
+**고치고 고르는 것은 `--dev` 에서 한다.** 평가 표본(229건)을 보며 고르면 그것이
+누출이다. 평가 표본은 개발에서 고른 설정마다 한 번 보고, 본 횟수를 결과 문서에 적는다.
+
+**이어받는다.** 이미 답한 키는 건너뛴다 — 중간에 끊겨도 같은 건을 두 번 부르지
+않는다. 기록은 `runs/agent-<표본>-<변형>-<모델>.jsonl` 이다(커밋하지 않는다).
+다 돈 것을 `ground_truth/agent/` 로 옮겨 커밋하면 `score-agent` 가 채점만 다시 한다.
+
+로컬 모델(`ollama:…`)은 **API 키가 필요 없다.** `ollama serve` 가 떠 있어야 한다.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.agent.data import PANEL, available, load  # noqa: E402
+from lol_balance.agent.evaluate import (  # noqa: E402
+    cases,
+    dev_cases,
+    read_records,
+    report,
+    run_case,
+)
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def main() -> int:
+    if not available():
+        print(
+            f"{PANEL.relative_to(ROOT)} 가 없다 — 수집부터 한다(README 「시작하기」)."
+        )
+        return 1
+    model = arg("--model", "rule")
+    variant = "r1" if model == "rule" else arg("--variant", "r1")
+    kwargs = {"reasoning": False} if "--no-think" in sys.argv else {}
+    dev = "--dev" in sys.argv
+    strict = "--strict" in sys.argv and model != "rule"
+    slug = model.replace(":", "-").replace("/", "-") + ("-nothink" if kwargs else "")
+    slug += "-no50" if strict else ""
+    out = ROOT / "runs" / f"agent-{'dev' if dev else 'test'}-{variant}-{slug}.jsonl"
+    out.parent.mkdir(exist_ok=True)
+
+    corpus = load()
+    all_cases = dev_cases(corpus) if dev else cases(corpus)
+    lines = read_records(out)
+    done = {x["key"] for x in lines}
+    todo = [c for c in all_cases if c.key not in done]
+    if "--limit" in sys.argv:
+        todo = todo[: max(0, int(arg("--limit", "0")) - len(done))]
+
+    if todo:
+        print(
+            f"{model} · {variant} {kwargs or ''} — {len(todo)}건 "
+            f"(이미 {len(done)}건) → {out.relative_to(ROOT)}",
+            flush=True,
+        )
+        with out.open("a", encoding="utf-8") as f:
+            for i, case in enumerate(todo, 1):
+                line = run_case(corpus, case, model, variant, strict, **kwargs)
+                f.write(json.dumps(line, ensure_ascii=False) + "\n")
+                f.flush()
+                lines.append(line)
+                if i % 10 == 0 or i == len(todo):
+                    answered = sum(1 for x in lines if not x["abstain"])
+                    print(
+                        f"  [{i}/{len(todo)}] 답 {answered}/{len(lines)} · "
+                        f"마지막 {line['seconds']}s",
+                        flush=True,
+                    )
+        print()
+
+    print("\n".join(report(all_cases, lines)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

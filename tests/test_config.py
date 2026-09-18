@@ -9,9 +9,19 @@ from pathlib import Path
 
 import pytest
 
-from lol_balance.config import DEFAULT_LLM_MODEL, DEFAULT_SEED, load_settings
+from lol_balance.config import (
+    DEFAULT_AGENT_MODEL,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_SEED,
+    load_settings,
+)
 
-_ENV_KEYS = ("LOL_BALANCE_SEED", "LOL_BALANCE_LLM_MODEL", "ANTHROPIC_API_KEY")
+_ENV_KEYS = (
+    "LOL_BALANCE_SEED",
+    "LOL_BALANCE_LLM_MODEL",
+    "LOL_BALANCE_AGENT_MODEL",
+    "ANTHROPIC_API_KEY",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -72,6 +82,22 @@ def test_non_numeric_seed_raises(
 
     with pytest.raises(ValueError, match="LOL_BALANCE_SEED"):
         load_settings(env_file=clean_env)
+
+
+def test_agent_runs_on_a_local_model_by_default(
+    clean_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """에이전트의 기본은 로컬 모델이다 — 키가 없어도 돈다. 빈 값도 기본값으로 읽는다."""
+    settings = load_settings(env_file=clean_env)
+    assert settings.agent_model == DEFAULT_AGENT_MODEL
+    assert settings.agent_model.startswith("ollama:")
+    assert settings.llm_available is False
+
+    monkeypatch.setenv("LOL_BALANCE_AGENT_MODEL", "")
+    assert load_settings(env_file=clean_env).agent_model == DEFAULT_AGENT_MODEL
+
+    monkeypatch.setenv("LOL_BALANCE_AGENT_MODEL", "ollama:qwen3.5:2b")
+    assert load_settings(env_file=clean_env).agent_model == "ollama:qwen3.5:2b"
 
 
 def test_settings_are_frozen(clean_env: Path) -> None:
