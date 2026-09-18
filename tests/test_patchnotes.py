@@ -7,11 +7,14 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from lol_balance.patchnotes import (
     champion_changes,
     changed_champions,
+    release_date,
     wiki_url,
     wiki_version,
 )
@@ -224,3 +227,39 @@ def test_changed_champions_still_excludes_other_modes() -> None:
     got = changed_champions(_sections(("Champions", "Ahri"), ("Arena", "Zed")))
 
     assert got == {"Ahri"}
+
+
+INFOBOX = (
+    '<div class="infobox-data-row"><div class="infobox-data-label">'
+    "<b>Release Date (US)</b></div>"
+    '<div class="infobox-data-value">{value}</div></div>'
+)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("July 19<sup>th</sup>, 2023", date(2023, 7, 19)),
+        ("December 11<sup>th</sup>, 2024", date(2024, 12, 11)),
+        ("January 1<sup>st</sup>, 2025", date(2025, 1, 1)),
+        ("March 2, 2026", date(2026, 3, 2)),
+    ],
+)
+def test_release_date_reads_the_infobox(value: str, expected: date) -> None:
+    """위키 머리의 출시일 — 서수(`th`)가 `<sup>` 로 떨어져 있어도 읽는다."""
+    html = INFOBOX.format(value=value)
+    assert release_date(html) == expected
+    assert release_date(html.encode()) == expected
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<p>no infobox</p>",
+        INFOBOX.format(value="TBA"),
+        INFOBOX.format(value="Smarch 3<sup>rd</sup>, 2024"),
+    ],
+)
+def test_release_date_is_none_when_it_cannot_be_read(html: str) -> None:
+    """**추정하지 않는다.** 못 읽으면 None 이다."""
+    assert release_date(html) is None

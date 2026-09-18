@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
@@ -224,3 +225,50 @@ def champion_changes(html: bytes) -> tuple[ChangeBlock, ...]:
                         section = "General"  # 묶음 없이 문장 하나만 있는 경우
                     blocks.append(ChangeBlock(champion, section, ability, lines))
     return tuple(blocks)
+
+
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        (
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ),
+        start=1,
+    )
+}
+_RELEASE = re.compile(
+    r"Release Date \(US\)</b></div>\s*<div class=\"infobox-data-value\">(.*?)</div>",
+    re.S,
+)
+_DAY = re.compile(r"([A-Z][a-z]+)\s+(\d{1,2})\s*(?:st|nd|rd|th)?\s*,\s*(\d{4})")
+
+
+def release_date(html: bytes | str) -> date | None:
+    """위키 노트 머리의 「Release Date (US)」 — 그 패치가 **북미에 나온 날**.
+
+    **다음 패치의 출시일이 예측의 경계다.** 그날부터는 정답(그 패치에 누가
+    조정됐나)이 공개돼 있으므로, 그 뒤의 기록은 앞 패치의 예측에 못 쓴다.
+
+    날짜만 있고 시각은 없다. 지역마다 몇 시간씩 어긋나므로 **날짜 단위로만**
+    가른다. 못 읽으면 None 이다 — 조용히 추정하지 않는다.
+    """
+    text = html.decode("utf-8", "replace") if isinstance(html, bytes) else html
+    found = _RELEASE.search(text)
+    if found is None:
+        return None
+    plain = re.sub(r"<[^>]+>", "", found.group(1))
+    day = _DAY.search(plain)
+    if day is None or day.group(1) not in _MONTHS:
+        return None
+    return date(int(day.group(3)), _MONTHS[day.group(1)], int(day.group(2)))

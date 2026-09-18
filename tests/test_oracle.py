@@ -8,11 +8,20 @@
 from __future__ import annotations
 
 import csv
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from lol_balance.oracle import BAN_SLOTS, normalise, read_pro
+from lol_balance.oracle import (
+    BAN_SLOTS,
+    before_release,
+    normalise,
+    rates,
+    read_games,
+    read_pro,
+    recent,
+)
 
 COLUMNS = ["gameid", "patch", "position", "champion"] + [
     f"ban{i}" for i in range(1, BAN_SLOTS + 1)
@@ -122,3 +131,90 @@ def test_every_year_file_is_read(tmp_path: Path) -> None:
 
 def test_an_empty_directory_is_not_a_crash(tmp_path: Path) -> None:
     assert read_pro(tmp_path) == {}
+
+
+# ── 경기 단위 · 날짜 경계 ─────────────────────────────────────────────
+
+
+def dated(
+    game: str, patch: str, day: str, picks: list[str], bans: list[str]
+) -> list[dict[str, str]]:
+    rows = [player(game, patch, c) | {"date": day} for c in picks]
+    rows.append(team(game, patch, *bans) | {"date": day})
+    return rows
+
+
+def write_dated(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=COLUMNS + ["date"])
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({c: row.get(c, "") for c in COLUMNS + ["date"]})
+
+
+@pytest.fixture
+def season(tmp_path: Path) -> Path:
+    """14.1 로 치른 경기 셋 — 둘은 14.2 출시 전, 하나는 출시 뒤. 14.2 경기 하나."""
+    rows = (
+        dated("g1", "14.01", "2024-01-10 08:00:00", ["Ahri", "Zed"], ["Yone"])
+        + dated("g2", "14.01", "2024-01-20 08:00:00", ["Ahri", "Lux"], ["Zed"])
+        + dated("g3", "14.01", "2024-01-26 08:00:00", ["Zed", "Lux"], ["Ahri"])
+        + dated("g4", "14.02", "2024-01-27 08:00:00", ["Zed", "Yone"], ["Lux"])
+    )
+    write_dated(tmp_path / "oracle" / "2024.csv", rows)
+    return tmp_path / "oracle"
+
+
+def test_games_count_the_same_as_read_pro(season: Path) -> None:
+    """경기 단위로 읽어 다시 세도 **기존 집계와 같아야 한다** — 견줄 기준이다."""
+    games = read_games(season)
+    assert {g.patch for g in games.values()} == {"14.1", "14.2"}
+    whole = read_pro(season)
+    for patch in ("14.1", "14.2"):
+        mine = rates(g for g in games.values() if g.patch == patch)
+        assert mine == whole[patch]
+
+
+def test_before_release_drops_games_played_after_the_next_patch(season: Path) -> None:
+    """14.2 가 1월 24일에 나왔다면 g3(1월 26일)은 14.1 → 14.2 예측에 못 쓴다."""
+    games = read_games(season)
+    cut = before_release(games, {"14.1": date(2024, 1, 24)})
+    assert set(cut) == {"14.1"}  # 경계가 없는 패치는 빠진다
+    lux = cut["14.1"]["Lux"]
+    assert lux.pick_rate == pytest.approx(1 / 2)  # g2 만 — 분모도 두 경기다
+    assert cut["14.1"]["Ahri"].ban_rate == 0  # g3 의 밴은 안 센다
+    assert "Ahri" in cut["14.1"] and cut["14.1"]["Ahri"].pick_rate == 1.0
+
+
+def test_offset_moves_the_boundary_earlier(season: Path) -> None:
+    games = read_games(season)
+    cut = before_release(games, {"14.1": date(2024, 1, 24)}, offset=7)
+    assert list(cut["14.1"]) and cut["14.1"]["Zed"].pick_rate == 1.0  # g1 만 남는다
+
+
+def test_a_patch_with_no_game_before_the_boundary_has_no_pro_rates(
+    season: Path,
+) -> None:
+    """경계 전 경기가 없으면 **그때는 프로 지표가 없었던** 것이다 — 0 이 아니다."""
+    games = read_games(season)
+    assert before_release(games, {"14.1": date(2024, 1, 1)}) == {}
+
+
+def test_recent_crosses_patches(season: Path) -> None:
+    """최근 흐름은 패치를 가리지 않는다 — 1월 27일 직전 8일이면 g2 · g3 이 든다."""
+    games = read_games(season)
+    window = recent(games, {"14.2": date(2024, 1, 28)}, days=8)
+    assert window["14.2"]["Lux"].pick_rate == pytest.approx(2 / 3)  # g2 · g3 · g4 중
+    assert recent(games, {"14.2": date(2023, 1, 1)}, days=8) == {}
+
+
+def test_undated_games_are_left_out_of_the_boundary(tmp_path: Path) -> None:
+    rows = dated("g1", "14.01", "", ["Ahri"], []) + dated(
+        "g2", "14.01", "2024-01-10 08:00:00", ["Zed"], []
+    )
+    write_dated(tmp_path / "oracle" / "2024.csv", rows)
+    games = read_games(tmp_path / "oracle")
+    assert games["g1"].day is None
+    cut = before_release(games, {"14.1": date(2024, 1, 24)})
+    assert cut["14.1"]["Zed"].pick_rate == 1.0 and "Ahri" not in cut["14.1"]
