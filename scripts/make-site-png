@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""배포 페이지를 그림으로 잡는다. **README 가 링크만 걸고 화면을 안 보여 줬다.**
+
+    ./scripts/make-site-png
+    ./scripts/make-site-png --answer     실제 결과를 켠 화면
+
+`docs/site/` 를 임시 서버로 띄워 잡는다. 배포된 주소가 아니라 **저장소에 있는
+파일**을 잡으므로, `make-site` 로 자료를 갱신하면 그림도 같이 따라온다.
+`file://` 로는 안 된다 — 페이지가 `data.json` 을 `fetch` 하는데 그 경로가 막힌다.
+
+## 왜 SVG 가 아닌가
+
+[`make-terminal-svg`](make-terminal-svg) 와 [`make-results-svg`](make-results-svg)
+는 글자와 막대를 직접 그린다. 이 페이지는 카드 격자·색·줄바꿈이 브라우저가 정하는
+것이라 다시 그리면 **화면과 다른 그림**이 된다. 그래서 여기서만 캡처를 쓴다.
+
+## Chrome 이 있어야 한다
+
+헤드리스 Chrome 하나만 쓰고 패키지는 안 늘린다. 없으면 어디서 찾는지 적고 멈춘다.
+**CI 는 이것을 안 돌린다** — 그림은 사람이 만들어 커밋한다.
+
+## 결과를 눈으로 확인하는 법
+
+    qlmanage -t -s 1400 -o /tmp docs/img/site.png
+
+**실제로 이걸로 잘린 카드를 잡았다.** 높이를 조금만 크게 잡으면 셋째 카드의 윗줄이
+한 줄 걸쳐 나온다.
+"""
+
+from __future__ import annotations
+
+import functools
+import http.server
+import subprocess
+import sys
+import threading
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SITE = ROOT / "docs" / "site"
+OUT = ROOT / "docs" / "img"
+
+# 카드 두 장이 온전히 들어가고 셋째가 안 걸리는 높이. **실측해서 맞춘 값이다** —
+# 카드 높이는 근거 줄 수에 따라 달라지므로 자료가 크게 바뀌면 다시 봐야 한다.
+VIEW = (1180, 726)
+VIEW_ANSWER = (1180, 806)  # 「실제 …」 한 줄이 카드마다 붙어 그만큼 길어진다
+
+# GitHub 은 README 그림을 약 880 px 폭으로 그린다. 2배까지만 올린다 —
+# 3배로 잡으면 파일만 커지고 화면에서는 같다.
+SCALE = 1.5
+
+CHROME = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+)
+
+
+def chrome() -> str | None:
+    return next((p for p in CHROME if Path(p).exists()), None)
+
+
+class Quiet(http.server.SimpleHTTPRequestHandler):
+    """요청 한 줄씩 찍는 기본 동작을 끈다. **결과 줄이 접속 기록에 묻힌다.**"""
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+
+def serve() -> tuple[http.server.ThreadingHTTPServer, int]:
+    """`docs/site/` 를 임시 포트로 연다. 포트는 OS 가 고르게 둔다."""
+    handler = functools.partial(Quiet, directory=SITE)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, server.server_address[1]
+
+
+def shrink(path: Path) -> None:
+    """색 수를 줄여 다시 저장한다. **화면이 단색 위주라 눈에 띄는 손실이 없다.**
+
+    `pngquant` 같은 도구를 안 쓰려고 `pillow` 로 한다 — 이미 개발 의존성에 있다.
+    """
+    from PIL import Image
+
+    with Image.open(path) as im:
+        rgb = im.convert("RGB")
+        rgb.quantize(colors=128, method=Image.Quantize.MEDIANCUT).save(
+            path, optimize=True
+        )
+
+
+def capture(url: str, out: Path, view: tuple[int, int], binary: str) -> None:
+    """**`--user-data-dir` 를 주지 않는다.** 빈 프로필을 새로 만들게 하면 Chrome 이
+    캡처를 마치고도 안 끝난다 — 실측으로 45초까지 기다려도 안 나왔고, 빼면 3초다.
+    그래도 안 끝나는 날이 있을 수 있으므로 시간 제한을 함께 건다.
+    """
+    subprocess.run(
+        [
+            binary,
+            "--headless=new",
+            "--disable-gpu",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-default-browser-check",
+            f"--force-device-scale-factor={SCALE}",
+            f"--window-size={view[0]},{view[1]}",
+            # 자료를 받아 그릴 때까지 기다린다. 안 주면 빈 화면이 잡힌다.
+            "--virtual-time-budget=8000",
+            f"--screenshot={out}",
+            url,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=90,
+    )
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+
+    binary = chrome()
+    if binary is None:
+        print("Chrome 을 못 찾았다. 다음 중 하나가 있어야 한다:", file=sys.stderr)
+        print("\n".join(f"  {p}" for p in CHROME), file=sys.stderr)
+        return 1
+
+    answer = "--answer" in sys.argv
+    out = OUT / ("site-answer.png" if answer else "site.png")
+    view = VIEW_ANSWER if answer else VIEW
+
+    server, port = serve()
+    try:
+        # 페이지에 결과를 켜는 주소가 없다. 체크박스를 미리 켠 사본을 임시로 두고
+        # 그것을 잡는다 — **원본을 고치지 않는다.**
+        name = "index.html"
+        if answer:
+            html = (SITE / "index.html").read_text(encoding="utf-8")
+            marked = html.replace('id="rev"', 'id="rev" checked', 1)
+            if marked == html:
+                print('index.html 에서 id="rev" 를 못 찾았다', file=sys.stderr)
+                return 1
+            name = "_answer.html"
+            (SITE / name).write_text(marked, encoding="utf-8")
+        try:
+            capture(f"http://127.0.0.1:{port}/{name}", out, view, binary)
+        finally:
+            if answer:
+                (SITE / name).unlink(missing_ok=True)
+    finally:
+        server.shutdown()
+
+    shrink(out)
+    print(f"{out.relative_to(ROOT)}  {view[0]}x{view[1]}  {out.stat().st_size:,} B")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
