@@ -69,6 +69,11 @@ USER_AGENT = "lol-balance-project/0.1 (personal research)"
 # 그만큼 기다려야 해서 오히려 느려진다.
 LIMITS: tuple[tuple[int, float], ...] = ((18, 1.0), (95, 120.0))
 
+# 저장 형식의 판. **1 은 칸이 좁았다** — 챔피언 · 승패 · 밴만 남기고 아이템 · 룬 ·
+# 성과를 버렸다. 같은 응답에 들어 있어 남기는 데 요청이 안 든다는 것을 뒤늦게 보고
+# 2 로 넓혔다(2026-09-18). 1 로 받은 1,625판은 `data/riot/v1/` 에 따로 둔다.
+SCHEMA = 2
+
 # 판정 기준 — **재기 전에 ADR 0010 에 적은 값이다.** 결과를 보고 바꾸지 않는다.
 MEAN_Z_LIMIT = 0.2
 SD_Z_LIMIT = 1.2
@@ -223,12 +228,42 @@ class RiotClient:
 
 @dataclass(frozen=True)
 class Pick:
-    """한 선수의 한 판. **선수가 누구인지는 남기지 않는다.**"""
+    """한 선수의 한 판. **선수가 누구인지는 남기지 않는다.**
+
+    `items` 는 경기가 끝났을 때의 일곱 칸이고 마지막이 장신구, 0 은 빈 칸이다 —
+    **최종 아이템이지 구매 이력이 아니다.** 판 것 · 다 쓴 것은 남지 않는다.
+    `runes` 는 (주 계열, 주 계열 룬 넷, 보조 계열, 보조 룬 둘, 능력치 셋) 순서다.
+    `minions` 와 `monsters` 를 더한 것이 CS 다.
+    """
 
     champion_id: int
     team_id: int
     position: str
     win: bool
+    items: tuple[int, ...] = ()
+    spells: tuple[int, ...] = ()
+    runes: tuple[int, ...] = ()
+    gold: int = 0
+    minions: int = 0
+    monsters: int = 0
+    damage: int = 0
+    kills: int = 0
+    deaths: int = 0
+    assists: int = 0
+
+
+@dataclass(frozen=True)
+class Origin:
+    """이 경기를 가져온 선수를 **어디서 · 언제** 뽑았나.
+
+    랭크는 **조회한 시각의** 것이다 — 그 경기를 치른 때의 랭크가 아니다. 그래서
+    이 표본은 「지금 에메랄드 이상인 선수에서 출발해 모은 경기」이지 「그때
+    에메랄드 이상이던 경기」가 아니다. 마스터 이상은 단계가 없어 `division` 이 빈다.
+    """
+
+    tier: str
+    division: str
+    looked_up: int  # epoch 초
 
 
 @dataclass(frozen=True)
@@ -246,6 +281,7 @@ class Match:
     start_ms: int
     duration_s: int
     player: int
+    origin: Origin
     picks: tuple[Pick, ...]
     bans: tuple[int, ...]
 
@@ -266,7 +302,44 @@ def patch_of(game_version: str) -> str:
     return f"{m.group(1)}_{m.group(2)}"
 
 
-def slim(payload: Mapping[str, Any], platform: str, player: int) -> Match | None:
+def _runes(perks: Mapping[str, Any] | None) -> tuple[int, ...]:
+    """(주 계열, 주 계열 룬 넷, 보조 계열, 보조 룬 둘, 능력치 셋). 모양이 다르면 빈 값."""
+    styles = {s.get("description"): s for s in (perks or {}).get("styles") or []}
+    primary, sub = styles.get("primaryStyle"), styles.get("subStyle")
+    if not primary or not sub:
+        return ()
+    shards = (perks or {}).get("statPerks") or {}
+    return (
+        int(primary["style"]),
+        *(int(s["perk"]) for s in primary.get("selections") or []),
+        int(sub["style"]),
+        *(int(s["perk"]) for s in sub.get("selections") or []),
+        *(int(shards.get(k, 0)) for k in ("offense", "flex", "defense")),
+    )
+
+
+def _pick(p: Mapping[str, Any]) -> Pick:
+    return Pick(
+        champion_id=int(p["championId"]),
+        team_id=int(p["teamId"]),
+        position=str(p.get("teamPosition") or ""),
+        win=bool(p["win"]),
+        items=tuple(int(p.get(f"item{i}", 0)) for i in range(7)),
+        spells=(int(p.get("summoner1Id", 0)), int(p.get("summoner2Id", 0))),
+        runes=_runes(p.get("perks")),
+        gold=int(p.get("goldEarned", 0)),
+        minions=int(p.get("totalMinionsKilled", 0)),
+        monsters=int(p.get("neutralMinionsKilled", 0)),
+        damage=int(p.get("totalDamageDealtToChampions", 0)),
+        kills=int(p.get("kills", 0)),
+        deaths=int(p.get("deaths", 0)),
+        assists=int(p.get("assists", 0)),
+    )
+
+
+def slim(
+    payload: Mapping[str, Any], platform: str, player: int, origin: Origin
+) -> Match | None:
     """매치 응답에서 필요한 칸만 남긴다. 셀 수 없는 판이면 None.
 
     **선수를 가리키는 칸(`puuid` · 이름 · 소환사 id)은 여기서 버린다.** 저장하는
@@ -283,15 +356,7 @@ def slim(payload: Mapping[str, Any], platform: str, player: int) -> Match | None
         return None
     if any(p.get("gameEndedInEarlySurrender") for p in participants):
         return None
-    picks = tuple(
-        Pick(
-            champion_id=int(p["championId"]),
-            team_id=int(p["teamId"]),
-            position=str(p.get("teamPosition") or ""),
-            win=bool(p["win"]),
-        )
-        for p in participants
-    )
+    picks = tuple(_pick(p) for p in participants)
     bans = tuple(
         int(b["championId"])
         for team in info.get("teams") or []
@@ -305,32 +370,64 @@ def slim(payload: Mapping[str, Any], platform: str, player: int) -> Match | None
         start_ms=int(info["gameStartTimestamp"]),
         duration_s=int(info["gameDuration"]),
         player=player,
+        origin=origin,
         picks=picks,
         bans=bans,
     )
 
 
 def dumps(match: Match) -> str:
-    """한 줄 JSON."""
+    """한 줄 JSON. 칸 이름을 적는다 — 위치로만 읽는 형식은 u.gg 에서 해독에 애먹었다."""
     return json.dumps(
         {
+            "v": SCHEMA,
             "id": match.match_id,
             "platform": match.platform,
+            "queue": QUEUE_ID,
             "version": match.version,
             "start": match.start_ms,
             "duration": match.duration_s,
             "player": match.player,
+            "origin": {
+                "tier": match.origin.tier,
+                "division": match.origin.division,
+                "looked_up": match.origin.looked_up,
+            },
             "picks": [
-                [p.champion_id, p.team_id, p.position, p.win] for p in match.picks
+                {
+                    "champion": p.champion_id,
+                    "team": p.team_id,
+                    "position": p.position,
+                    "win": p.win,
+                    "items": list(p.items),
+                    "spells": list(p.spells),
+                    "runes": list(p.runes),
+                    "gold": p.gold,
+                    "minions": p.minions,
+                    "monsters": p.monsters,
+                    "damage": p.damage,
+                    "kills": p.kills,
+                    "deaths": p.deaths,
+                    "assists": p.assists,
+                }
+                for p in match.picks
             ],
             "bans": list(match.bans),
         },
+        ensure_ascii=False,
         separators=(",", ":"),
     )
 
 
 def loads(line: str) -> Match:
+    """`dumps` 의 역. **다른 판의 형식은 거절한다** — 칸이 모자란 채로 섞이지 않게."""
     raw = json.loads(line)
+    if raw.get("v") != SCHEMA:
+        raise ValueError(
+            f"저장 형식 {raw.get('v')!r} — 지금은 {SCHEMA} 이다. "
+            "옛 형식(data/riot/v1)은 아이템 · 룬 칸이 없다"
+        )
+    origin = raw["origin"]
     return Match(
         match_id=raw["id"],
         platform=raw["platform"],
@@ -338,8 +435,25 @@ def loads(line: str) -> Match:
         start_ms=raw["start"],
         duration_s=raw["duration"],
         player=raw["player"],
+        origin=Origin(origin["tier"], origin["division"], origin["looked_up"]),
         picks=tuple(
-            Pick(int(c), int(t), str(pos), bool(w)) for c, t, pos, w in raw["picks"]
+            Pick(
+                champion_id=p["champion"],
+                team_id=p["team"],
+                position=p["position"],
+                win=p["win"],
+                items=tuple(p["items"]),
+                spells=tuple(p["spells"]),
+                runes=tuple(p["runes"]),
+                gold=p["gold"],
+                minions=p["minions"],
+                monsters=p["monsters"],
+                damage=p["damage"],
+                kills=p["kills"],
+                deaths=p["deaths"],
+                assists=p["assists"],
+            )
+            for p in raw["picks"]
         ),
         bans=tuple(int(c) for c in raw["bans"]),
     )
@@ -386,7 +500,9 @@ class Ladder:
 
     client: Getter
     platform: str
+    clock: Callable[[], float] = time.time
     _pages: dict[tuple[str, str, int], list[str]] = field(default_factory=dict)
+    _looked_up: dict[tuple[str, str, int], int] = field(default_factory=dict)
 
     def page(self, tier: str, division: str, number: int) -> list[str]:
         key = (tier, division, number)
@@ -396,7 +512,7 @@ class Ladder:
                 f"/lol/league/v4/entries/{QUEUE}/{tier}/{division}",
                 {"page": number},
             )
-            self._pages[key] = _puuids(entries or [])
+            self._keep(key, _puuids(entries or []))
         return self._pages[key]
 
     def apex(self, tier: str) -> list[str]:
@@ -405,8 +521,16 @@ class Ladder:
             league = self.client.get(
                 self.platform, f"/lol/league/v4/{tier}leagues/by-queue/{QUEUE}"
             )
-            self._pages[key] = _puuids((league or {}).get("entries") or [])
+            self._keep(key, _puuids((league or {}).get("entries") or []))
         return self._pages[key]
+
+    def looked_up(self, key: tuple[str, str, int]) -> int:
+        """그 쪽을 받은 시각 — 거기 적힌 랭크가 언제의 것인가."""
+        return self._looked_up[key]
+
+    def _keep(self, key: tuple[str, str, int], puuids: list[str]) -> None:
+        self._pages[key] = puuids
+        self._looked_up[key] = int(self.clock())
 
 
 def _puuids(entries: Iterable[Mapping[str, Any]]) -> list[str]:
@@ -442,16 +566,33 @@ def strata(ladder: Ladder) -> list[Stratum]:
     return out
 
 
-def draw_player(ladder: Ladder, groups: Sequence[Stratum], rng: random.Random) -> str:
-    """지금 에메랄드 이상인 선수 한 명을 **인원에 비례해** 무작위로 뽑는다."""
+@dataclass(frozen=True)
+class Drawn:
+    """뽑은 선수. `puuid` 는 여기까지만 간다 — 저장되는 것은 `origin` 이다."""
+
+    puuid: str
+    origin: Origin
+
+
+def draw_player(
+    ladder: Ladder, groups: Sequence[Stratum], rng: random.Random
+) -> Drawn | None:
+    """지금 에메랄드 이상인 선수 한 명을 **인원에 비례해** 무작위로 뽑는다.
+
+    단계마다 같은 수를 뽑지 않는다 — 그러면 사람이 적은 위쪽 단계가 실제보다 많이
+    뽑혀 가중치로 되돌려야 한다. 인원에 비례해 뽑으면 그대로 합쳐도 된다.
+    """
     stratum = rng.choices(groups, weights=[s.size for s in groups])[0]
     if stratum.division:
-        page = ladder.page(
-            stratum.tier, stratum.division, rng.randint(1, stratum.pages)
-        )
+        key = (stratum.tier, stratum.division, rng.randint(1, stratum.pages))
+        page = ladder.page(*key)
     else:
+        key = (stratum.tier, "", 1)
         page = ladder.apex(stratum.tier.lower())
-    return rng.choice(page) if page else ""
+    if not page:
+        return None
+    origin = Origin(stratum.tier, stratum.division, ladder.looked_up(key))
+    return Drawn(rng.choice(page), origin)
 
 
 def collect(
@@ -488,18 +629,18 @@ def collect(
     idle = 0
     misses = 0
     while collected < target:
-        puuid = draw_player(ladder, groups, rng)
-        if not puuid or puuid in drawn:
+        pick = draw_player(ladder, groups, rng)
+        if pick is None or pick.puuid in drawn:
             misses += 1
             if misses > 1000 or len(drawn) >= population:
                 log(f"[{platform}] 더 뽑을 선수가 없다 — 멈춘다")
                 break
             continue
         misses = 0
-        drawn.add(puuid)
+        drawn.add(pick.puuid)
         ids = client.get(
             route,
-            f"/lol/match/v5/matches/by-puuid/{puuid}/ids",
+            f"/lol/match/v5/matches/by-puuid/{pick.puuid}/ids",
             {
                 "queue": QUEUE_ID,
                 "startTime": window.start,
@@ -520,7 +661,7 @@ def collect(
         for match_id in rng.sample(fresh, min(PER_PLAYER, len(fresh))):
             seen.add(match_id)
             payload = client.get(route, f"/lol/match/v5/matches/{match_id}")
-            match = slim(payload, platform, player) if payload else None
+            match = slim(payload, platform, player, pick.origin) if payload else None
             if (
                 match is None
                 or match.patch != window.patch
