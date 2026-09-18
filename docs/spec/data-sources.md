@@ -600,6 +600,44 @@ Oracle    14.01     15.09
 
 ---
 
+## 5b. Riot API — 직접 집계 🔑 키 필요 (2026-09-18 추가)
+
+**키가 필요한 선택 경로다** — `.env` 의 `RIOT_API_KEY`(개인 키). 없어도 기존 결과는
+전부 나온다. 왜 하는지와 판정 기준은
+[ADR 0010](../adr/0010-riot-api-direct-aggregation.md).
+
+```
+랭킹 (플랫폼)      https://{kr|euw1|na1}.api.riotgames.com/lol/league/v4/entries/RANKED_SOLO_5x5/{EMERALD|DIAMOND}/{IV~I}?page={n}
+                  https://{플랫폼}.api.riotgames.com/lol/league/v4/{master|grandmaster|challenger}leagues/by-queue/RANKED_SOLO_5x5
+경기 목록 (권역)    https://{asia|europe|americas}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids?queue=420&startTime=&endTime=&count=100
+경기 (권역)        https://{권역}.api.riotgames.com/lol/match/v5/matches/{matchId}
+받는 것            ./scripts/fetch-riot   → data/riot/<패치>/<플랫폼>.jsonl  (+ .skip)
+견주는 것          ./scripts/run-riot-check <패치> …
+```
+
+**키는 헤더(`X-Riot-Token`)로만 보낸다.** 주소에 넣으면 로그와 오류 문구에 남는다.
+
+### 실측 (2026-09-18)
+
+| 항목 | 값 |
+| --- | --- |
+| 한도 | 응답 헤더 `X-App-Rate-Limit: 100:120,20:1` — 2분 100회 · 1초 20회. **호스트마다 따로 센다**(포털 문서). 세 플랫폼을 동시에 돌려 `429` 0회 |
+| 파이썬 기본 이름 | **403 · `error code: 1010`** — Cloudflare 가 `Python-urllib` 를 거절한다. 프로젝트 이름(`lol-balance-project/0.1`)을 밝히면 200 이다 |
+| 랭킹 한 쪽 | 205명 |
+| 마스터 리그 | 세 플랫폼 모두 **정확히 10,000명** — 응답 상한으로 보인다(미확인). 에메랄드 이상의 2~4% 라 뽑기 비중에 주는 영향은 작다 |
+| 에메랄드 이상 인원 | kr 565,556 · euw1 630,607 · na1 268,521 (단계별 쪽 수로 센 값) |
+| 한 판 | 필요한 칸만 남겨 한 줄 약 0.4 KB |
+
+**선수를 가리키는 칸은 저장하지 않는다.** `puuid` 는 경기 목록을 부를 때 메모리에만
+있고, 파일에는 「몇 번째로 뽑은 선수인가」라는 일련번호만 남는다.
+
+### 받은 키가 개인 키인지는 하루 뒤에 안다
+
+개발 키와 개인 키는 한도가 같아 응답만으로는 구분이 안 된다. **2026-09-19 이후에도
+200 이 오면 개인 키다** — 개발 키는 24시간마다 꺼진다.
+
+---
+
 ## 6. 공개 밸런스 기준 — **개발사가 적어 둔 문턱**
 
 **수집하는 데이터가 아니라 읽을 문서다.** 지금 저장소의 규칙 12개는 전부
