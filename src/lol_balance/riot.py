@@ -720,7 +720,13 @@ class Tally:
 
 
 def tally(matches: Iterable[Match]) -> Tally:
-    """판수를 센다. 밴은 칸마다 센다 — u.gg 밴 표도 칸 단위다(게임당 9.06밴)."""
+    """판수를 센다. **밴은 경기 단위다** — 한 경기에서 두 팀이 같은 챔피언을 밴해도 한 번.
+
+    처음에는 밴 칸을 그대로 셌다(ADR 0010). 그런데 `16_15` 를 u.gg 와 견주니 밴율만
+    계통으로 높았다. 세어 보니 **경기의 45.2% 에서 같은 챔피언이 두 번 밴**됐고,
+    칸으로 세면 9.635개/판인데 서로 다른 챔피언은 9.084종/판, u.gg 는 8.939 였다.
+    u.gg 가 경기 단위로 센다는 뜻이라 정의를 맞췄다(2026-09-20).
+    """
     t = Tally()
     for m in matches:
         t.games += 1
@@ -728,7 +734,7 @@ def tally(matches: Iterable[Match]) -> Tally:
             t.picks[p.champion_id] += 1
             if p.win:
                 t.wins[p.champion_id] += 1
-        for c in m.bans:
+        for c in set(m.bans):
             t.bans[c] += 1
     return t
 
@@ -785,7 +791,7 @@ def ranking(matches: Iterable[Match]) -> ChampionRanking:
             slot[5] += p.deaths
             slot[6] += p.assists
             slot[7] += p.minions + p.monsters
-        for champion in m.bans:
+        for champion in set(m.bans):  # 경기 단위 — 같은 챔피언을 두 팀이 밴해도 한 번
             bans[champion] += 1
     rows = tuple(
         ChampionRow(
@@ -872,7 +878,7 @@ def player_bootstrap(
             picks[i, col[p.champion_id]] += 1
             if p.win:
                 wins[i, col[p.champion_id]] += 1
-        for c in m.bans:
+        for c in set(m.bans):
             bans[i, col[c]] += 1
 
     if not players:

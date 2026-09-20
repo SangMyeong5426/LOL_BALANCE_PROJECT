@@ -586,6 +586,18 @@ def test_ranking_drops_games_without_a_position() -> None:
     assert ranking([good, odd]).games == 1
 
 
+def test_bans_are_counted_once_per_game() -> None:
+    """두 팀이 같은 챔피언을 밴해도 한 번이다 — u.gg 가 그렇게 센다."""
+    twice = payload("KR_9", bans=(11, 12, 13, 14, 15, 11, 16, 17, 18, 19))
+    m = slim(twice, "kr", 1, ORIGIN)
+    assert m is not None and m.bans.count(11) == 2  # 저장은 칸 그대로
+
+    t = tally([m])
+
+    assert t.bans[11] == 1
+    assert rates(t).ban[11] == 1.0
+
+
 def test_ugg_rates_use_the_panel_formula() -> None:
     ranking = parse_champion_ranking(
         [
