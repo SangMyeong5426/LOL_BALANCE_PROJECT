@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import random
@@ -124,14 +125,25 @@ class RateLimiter:
 
 
 def _urlopen(request: urllib.request.Request, timeout: float) -> Response:
-    """요청 한 건. 연결 실패는 상태 0 으로 돌려 재시도에 태운다."""
+    """요청 한 건. **받다가 끊긴 것도 상태 0 으로 돌려 재시도에 태운다.**
+
+    처음에는 연결 실패(`URLError`)만 잡았다. 그런데 맥이 자는 동안 전송이 끊기면
+    `http.client.IncompleteRead` 가 올라와 수집 스레드가 통째로 죽었다 — `16_15`
+    수집이 1,612판에서 그렇게 멈췄다(2026-09-18). HTTP 층의 예외와 소켓 오류
+    (`OSError`)를 함께 잡는다.
+    """
     try:
         with urllib.request.urlopen(request, timeout=timeout) as r:
             return int(r.status), dict(r.headers.items()), r.read()
     except urllib.error.HTTPError as exc:
         headers = dict(exc.headers.items()) if exc.headers else {}
-        return exc.code, headers, exc.read()
-    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        try:
+            body = exc.read()
+        except (OSError, http.client.HTTPException):
+            body = b""
+        return exc.code, headers, body
+    except (OSError, http.client.HTTPException):
+        # URLError · TimeoutError · ConnectionError 는 모두 OSError 다
         return 0, {}, b""
 
 
@@ -204,7 +216,13 @@ class RiotClient:
             status, headers, body = self._opener(request, self._timeout)
             self.requests += 1
             if status == 200:
-                return json.loads(body)
+                try:
+                    return json.loads(body)
+                except ValueError:
+                    # 잘린 응답은 HTTP 로는 성공이다. 다시 받아 본다
+                    self._sleep(min(2.0**attempt, 60.0))
+                    last = "잘린 응답"
+                    continue
             if status == 404:
                 return None
             if status in (401, 403):
