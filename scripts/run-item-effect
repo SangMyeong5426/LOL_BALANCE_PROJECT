@@ -1,0 +1,359 @@
+#!/usr/bin/env python3
+"""주요 아이템이 바뀐 챔피언의 승률이 움직였나 — 그리고 다음 패치에 조정됐나.
+
+    ./scripts/run-item-effect            # 직접 집계가 이어진 패치 쌍 전부
+    ./scripts/run-item-effect 16_16      # 한 쌍만 (16_15 → 16_16)
+
+[ADR 0011](../docs/adr/0011-champion-item-usage.md) 의 경고가 **값을 하는지** 보는
+자리다. 두 가지를 잰다.
+
+    1. 앞 패치의 주요 아이템이 이번 패치에 바뀐 챔피언의 승률 변화
+    2. 그 챔피언이 **다음** 패치에 조정된 비율
+
+## 첫 판을 검토받고 고친 것 (2026-09-20)
+
+첫 판은 「바뀐 아이템을 쓴 챔피언 vs 그 외」의 평균 차이 하나만 냈다. 독립 재계산은
+숫자를 그대로 재현했지만 설계에서 네 가지가 걸렸고, 여기서 전부 다룬다.
+
+| 걸린 것 | 지금 |
+| --- | --- |
+| 「바뀌었다」에 방향이 없었다 — 20종 중 17종은 아이템이 **세진** 쪽이었다 | 아이템이 세진 무리와 약해진 무리를 **따로** 낸다 |
+| 그 패치에 **직접 조정된** 챔피언이 양쪽에 섞였다 (Smolder −10%p 가 무리 평균의 1/3) | 직접 조정된 챔피언을 뺀 것을 **본 결과**로 낸다 |
+| `16_15` 는 처음 2.5일에 60% 가 몰려 있어, 아이템 변경이 없는 **같은 패치 안**에서도 비슷한 차이가 났다 | 날짜마다 같은 무게를 주고(**날짜 균등**), 같은 패치를 반으로 갈라 잰 **위약 비교**를 옆에 낸다 |
+| 챔피언당 100~500판이면 표준오차가 4~5%p 라 3~5%p 아래는 못 가른다 | 해석적 표준오차와 **가를 수 있는 최소 차이**를 적는다 |
+
+**인과가 아니다.** 같은 패치의 다른 변경이 섞여 있을 수 있다. 그리고 이 설계가 가를
+수 있는 차이보다 아이템 하나가 낼 법한 차이가 훨씬 작다 — 「구분 안 된다」는 가설과
+무관하게 나오는 결과다. 그 사실을 숫자로 적는다.
+
+키가 필요 없다 — 받아 둔 것을 읽기만 한다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from lol_balance.assemble import adjusted_in  # noqa: E402
+from lol_balance.builds import (  # noqa: E402
+    CoreItemChange,
+    core_item_changes,
+    finished_items,
+    item_usage,
+    load_items,
+)
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.panel import champion_names, patch_index, previous_patch  # noqa: E402
+from lol_balance.riot import Match, loads  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+RIOT = ROOT / "data" / "riot"
+ITEMS = ROOT / "data" / "items"
+NOTES = ROOT / "data" / "patchnotes"
+DDRAGON = ROOT / "data" / "ddragon"
+
+# 두 패치 다 이만큼 나온 챔피언만 본다. 승률 차이를 말하려면 양쪽에 필요하다.
+MIN_GAMES = 100
+DRAWS = 20_000
+# 무리가 이보다 작으면 평균을 말하지 않는다.
+MIN_GROUP = 3
+# 80% 검정력 · 양측 5% 에서 가를 수 있는 최소 차이 = 이 배수 × 표준오차
+POWER_FACTOR = 2.8
+
+
+def collected() -> list[str]:
+    return sorted(
+        (p.name for p in RIOT.iterdir() if p.is_dir() and p.name[:1].isdigit()),
+        key=patch_index,
+    )
+
+
+def read(patch: str) -> list[Match]:
+    return [
+        loads(line)
+        for path in sorted((RIOT / patch).glob("*.jsonl"))
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
+
+
+def names() -> dict[int, str]:
+    newest = sorted(
+        (p for p in DDRAGON.glob("*.json") if p.stem[:1].isdigit()),
+        key=lambda p: tuple(int(x) for x in p.stem.split(".")),
+    )[-1]
+    return champion_names(json.loads(newest.read_text())["data"])
+
+
+def adjusted(patch: str) -> frozenset[str]:
+    return adjusted_in(patch, NOTES) | adjusted_in(patch, NOTES / "live")
+
+
+def day_of(m: Match) -> str:
+    return datetime.fromtimestamp(m.start_ms / 1000, UTC).strftime("%Y-%m-%d")
+
+
+# ── 승률 — 날짜 균등 ────────────────────────────────────────────────────
+
+
+class Rate:
+    """챔피언 하나의 승률과 표준오차. 판마다 무게를 줄 수 있다."""
+
+    def __init__(self) -> None:
+        self.wins = 0.0
+        self.weight = 0.0
+        self.games = 0
+
+    def add(self, win: bool, weight: float) -> None:
+        self.wins += weight * win
+        self.weight += weight
+        self.games += 1
+
+    @property
+    def value(self) -> float:
+        return self.wins / self.weight
+
+    @property
+    def se(self) -> float:
+        """이항 표준오차. 무게를 줘도 판수로 근사한다 — 보수적인 쪽이다."""
+        p = self.value
+        return math.sqrt(p * (1 - p) / self.games) if self.games else float("nan")
+
+
+def win_rates(matches: Iterable[Match], equal_days: bool) -> dict[int, Rate]:
+    """챔피언마다 승률. `equal_days` 면 **날짜마다 같은 무게**를 준다.
+
+    수집이 어떤 날에 몰려 있으면(16_15 는 처음 2.5일에 60%) 그 날의 메타가 패치
+    전체를 대표해 버린다. 날짜를 균등하게 놓으면 그 쏠림이 사라진다.
+    """
+    games = list(matches)
+    per_day = Counter(day_of(m) for m in games)
+    out: defaultdict[int, Rate] = defaultdict(Rate)
+    for m in games:
+        w = 1.0 / per_day[day_of(m)] if equal_days else 1.0
+        for p in m.picks:
+            out[p.champion_id].add(p.win, w)
+    return dict(out)
+
+
+# ── 무리 비교 ──────────────────────────────────────────────────────────
+
+
+def signed(changes: Sequence[CoreItemChange]) -> dict[int, str]:
+    """챔피언 → 주요 아이템이 어느 쪽으로 바뀌었나 (buff · nerf · mixed).
+
+    골드가 오르면 약해진 것, 스탯이 오르면 세진 것이다. 한 챔피언의 주요 아이템이
+    양쪽으로 바뀌었으면 mixed 다.
+    """
+    seen: dict[int, set[str]] = defaultdict(set)
+    for c in changes:
+        for x in c.changes:
+            if x.before is None or x.after is None or x.before == x.after:
+                continue
+            up = x.after > x.before
+            if x.field == "gold":
+                seen[c.champion_id].add("nerf" if up else "buff")
+            else:
+                seen[c.champion_id].add("buff" if up else "nerf")
+    return {c: (next(iter(s)) if len(s) == 1 else "mixed") for c, s in seen.items()}
+
+
+def gap(
+    a: Sequence[float], b: Sequence[float], seed: int
+) -> tuple[float, float, float]:
+    """두 무리의 평균 차이와 95% 구간. **챔피언을 재표본한다.**"""
+    rng = np.random.default_rng(seed)
+    first, second = np.array(a), np.array(b)
+    draws = rng.integers(0, len(first), (DRAWS, len(first)))
+    other = rng.integers(0, len(second), (DRAWS, len(second)))
+    spread = first[draws].mean(axis=1) - second[other].mean(axis=1)
+    low, high = np.percentile(spread, [2.5, 97.5])
+    return float(first.mean() - second.mean()), float(low), float(high)
+
+
+def analytic_se(a_se: Sequence[float], b_se: Sequence[float]) -> float:
+    """무리 평균 차이의 해석적 표준오차 — 챔피언마다의 이항 오차를 합친 것."""
+    return math.sqrt(
+        sum(s * s for s in a_se) / len(a_se) ** 2
+        + sum(s * s for s in b_se) / len(b_se) ** 2
+    )
+
+
+def hypergeom_at_most(k: int, n: int, hits: int, total: int) -> float:
+    """총 `total` 중 `hits` 가 조정됐을 때, `n` 을 뽑아 조정이 `k` 이하일 확률."""
+    return sum(
+        math.comb(hits, i) * math.comb(total - hits, n - i) / math.comb(total, n)
+        for i in range(0, min(k, n, hits) + 1)
+    )
+
+
+def compare(
+    label: str,
+    hit: list[int],
+    rest: list[int],
+    old: dict[int, Rate],
+    new: dict[int, Rate],
+    seed: int,
+) -> None:
+    if len(hit) < MIN_GROUP or len(rest) < MIN_GROUP:
+        print(
+            f"  {label:<24}{len(hit):>3}종 — 무리가 {MIN_GROUP}종이 안 돼 견주지 않는다"
+        )
+        return
+
+    def moved(ids: list[int]) -> list[float]:
+        return [(new[c].value - old[c].value) * 100 for c in ids]
+
+    def delta_se(ids: list[int]) -> list[float]:
+        return [math.sqrt(new[c].se ** 2 + old[c].se ** 2) * 100 for c in ids]
+
+    diff, low, high = gap(moved(hit), moved(rest), seed)
+    least = POWER_FACTOR * analytic_se(delta_se(hit), delta_se(rest))
+    verdict = "0 을 지난다" if low <= 0 <= high else "0 을 안 지난다"
+    print(
+        f"  {label:<24}{len(hit):>3}종 {np.mean(moved(hit)):+.2f}%p · 그 외 {len(rest):>3}종"
+        f" {np.mean(moved(rest)):+.2f}%p · 차이 {diff:+.2f}%p [{low:+.2f}, {high:+.2f}]"
+        f" {verdict} · 가를 수 있는 최소 차이 {least:.1f}%p"
+    )
+
+
+def span(games: list[Match]) -> str:
+    """수집이 어느 날에 몰려 있나."""
+    days = Counter(day_of(m) for m in games)
+    top = max(days.values())
+    players = len({(m.platform, m.player) for m in games})
+    return (
+        f"{min(days)} ~ {max(days)} · {len(days)}일 · 하루 최대 {top:,}판"
+        f" ({top / len(games):.0%}) · 뽑은 선수 {players:,}명"
+    )
+
+
+def pair(patch: str, seed: int, champion: dict[int, str]) -> None:
+    before = previous_patch(patch)
+    if before is None or before not in collected():
+        print(f"## {patch}: 앞 패치의 직접 집계가 없다\n")
+        return
+    files = [ITEMS / f"{p.replace('_', '.')}.1.json" for p in (before, patch)]
+    if not all(f.exists() for f in files):
+        print(f"## {before} → {patch}: 아이템 스냅샷이 없다\n")
+        return
+    (old_items, evolved), (new_items, _) = (load_items(f) for f in files)
+
+    old_games, new_games = read(before), read(patch)
+    usage = item_usage(old_games, finished_items(old_items), evolved=evolved)
+    direction = signed(core_item_changes(usage, old_items, new_items))
+    flagged = set(direction)
+
+    print(f"## {before} → {patch} — {len(old_games):,}판 → {len(new_games):,}판")
+    print(f"  {before} 창  {span(old_games)}")
+    print(f"  {patch} 창  {span(new_games)}")
+
+    old_w, new_w = win_rates(old_games, True), win_rates(new_games, True)
+    both = [
+        c
+        for c in old_w
+        if c in new_w and old_w[c].games >= MIN_GAMES and new_w[c].games >= MIN_GAMES
+    ]
+    dropped = [champion.get(c, str(c)) for c in flagged if c not in both]
+    same = {c for c in both if champion.get(c, "") in adjusted(patch)}
+    print(
+        f"  두 패치 다 {MIN_GAMES}판 넘는 챔피언 {len(both)}종 · 주요 아이템이 바뀐"
+        f" {len(flagged)}종 (판수 모자라 빠짐 {len(dropped)}: {', '.join(dropped) or '없음'})"
+        f" · {patch} 에 직접 조정된 {len(same)}종은 본 결과에서 뺀다"
+    )
+    if not flagged:
+        print("  아이템 값이 안 바뀌어 견줄 것이 없다\n")
+        return
+
+    clean = [c for c in both if c not in same]
+    hit = [c for c in clean if c in flagged]
+    rest = [c for c in clean if c not in flagged]
+    print("\n  본 결과 — 날짜 균등 · 직접 조정 제외 (승률 변화)")
+    for label, want in (
+        ("주요 아이템이 세진 챔피언", "buff"),
+        ("주요 아이템이 약해진 챔피언", "nerf"),
+        ("양쪽으로 바뀐 챔피언", "mixed"),
+    ):
+        compare(
+            label, [c for c in hit if direction[c] == want], rest, old_w, new_w, seed
+        )
+    compare("바뀐 챔피언 전부(방향 무시)", hit, rest, old_w, new_w, seed)
+
+    old_u, new_u = win_rates(old_games, False), win_rates(new_games, False)
+    hit_all = [c for c in both if c in flagged]
+    rest_all = [c for c in both if c not in flagged]
+    print("\n  참고 — 판 단위 · 직접 조정 포함 (첫 판이 낸 숫자)")
+    compare("바뀐 챔피언 전부(방향 무시)", hit_all, rest_all, old_u, new_u, seed)
+
+    # 위약 — 아이템이 안 바뀐 같은 패치 안에서 앞 반 → 뒤 반. 비슷한 차이가 나오면
+    # 그것은 아이템이 아니라 시간과 표본이 만든 것이다.
+    cut = sorted(m.start_ms for m in old_games)[len(old_games) // 2]
+    early = win_rates([m for m in old_games if m.start_ms < cut], False)
+    late = win_rates([m for m in old_games if m.start_ms >= cut], False)
+    half = MIN_GAMES // 2
+    ok = [
+        c
+        for c in hit_all + rest_all
+        if c in early and c in late and early[c].games >= half and late[c].games >= half
+    ]
+    print(
+        f"\n  위약 — {before} 안에서 앞 반 → 뒤 반 (아이템 변경 없음 · 판 단위 · {half}판 이상)"
+    )
+    compare(
+        "바뀐 챔피언 전부(방향 무시)",
+        [c for c in ok if c in flagged],
+        [c for c in ok if c not in flagged],
+        early,
+        late,
+        seed,
+    )
+
+    nxt = f"{patch.split('_')[0]}_{int(patch.split('_')[1]) + 1}"
+    later = adjusted(nxt)
+    if later:
+        k = sum(champion.get(c, "") in later for c in hit_all)
+        hits = sum(champion.get(c, "") in later for c in both)
+        p_low = hypergeom_at_most(k, len(hit_all), hits, len(both))
+        print(
+            f"\n  {nxt} 에서 조정된 비율 — 아이템 바뀐 쪽 {k}/{len(hit_all)}"
+            f" · 그 외 {hits - k}/{len(rest_all)}"
+            f" · 무작위라면 바뀐 쪽이 {k}종 이하일 확률 {p_low:.3f}"
+        )
+    print()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("patches", nargs="*", help="예: 16_16 16_17")
+    args = parser.parse_args()
+
+    have = collected()
+    pairs = args.patches or [p for p in have if previous_patch(p) in have]
+    if not pairs:
+        print("이어진 패치 쌍이 없다. ./scripts/fetch-riot 을 먼저 돌린다")
+        return 1
+    champion = names()
+    seed = load_settings().seed
+    print(f"직접 집계 {', '.join(have)} · 시드 {seed} · 부트스트랩 {DRAWS:,}회\n")
+    for patch in pairs:
+        pair(patch, seed, champion)
+    print("**인과가 아니다.** 같은 패치의 다른 변경이 섞여 있을 수 있다.")
+    print(
+        f"**가를 수 있는 최소 차이**는 80% 검정력 · 양측 5% 에서 {POWER_FACTOR} × 해석적"
+        " 표준오차다. 그 아래 차이는 이 표본으로 못 본다."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
