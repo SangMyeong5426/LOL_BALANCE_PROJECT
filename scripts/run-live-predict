@@ -37,10 +37,10 @@ from lol_balance.builds import (  # noqa: E402
     core_item_changes,
     finished_items,
     item_usage,
+    load_items,
 )
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.direction import Direction  # noqa: E402
-from lol_balance.items import read_items  # noqa: E402
 from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
     MIN_MATCHES,
@@ -108,8 +108,8 @@ def shaken(patch: str) -> dict[str, str]:
     files = [ITEMS / f"{p.replace('_', '.')}.1.json" for p in (previous, patch)]
     if not all(f.exists() for f in files) or previous not in collected():
         return {}
-    before, after = (read_items(f) for f in files)
-    usage = item_usage(read(previous), finished_items(before))
+    (before, evolved), (after, _) = (load_items(f) for f in files)
+    usage = item_usage(read(previous), finished_items(before), evolved=evolved)
     name = names_at(patch)
     item = {int(k): v.get("name", k) for k, v in after.items()}
     return {

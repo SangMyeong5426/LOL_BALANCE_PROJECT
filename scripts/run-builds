@@ -30,8 +30,8 @@ from lol_balance.builds import (  # noqa: E402
     core_item_changes,
     finished_items,
     item_usage,
+    load_items,
 )
-from lol_balance.items import read_items  # noqa: E402
 from lol_balance.panel import champion_names  # noqa: E402
 from lol_balance.patchnotes import release_date  # noqa: E402
 from lol_balance.riot import Match, loads  # noqa: E402
@@ -73,9 +73,10 @@ def boundary(patch: str) -> int | None:
 
 
 def usage_of(patch: str) -> tuple[dict[int, Usage], dict[str, dict], int | None]:
-    items = read_items(ITEMS / f"{version(patch)}.json")
+    items, evolved = load_items(ITEMS / f"{version(patch)}.json")
     cut = boundary(patch)
-    return item_usage(read(patch), finished_items(items), cut), items, cut
+    usage = item_usage(read(patch), finished_items(items), cut, evolved=evolved)
+    return usage, items, cut
 
 
 def adjusted(patch: str) -> frozenset[str]:
