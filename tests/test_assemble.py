@@ -23,7 +23,7 @@ from lol_balance.assemble import (
     version,
     version_short,
 )
-from lol_balance.panel import PATCH_SEQUENCE, patch_index
+from lol_balance.panel import PATCH_SEQUENCE, patch_index, previous_patch
 from lol_balance.ugg import ChampionRanking, ChampionRow
 
 
@@ -292,3 +292,13 @@ def test_rows_from_ranking_uses_the_previous_patch_for_trend() -> None:
     assert ahri.d_win_rate == pytest.approx(-0.1)  # 0.6 → 0.5
     assert ahri.adjusted_next is True
     assert next(r for r in later if r.champion == "Zed").adjusted_next is False
+
+
+def test_previous_patch_follows_the_table_then_counts_down() -> None:
+    """`14_1` 의 앞은 `13_24` 다 — 산술로 `14_0` 을 만들면 안 된다."""
+    assert previous_patch("14_1") == "13_24"
+    assert previous_patch(PATCH_SEQUENCE[0]) is None
+    assert previous_patch("16_16") == PATCH_SEQUENCE[-1]
+    assert previous_patch("16_18") == "16_17"
+    with pytest.raises(KeyError):
+        previous_patch("17_2")
