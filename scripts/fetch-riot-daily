@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""현재 패치의 직접 집계를 하루치 더 쌓는다 — 예약 작업이 매일 부른다.
+
+    ./scripts/fetch-riot-daily            # 플랫폼마다 300판 더
+    ./scripts/fetch-riot-daily --add 500
+
+**키가 필요하다**(ADR 0010). 현재 패치는 Data Dragon 의 가장 새 버전으로 정한다
+(`16.18.1` → `16_18`). 창은 지난 26시간 — 하루에 한 번 돌리므로 두 시간을 겹쳐
+놓치는 틈을 없앤다. 겹친 경기는 경기 ID 로 걸러진다.
+
+패치가 바뀐 날에는 창 안에 앞 패치 경기가 섞인다. `gameVersion` 으로 걸러
+`.skip` 으로 가므로 섞이지 않는다.
+
+예약은 `./scripts/install-riot-daily` 가 건다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from lol_balance.fetch import get_with_retry  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+VERSIONS = "https://ddragon.leagueoflegends.com/api/versions.json"
+WINDOW_HOURS = 26
+
+
+def current_patch() -> str:
+    """Data Dragon 의 가장 새 버전 → 우리 패치 표기."""
+    versions = json.loads(get_with_retry(VERSIONS, validate=json.loads).decode())
+    major, minor, *_ = versions[0].split(".")
+    return f"{major}_{minor}"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--add", type=int, default=300, help="플랫폼마다 더 받을 판수")
+    args = parser.parse_args()
+
+    patch = current_patch()
+    since = datetime.fromtimestamp(time.time() - WINDOW_HOURS * 3600, UTC)
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%MZ")
+    print(f"=== {stamp} · 현재 패치 {patch} · 지난 {WINDOW_HOURS}시간", flush=True)
+    return subprocess.call(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "fetch-riot"),
+            patch,
+            "--since",
+            since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "--add",
+            str(args.add),
+        ],
+        cwd=ROOT,
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

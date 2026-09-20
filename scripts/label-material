@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction  # noqa: E402
-from lol_balance.panel import PATCH_SEQUENCE, next_patch  # noqa: E402
+from lol_balance.panel import next_patch, patch_index  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
@@ -37,10 +37,22 @@ def version(patch: str) -> str:
     return patch.replace("_", ".") + ".1"
 
 
+def previous(patch: str) -> str:
+    """바로 앞 패치 이름. **순서표 밖 패치도 다룬다** — 직접 집계가 `16_15` 뒤를 본다."""
+    major, minor = (int(x) for x in patch.split("_"))
+    return f"{major}_{minor - 1}"
+
+
+def note_path(patch: str) -> Path:
+    """그 패치 노트. 우리 구간 밖은 `live/` 에 있다(fetch-patchnotes)."""
+    name = f"{version(patch)}.html"
+    here = NOTES / name
+    return here if here.exists() else NOTES / "live" / name
+
+
 def automatic(patch: str) -> dict[str, str]:
     """그 패치에서 Data Dragon 이 방향을 아는 챔피언."""
-    i = PATCH_SEQUENCE.index(patch)
-    before = DDRAGON / f"{version(PATCH_SEQUENCE[i - 1])}.json"
+    before = DDRAGON / f"{version(previous(patch))}.json"
     after = DDRAGON / f"{version(patch)}.json"
     if not (before.exists() and after.exists()):
         return {}
@@ -60,7 +72,7 @@ def automatic(patch: str) -> dict[str, str]:
 def targets() -> list[str]:
     """예측 대상 패치 — 통계가 있는 패치의 **다음** 패치."""
     rows = read_panel(ROOT / "data" / "panel.sqlite")
-    predicted = sorted({r.patch for r in rows}, key=PATCH_SEQUENCE.index)
+    predicted = sorted({r.patch for r in rows}, key=patch_index)
     # **순서 끝은 다음이 없다.** 그냥 `+1` 하면 패널이 끝까지 차는 순간 죽는다.
     return [n for p in predicted if (n := next_patch(p)) is not None]
 
@@ -77,11 +89,11 @@ def show_sample(count: int) -> None:
     seed = load_settings().seed
     picked = sorted(
         random.Random(seed).sample(pool, min(count, len(pool))),
-        key=PATCH_SEQUENCE.index,
+        key=patch_index,
     )
     print(f"시드 {seed} · 남은 {len(pool)}패치에서 {len(picked)}개\n")
     for patch in picked:
-        blocks = champion_changes((NOTES / f"{version(patch)}.html").read_bytes())
+        blocks = champion_changes((note_path(patch)).read_bytes())
         champions = {b.champion for b in blocks}
         auto = automatic(patch)
         print(
@@ -94,7 +106,7 @@ def show_sample(count: int) -> None:
 def show_coverage() -> None:
     print(f"{'패치':8}{'챔피언':>7}{'자동':>6}{'비율':>8}")
     for patch in targets():
-        blocks = champion_changes((NOTES / f"{version(patch)}.html").read_bytes())
+        blocks = champion_changes((note_path(patch)).read_bytes())
         champions = {b.champion for b in blocks}
         auto = automatic(patch)
         hit = len(champions & set(auto))
@@ -102,7 +114,7 @@ def show_coverage() -> None:
 
 
 def show_patch(patch: str) -> None:
-    blocks = champion_changes((NOTES / f"{version(patch)}.html").read_bytes())
+    blocks = champion_changes((note_path(patch)).read_bytes())
     auto = automatic(patch)
     by_champion: dict[str, list] = {}
     for block in blocks:

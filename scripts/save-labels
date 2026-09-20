@@ -21,7 +21,6 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction, drop_mass_changes  # noqa: E402
 from lol_balance.groundtruth import DirectionLabel, compare, write_labels  # noqa: E402
-from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 
 OUT = ROOT / "ground_truth" / "directions"
@@ -30,6 +29,19 @@ VALID = ("nerf", "buff", "mixed", "adjust")
 
 def version(patch: str) -> str:
     return patch.replace("_", ".") + ".1"
+
+
+def previous(patch: str) -> str:
+    """바로 앞 패치 이름. **순서표 밖 패치도 다룬다** — 직접 집계가 `16_15` 뒤를 본다."""
+    major, minor = (int(x) for x in patch.split("_"))
+    return f"{major}_{minor - 1}"
+
+
+def note_path(patch: str) -> Path:
+    """그 패치 노트. 우리 구간 밖은 `live/` 에 있다(fetch-patchnotes)."""
+    name = f"{version(patch)}.html"
+    here = ROOT / "data" / "patchnotes" / name
+    return here if here.exists() else ROOT / "data" / "patchnotes" / "live" / name
 
 
 def released_in(patch: str) -> set[str]:
@@ -41,24 +53,24 @@ def released_in(patch: str) -> set[str]:
     빠뜨린 것과 구분해야 한다 — 라벨을 안 붙인 챔피언을 그냥 통과시키면
     어려운 것을 조용히 건너뛰게 된다.
     """
-    i = PATCH_SEQUENCE.index(patch)
+
     after = json.loads((ROOT / f"data/ddragon/{version(patch)}.json").read_bytes())[
         "data"
     ]
     before = json.loads(
-        (ROOT / f"data/ddragon/{version(PATCH_SEQUENCE[i - 1])}.json").read_bytes()
+        (ROOT / f"data/ddragon/{version(previous(patch))}.json").read_bytes()
     )["data"]
     fresh = set(standard_champions(after)) - set(standard_champions(before))
     return {after[cid].get("name", cid) for cid in fresh}
 
 
 def automatic(patch: str) -> dict[str, str]:
-    i = PATCH_SEQUENCE.index(patch)
+
     after = json.loads((ROOT / f"data/ddragon/{version(patch)}.json").read_bytes())[
         "data"
     ]
     before = json.loads(
-        (ROOT / f"data/ddragon/{version(PATCH_SEQUENCE[i - 1])}.json").read_bytes()
+        (ROOT / f"data/ddragon/{version(previous(patch))}.json").read_bytes()
     )["data"]
     standard = standard_champions(after)
     names = {k: v.get("name", k) for k, v in standard.items()}
@@ -81,9 +93,7 @@ def main() -> int:
         return 1
     patch = sys.argv[1]
 
-    blocks = champion_changes(
-        (ROOT / f"data/patchnotes/{version(patch)}.html").read_bytes()
-    )
+    blocks = champion_changes(note_path(patch).read_bytes())
     evidence: dict[str, list[str]] = {}
     for block in blocks:
         evidence.setdefault(block.champion, []).extend(block.lines)

@@ -2,6 +2,7 @@
 """Data Dragon 에서 아이템 수치 스냅샷을 받는다.
 
     ./scripts/fetch-items [--all]
+    ./scripts/fetch-items 16.16.1 16.17.1 16.18.1   # 준 버전만
 
 챔피언과 같은 CDN, 같은 버전 체계다. **새 출처가 아니므로 지역·티어가 섞일
 여지가 없다** — 아이템은 애초에 지역별로 다르지 않다.
@@ -42,11 +43,17 @@ def in_scope(version: str) -> bool:
 
 def main() -> int:
     take_all = "--all" in sys.argv
+    # 버전을 주면 그것만 받는다 — 우리 구간 뒤 패치(직접 집계, ADR 0011)를 볼 때
+    wanted = [a for a in sys.argv[1:] if not a.startswith("-")]
     versions = json.loads(
         get_with_retry(f"{BASE}/api/versions.json", validate=json.loads).decode()
     )
+    unknown = sorted(set(wanted) - set(versions))
+    if unknown:
+        print(f"Data Dragon 에 없는 버전: {unknown}")
+        return 1
     targets = sorted(
-        set(versions if take_all else [v for v in versions if in_scope(v)])
+        set(wanted or (versions if take_all else [v for v in versions if in_scope(v)]))
     )
     print(f"대상 {len(targets)}개 버전 (전체 {len(versions)}개 중)", flush=True)
 
