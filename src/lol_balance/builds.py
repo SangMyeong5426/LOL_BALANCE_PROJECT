@@ -21,12 +21,20 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from lol_balance.items import FINISHED_GOLD, ItemChange, diff_items
+from lol_balance.items import (
+    FINISHED_GOLD,
+    SUMMONERS_RIFT,
+    ItemChange,
+    diff_items,
+    read_items,
+)
 from lol_balance.riot import Match
 
 # 최종 아이템 일곱 칸 중 마지막이 장신구다. 빌드가 아니라 시야 도구라 뺀다.
@@ -48,6 +56,37 @@ def finished_items(items: Mapping[str, Any]) -> frozenset[int]:
         for key, entry in items.items()
         if entry.get("gold", {}).get("total", 0) >= FINISHED_GOLD
     )
+
+
+def load_items(path: Path) -> tuple[dict[str, Any], dict[int, int]]:
+    """한 버전의 `item.json` → (협곡·구매 가능 표, 진화형 되돌림표).
+
+    앞은 `items.read_items` 그대로이고, 뒤는 그 표가 걸러 낸 진화형에서 만든다.
+    사용률을 셀 때는 둘이 같이 있어야 한다.
+    """
+    raw = json.loads(path.read_bytes())["data"]
+    return read_items(path), evolved_forms(raw)
+
+
+def evolved_forms(data: Mapping[str, Any]) -> dict[int, int]:
+    """진화한 아이템 → 원래 아이템. `item.json` 의 `data` 통째를 받는다.
+
+    Manamune 은 게임 중에 Muramana 로 바뀐다. **Muramana 는 살 수 없어서**
+    `read_items` 가 걸러 내고, 경기가 끝났을 때 인벤토리에는 Muramana 만 있다.
+    그대로 두면 Ezreal 의 Manamune 사용률이 3% 로 나온다 — 실제로는 83% 가
+    Muramana 를 들고 있었다(2026-09-20 발견, `16_15` 에서 13 챔피언·아이템 쌍이
+    이것 때문에 20% 문턱 아래로 떨어졌다).
+
+    Data Dragon 은 진화형에 `specialRecipe` 로 원래 아이템을 적어 둔다. 협곡에서
+    살 수 없고 그 칸이 있는 것을 원래 아이템으로 되돌린다.
+    """
+    return {
+        int(key): int(entry["specialRecipe"])
+        for key, entry in data.items()
+        if entry.get("maps", {}).get(SUMMONERS_RIFT)
+        and not entry.get("gold", {}).get("purchasable")
+        and entry.get("specialRecipe")
+    }
 
 
 @dataclass(frozen=True)
@@ -83,23 +122,29 @@ def item_usage(
     matches: Iterable[Match],
     finished: frozenset[int],
     before_ms: int | None = None,
+    evolved: Mapping[int, int] | None = None,
 ) -> dict[int, Usage]:
     """챔피언마다 완성템 사용을 센다.
 
     `before_ms` 를 주면 **그 시각 전에 시작한 경기만** 센다 — 다음 패치 출시일
     경계다. 예측하는 날 없던 경기를 쓰지 않으려는 것이다.
 
+    `evolved` 는 진화형 → 원래 아이템이다(`evolved_forms`). 진화형을 든 판은 원래
+    아이템을 쓴 판으로 센다.
+
     한 선수가 같은 완성템을 두 개 가져도 한 번으로 센다. 사용률은 「그 아이템을 쓴
     판」의 비율이다.
     """
     games: Counter[int] = Counter()
     counts: defaultdict[int, Counter[int]] = defaultdict(Counter)
+    back = evolved or {}
     for m in matches:
         if before_ms is not None and m.start_ms >= before_ms:
             continue
         for p in m.picks:
             games[p.champion_id] += 1
-            for item in set(p.items[:TRINKET_SLOT]) & finished:
+            held = {back.get(i, i) for i in p.items[:TRINKET_SLOT]}
+            for item in held & finished:
                 counts[p.champion_id][item] += 1
     return {c: Usage(c, n, dict(counts[c])) for c, n in games.items()}
 
