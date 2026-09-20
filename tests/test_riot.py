@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import email.message
+import http.client
 import io
 import random
 import urllib.error
@@ -339,6 +340,13 @@ def test_urlopen_returns_status_headers_body(monkeypatch: pytest.MonkeyPatch) ->
     )
 
 
+def test_truncated_body_is_fetched_again() -> None:
+    """잘린 응답은 HTTP 로는 성공이라 상태로는 안 잡힌다."""
+    opener = FakeOpener((200, {}, b'{"a": 1'), (200, {}, b'{"a": 1}'))
+
+    assert client(opener).get("asia", "/lol/m") == {"a": 1}
+
+
 def test_urlopen_turns_errors_into_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     request = urllib.request.Request("https://kr.api.riotgames.com/x")
     headers = email.message.Message()
@@ -356,6 +364,13 @@ def test_urlopen_turns_errors_into_statuses(monkeypatch: pytest.MonkeyPatch) -> 
     assert riot._urlopen(request, 1.0) == (429, {"Retry-After": "5"}, b"later")
 
     monkeypatch.setattr(urllib.request, "urlopen", unreachable)
+    assert riot._urlopen(request, 1.0) == (0, {}, b"")
+
+    # 맥이 자는 동안 전송이 끊기면 이것이 올라온다 — 스레드를 죽이면 안 된다
+    def cut_off(*_: object, **__: object) -> None:
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(urllib.request, "urlopen", cut_off)
     assert riot._urlopen(request, 1.0) == (0, {}, b"")
 
 

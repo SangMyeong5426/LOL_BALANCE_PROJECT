@@ -115,6 +115,10 @@ def run(
             results[platform] = f"멈춤 — {exc}"
             log(f"[{platform}] {results[platform]}")
             return
+        except Exception as exc:  # noqa: BLE001 — 한 플랫폼이 죽어도 나머지는 계속
+            results[platform] = f"멈춤 — 뜻밖의 오류 {type(exc).__name__}: {exc}"
+            log(f"[{platform}] {results[platform]}")
+            return
     minutes = (time.monotonic() - started) / 60
     results[platform] = (
         f"{len(have) + got:,}판 · 요청 {client.requests:,} · 429 {client.throttled}회"
