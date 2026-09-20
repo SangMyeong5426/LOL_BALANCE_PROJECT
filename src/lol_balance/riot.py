@@ -31,11 +31,12 @@ import warnings
 from collections import Counter, deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import numpy as np
 
-from lol_balance.ugg import ChampionRanking
+from lol_balance.ugg import ChampionRanking, ChampionRow
 
 # 플랫폼 → 매치 API 권역. **요청 한도는 권역마다 따로 걸린다**(포털 문서) — 그래서
 # 권역이 서로 다른 셋을 골랐다. 같은 권역의 플랫폼을 더하면 한도를 나눠 쓴다.
@@ -43,6 +44,15 @@ ROUTES: dict[str, str] = {"kr": "asia", "euw1": "europe", "na1": "americas"}
 
 QUEUE_ID = 420  # 솔로 랭크 — u.gg 의 `ranked_solo_5x5`
 QUEUE = "RANKED_SOLO_5x5"
+
+# Riot 의 포지션 이름 → u.gg 의 역할 이름. 패널이 u.gg 이름으로 돌아가므로 맞춘다.
+ROLES: dict[str, str] = {
+    "TOP": "top",
+    "JUNGLE": "jungle",
+    "MIDDLE": "mid",
+    "BOTTOM": "adc",
+    "UTILITY": "supp",
+}
 
 # 「에메랄드 이상」. 단계가 있는 두 티어와, 리그 하나로 통째로 오는 셋.
 DIVISIONS: tuple[tuple[str, str], ...] = tuple(
@@ -745,6 +755,64 @@ def rates(t: Tally) -> Rates:
         win_n=dict(t.picks),
         games=t.games,
         ban_games=t.games,
+    )
+
+
+def ranking(matches: Iterable[Match]) -> ChampionRanking:
+    """직접 집계를 u.gg 응답과 **같은 모양**으로 바꾼다 — 패널이 그대로 읽게.
+
+    같은 모양이지 **같은 출처가 아니다.** 한 시계열에 이어 붙이지 않는다(ADR 0010).
+
+    포지션이 빈 칸인 경기는 뺀다. 역할별 합이 어긋나기 때문이고, 드물다 —
+    `16_15` 4,500판 중 6판이었다.
+    """
+    totals: dict[tuple[int, str], list[int]] = {}
+    bans: Counter[int] = Counter()
+    games = 0
+    last = 0
+    for m in matches:
+        if any(p.position not in ROLES for p in m.picks):
+            continue
+        games += 1
+        last = max(last, m.start_ms)
+        for p in m.picks:
+            slot = totals.setdefault((p.champion_id, ROLES[p.position]), [0] * 8)
+            slot[0] += int(p.win)
+            slot[1] += 1
+            slot[2] += p.damage
+            slot[3] += p.gold
+            slot[4] += p.kills
+            slot[5] += p.deaths
+            slot[6] += p.assists
+            slot[7] += p.minions + p.monsters
+        for champion in m.bans:
+            bans[champion] += 1
+    rows = tuple(
+        ChampionRow(
+            champion_id=champion,
+            role=role,
+            wins=v[0],
+            matches=v[1],
+            damage=v[2],
+            gold=v[3],
+            kills=v[4],
+            deaths=v[5],
+            assists=v[6],
+            cs=v[7],
+        )
+        for (champion, role), v in sorted(totals.items())
+    )
+    return ChampionRanking(
+        rows=rows,
+        bans=dict(bans),
+        # u.gg 는 밴 표에 자기 분모를 따로 두지만, 우리는 모든 경기에 밴 단계가 있다
+        ban_denominator=games,
+        games=games,
+        updated_at=(
+            datetime.fromtimestamp(last / 1000, UTC).isoformat(timespec="seconds")
+            if last
+            else ""
+        ),
     )
 
 

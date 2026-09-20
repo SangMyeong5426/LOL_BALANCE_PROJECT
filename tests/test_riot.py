@@ -26,6 +26,7 @@ from lol_balance import riot
 from lol_balance.riot import (
     Match,
     Origin,
+    Pick,
     RateLimiter,
     RiotClient,
     RiotError,
@@ -40,12 +41,18 @@ from lol_balance.riot import (
     loads,
     patch_of,
     player_bootstrap,
+    ranking,
     rates,
     slim,
     tally,
     ugg_rates,
 )
-from lol_balance.ugg import ChampionRanking, parse_champion_ranking
+from lol_balance.ugg import (
+    ChampionRanking,
+    check_games_identity,
+    check_win_rate_identity,
+    parse_champion_ranking,
+)
 
 KEY = "RGAPI-00000000-0000-0000-0000-000000000000"
 POSITIONS = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY")
@@ -550,6 +557,33 @@ def test_tally_obeys_the_identities() -> None:
     r = rates(t)
     assert sum(r.pick.values()) == pytest.approx(10.0)
     assert r.games == r.ban_games == 50
+
+
+def test_ranking_looks_like_a_ugg_response() -> None:
+    """패널이 u.gg 를 읽는 그대로 읽을 수 있어야 한다 — 항등식까지."""
+    matches = random_matches(40, 4, seed=23)
+
+    r = ranking(matches)
+
+    check_win_rate_identity(r)  # 전체 승률 50%
+    check_games_identity(r)  # 픽 합 = 10 × 판수
+    assert r.games == 40
+    assert {row.role for row in r.rows} == {"top", "jungle", "mid", "adc", "supp"}
+    assert r.ban_denominator == 40
+    assert r.updated_at.startswith("2026-")
+
+
+def test_ranking_drops_games_without_a_position() -> None:
+    """포지션이 비면 역할별 합이 어긋난다. 드물어서 빼는 쪽이 낫다."""
+    good, odd = random_matches(2, 1, seed=29)
+    odd = Match(
+        **{
+            **odd.__dict__,
+            "picks": (Pick(1, 100, "", True), *odd.picks[1:]),
+        }
+    )
+
+    assert ranking([good, odd]).games == 1
 
 
 def test_ugg_rates_use_the_panel_formula() -> None:
