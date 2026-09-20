@@ -150,9 +150,10 @@ def main() -> int:
     old_usage, old_items, _ = usage_of(previous)
     flagged = core_item_changes(old_usage, old_items, items)
     touched = adjusted(patch)
-    quiet = [c for c in flagged if name(c.champion_id) not in touched]
+    quiet = {c.champion_id for c in flagged if name(c.champion_id) not in touched}
     print(
         f"\n  경고 — {previous} 의 주요 아이템이 {patch} 에 바뀌었다: {len(flagged)}건"
+        f" · 챔피언 {len({c.champion_id for c in flagged})}종"
         f" · 그중 {patch} 에 **직접 조정은 없던** 챔피언 {len(quiet)}종"
     )
     if not touched:

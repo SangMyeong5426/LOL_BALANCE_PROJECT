@@ -147,8 +147,11 @@ def build(
     """직접 집계가 있는 패치의 행을 시간순으로 만든다. 이력은 앞선 행에서 온다."""
     pro = read_pro(ORACLE) if ORACLE.is_dir() else None
     out: dict[str, tuple[PanelRow, ...]] = {}
+    # **한 패치가 이력에 두 번 들어가면 안 된다.** `16_13` 은 u.gg 패널에도 있고
+    # 직접 집계(재현 확인용)에도 있다. 패널에 있는 패치는 패널 행만 쓴다.
+    in_panel = {r.patch for r in panel}
     for patch in patches:
-        known = list(panel) + [r for p in out for r in out[p]]
+        known = list(panel) + [r for p in out if p not in in_panel for r in out[p]]
         short = patch.replace("_", ".")
         out[patch] = rows_from_ranking(
             patch,
