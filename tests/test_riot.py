@@ -18,6 +18,7 @@ import random
 import urllib.error
 import urllib.request
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -38,11 +39,13 @@ from lol_balance.riot import (
     count_pages,
     dumps,
     floor_se,
+    invalid,
     loads,
     patch_of,
     player_bootstrap,
     ranking,
     rates,
+    read_games,
     slim,
     tally,
     ugg_rates,
@@ -517,6 +520,58 @@ def test_collect_stops_when_nobody_played_in_the_window(
 
     assert got == 0
     assert "창 안에 경기가 있는 선수가" in lines[-1]
+
+
+def test_collect_stops_when_every_fetched_game_is_another_patch(
+    small_ladder: FakeRiot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """패치가 바뀌는 날 — 창 안 경기가 전부 다른 패치면 사다리를 다 돌지 않는다."""
+    monkeypatch.setattr(riot, "MAX_WASTED_PLAYERS", 1)
+    for game in small_ladder.games.values():
+        if game:
+            game["info"]["gameVersion"] = "16.14.1.1"
+
+    got, written, skipped, lines = run_collect(small_ladder, target=5)
+
+    assert got == 0 and written == []
+    assert skipped  # 받기는 했고 버렸다
+    assert "다른 패치다. 멈춘다" in lines[-1]
+
+
+def test_collect_leaves_other_platforms_games_alone(small_ladder: FakeRiot) -> None:
+    """권역 목록에는 `EUN1_…` 같은 다른 플랫폼 경기가 섞여 온다 — 받지 않는다."""
+    small_ladder.matches_of = {"p1": ["EUN1_1", "KR_1"], "p2": [], "c1": []}
+
+    got, written, _, _ = run_collect(small_ladder, target=5)
+
+    assert [m.match_id for m in written] == ["KR_1"]
+    assert not any(path.endswith("/EUN1_1") for _, path in small_ladder.calls)
+
+
+def test_read_games_drops_what_slim_would_now_refuse(tmp_path: Path) -> None:
+    """형식 2 초기 파일에 남은 무승부 기록과 다른 플랫폼 경기는 읽을 때 걸러진다."""
+    good = slim(payload("KR_1"), "kr", 1, ORIGIN)
+    nobody = payload("KR_2")
+    for p in nobody["info"]["participants"]:
+        p["win"] = False
+    stray = slim(payload("EUN1_3"), "kr", 1, ORIGIN)  # 다른 플랫폼 경기가 kr 로 저장됨
+    assert good and stray
+    # slim 이 거르기 전에 저장된 것처럼 — 직접 줄을 만든다
+    lost = Match(
+        **{
+            **good.__dict__,
+            "match_id": "KR_2",
+            "picks": tuple(Pick(**{**p.__dict__, "win": False}) for p in good.picks),
+        }
+    )
+    (tmp_path / "kr.jsonl").write_text(
+        "\n".join(dumps(m) for m in (good, lost, stray)) + "\n"
+    )
+
+    assert invalid(good) is None
+    assert invalid(lost) == "이긴 쪽이 다섯이 아니다"
+    assert invalid(stray) == "다른 플랫폼의 경기다"
+    assert [m.match_id for m in read_games(tmp_path)] == ["KR_1"]
 
 
 def test_collect_refuses_an_empty_ladder() -> None:
