@@ -203,6 +203,15 @@ def test_slim_rejects_games_we_do_not_count(game: dict[str, Any]) -> None:
     assert slim(game, "kr", 1, ORIGIN) is None
 
 
+def test_slim_rejects_a_game_nobody_won() -> None:
+    """`EUW1_7950894381` 처럼 열 명 전부 win=false 인 기록. 열 패배로 세면 안 된다."""
+    game = payload()
+    for p in game["info"]["participants"]:
+        p["win"] = False
+
+    assert slim(game, "kr", 1, ORIGIN) is None
+
+
 def test_patch_of_reads_the_game_version() -> None:
     assert patch_of("16.15.702.4052") == "16_15"
     assert patch_of("15.9.1.1") == "15_9"

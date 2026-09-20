@@ -385,6 +385,11 @@ def slim(
     if any(p.get("gameEndedInEarlySurrender") for p in participants):
         return None
     picks = tuple(_pick(p) for p in participants)
+    # **이긴 쪽이 정확히 다섯이어야 한다.** `EUW1_7950894381`(16_16 · 822초)은
+    # 열 명 전부 `win: false` 로 왔다 — 조기 항복 표시도 없는 무승부 기록이다.
+    # 그대로 세면 열 패배가 들어가 전체 승률이 50% 에서 어긋난다(2026-09-20 발견).
+    if sum(p.win for p in picks) != 5:
+        return None
     bans = tuple(
         int(b["championId"])
         for team in info.get("teams") or []
