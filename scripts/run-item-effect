@@ -54,7 +54,7 @@ from lol_balance.builds import (  # noqa: E402
 )
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.panel import champion_names, patch_index, previous_patch  # noqa: E402
-from lol_balance.riot import Match, loads  # noqa: E402
+from lol_balance.riot import Match, read_games  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 RIOT = ROOT / "data" / "riot"
@@ -79,12 +79,7 @@ def collected() -> list[str]:
 
 
 def read(patch: str) -> list[Match]:
-    return [
-        loads(line)
-        for path in sorted((RIOT / patch).glob("*.jsonl"))
-        for line in path.read_text().splitlines()
-        if line.strip()
-    ]
+    return read_games(RIOT / patch)
 
 
 def names() -> dict[int, str]:
@@ -112,11 +107,13 @@ class Rate:
     def __init__(self) -> None:
         self.wins = 0.0
         self.weight = 0.0
+        self.squares = 0.0
         self.games = 0
 
     def add(self, win: bool, weight: float) -> None:
         self.wins += weight * win
         self.weight += weight
+        self.squares += weight * weight
         self.games += 1
 
     @property
@@ -125,9 +122,15 @@ class Rate:
 
     @property
     def se(self) -> float:
-        """이항 표준오차. 무게를 줘도 판수로 근사한다 — 보수적인 쪽이다."""
+        """가중 이항 표준오차 — p(1−p)·Σw²/(Σw)². 무게가 같으면 p(1−p)/n 이다.
+
+        처음에는 판수로만 나눴다. 무게가 고르지 않으면 그것은 오차를 **작게** 잡고,
+        그러면 「가를 수 있는 최소 차이」도 작게 나온다(2026-09-20 감사).
+        """
         p = self.value
-        return math.sqrt(p * (1 - p) / self.games) if self.games else float("nan")
+        if not self.games:
+            return float("nan")
+        return math.sqrt(p * (1 - p) * self.squares / (self.weight * self.weight))
 
 
 def win_rates(matches: Iterable[Match], equal_days: bool) -> dict[int, Rate]:

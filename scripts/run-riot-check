@@ -31,8 +31,8 @@ from lol_balance.riot import (  # noqa: E402
     Agreement,
     Match,
     compare,
-    loads,
     rates,
+    read_games,
     tally,
 )
 from lol_balance.ugg import parse_champion_ranking  # noqa: E402
@@ -50,10 +50,7 @@ METRICS = ("승률", "픽률", "밴율")
 
 
 def read(patch: str) -> list[Match]:
-    out: list[Match] = []
-    for path in sorted((RIOT / patch).glob("*.jsonl")):
-        out += [loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return out
+    return read_games(RIOT / patch)
 
 
 def names() -> dict[int, str]:

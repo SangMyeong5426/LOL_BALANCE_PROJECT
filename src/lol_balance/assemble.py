@@ -88,8 +88,12 @@ def directions_in(
     cdragon: Path,
     notes: Path,
     labels: Path,
+    previous_notes: Path | None = None,
 ) -> dict[str, tuple[Direction, str]]:
     """그 패치의 챔피언별 방향. **손 라벨이 기계 판정을 이긴다.**
+
+    `previous_notes` 는 직전 패치 노트가 다른 폴더에 있을 때 준다 — 우리 구간 밖
+    노트는 `live/` 에 있어서 `16_16` 의 직전(`16_15`)은 본 폴더에 있다.
 
     기계 판정은 두 출처를 합친 것이다.
 
@@ -113,7 +117,9 @@ def directions_in(
     # **스냅샷은 노트보다 늦게 움직인다.** 직전 패치의 조정이 이 diff 에 처음
     # 나타나므로, 그대로 두면 직전 패치 것이 이 패치 것으로 적힌다. 근거는
     # `patchnotes.changed_champions`.
-    late = changed_champions((notes / f"{version(previous)}.html").read_bytes())
+    late = changed_champions(
+        ((previous_notes or notes) / f"{version(previous)}.html").read_bytes()
+    )
 
     out: dict[str, tuple[Direction, str]] = {}
     for champion_id, entry in standard.items():

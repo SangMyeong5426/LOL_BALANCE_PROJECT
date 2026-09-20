@@ -34,7 +34,7 @@ from lol_balance.builds import (  # noqa: E402
 )
 from lol_balance.panel import champion_names  # noqa: E402
 from lol_balance.patchnotes import release_date  # noqa: E402
-from lol_balance.riot import Match, loads  # noqa: E402
+from lol_balance.riot import Match, read_games  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 RIOT = ROOT / "data" / "riot"
@@ -53,10 +53,7 @@ def neighbour(patch: str, step: int) -> str:
 
 
 def read(patch: str) -> list[Match]:
-    out: list[Match] = []
-    for path in sorted((RIOT / patch).glob("*.jsonl")):
-        out += [loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return out
+    return read_games(RIOT / patch)
 
 
 def boundary(patch: str) -> int | None:
