@@ -155,7 +155,7 @@ LLM 이 만든 것은 정답지 라벨 1,630종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 467개 · 검사 11개
+./scripts/check-all                 # 테스트 470개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -193,7 +193,7 @@ src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전�
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
 ground_truth/      정답지. 실제 조정 결과 1,630건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             467개 · 커버리지 96%
+tests/             470개 · 커버리지 96%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
