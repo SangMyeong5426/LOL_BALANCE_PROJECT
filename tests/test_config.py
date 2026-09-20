@@ -21,6 +21,7 @@ _ENV_KEYS = (
     "LOL_BALANCE_LLM_MODEL",
     "LOL_BALANCE_AGENT_MODEL",
     "ANTHROPIC_API_KEY",
+    "RIOT_API_KEY",
 )
 
 
@@ -98,6 +99,17 @@ def test_agent_runs_on_a_local_model_by_default(
 
     monkeypatch.setenv("LOL_BALANCE_AGENT_MODEL", "ollama:qwen3.5:2b")
     assert load_settings(env_file=clean_env).agent_model == "ollama:qwen3.5:2b"
+
+
+def test_riot_key_is_optional(clean_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """직접 집계에만 쓰는 키다 — 없어도 설정은 서고, 빈 값은 없는 것으로 읽는다."""
+    assert load_settings(env_file=clean_env).riot_api_key is None
+
+    monkeypatch.setenv("RIOT_API_KEY", "  ")
+    assert load_settings(env_file=clean_env).riot_api_key is None
+
+    monkeypatch.setenv("RIOT_API_KEY", " RGAPI-test ")
+    assert load_settings(env_file=clean_env).riot_api_key == "RGAPI-test"
 
 
 def test_settings_are_frozen(clean_env: Path) -> None:

@@ -43,9 +43,28 @@ PATCH_SEQUENCE: tuple[str, ...] = tuple(
 _INDEX = {patch: i for i, patch in enumerate(PATCH_SEQUENCE)}
 
 
+def _parts(patch: str) -> tuple[int, int]:
+    major, minor = patch.split("_")
+    return int(major), int(minor)
+
+
 def patch_index(patch: str) -> int:
-    """패치의 시간 순서. **문자열 정렬로는 안 된다** — `13_9` 가 `13_10` 뒤로 간다."""
-    return _INDEX[patch]
+    """패치의 시간 순서. **문자열 정렬로는 안 된다** — `13_9` 가 `13_10` 뒤로 간다.
+
+    확정한 범위 **뒤**의 패치에도 순서를 준다. u.gg 아카이브가 `16_15` 에서
+    끊긴 뒤를 직접 집계가 보기 때문이다([ADR 0010](../../docs/adr/0010-riot-api-direct-aggregation.md)).
+    그 패치들은 패널에 없고, 여기서 얻는 것은 **순서뿐**이다.
+
+    범위 안인데 없는 패치, 범위 앞, 해가 바뀐 뒤는 그대로 모른다 — 해가 바뀌면
+    그 해에 패치가 몇 개인지 알아야 이어 붙일 수 있다.
+    """
+    if patch in _INDEX:
+        return _INDEX[patch]
+    major, minor = _parts(patch)
+    last_major, last_minor = _parts(PATCH_SEQUENCE[-1])
+    if major != last_major or minor <= last_minor:
+        raise KeyError(patch)
+    return len(PATCH_SEQUENCE) - 1 + (minor - last_minor)
 
 
 def as_patch(text: str) -> str:

@@ -28,3 +28,6 @@
 - [ADR 0007: 판단을 어떤 형식으로 적는가](0007-answer-schema.md)
 - [ADR 0008: 프로 경기 데이터를 본 분석에 넣는다](0008-pro-play-in-the-main-analysis.md)
 - [ADR 0009: 에이전트를 LangChain 으로 만들고 로컬 모델로 돌린다](0009-agent-framework-and-local-model.md)
+- [ADR 0010: u.gg 가 끊긴 뒤를 Riot API 로 직접 센다 — 키가 필요한 선택 경로](0010-riot-api-direct-aggregation.md)
+- [ADR 0011: 챔피언별 아이템 사용을 최종 아이템으로 센다](0011-champion-item-usage.md)
+- [ADR 0012: 직접 집계로 다음 패치를 예측한다 — 학습은 u.gg, 대상만 우리 집계](0012-predicting-with-direct-aggregation.md)

@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from lol_balance.ddragon import standard_champions  # noqa: E402
 from lol_balance.fetch import Retryable, get_with_retry, save  # noqa: E402
-from lol_balance.panel import PATCH_SEQUENCE, next_patch  # noqa: E402
+from lol_balance.panel import next_patch, patch_index  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
@@ -59,10 +59,22 @@ def wanted(patches: tuple[str, ...]) -> dict[tuple[str, str], str]:
     """
     out: dict[tuple[str, str], str] = {}
     for patch in patches:
-        index = PATCH_SEQUENCE.index(patch)
-        note = NOTES / f"{version(patch)}.1.html"
+        major, minor = (int(x) for x in patch.split("_"))
+        before = f"{major}_{minor - 1}"
+        # 우리 구간 밖 패치의 노트는 `live/` 에 있다(fetch-patchnotes)
+        note = next(
+            (
+                n
+                for n in (
+                    NOTES / f"{version(patch)}.1.html",
+                    NOTES / "live" / f"{version(patch)}.1.html",
+                )
+                if n.exists()
+            ),
+            None,
+        )
         data = DDRAGON / f"{version(patch)}.1.json"
-        if not (note.exists() and data.exists()):
+        if not (note and data.exists()):
             continue
         named = {
             entry.get("name", key): key
@@ -74,17 +86,21 @@ def wanted(patches: tuple[str, ...]) -> dict[tuple[str, str], str]:
             champion_id = named.get(block.champion)
             if champion_id is None:
                 continue
-            for other in (PATCH_SEQUENCE[index - 1], patch):
+            for other in (before, patch):
                 out[(other, slug(champion_id))] = block.champion
     return out
 
 
 def main() -> int:
+    # 패치를 주면 그것만 받는다 — 우리 구간 뒤 패치의 방향 라벨을 만들 때(ADR 0012)
+    asked = tuple(a for a in sys.argv[1:] if not a.startswith("-"))
     rows = read_panel(ROOT / "data" / "panel.sqlite")
-    predicted = sorted({r.patch for r in rows}, key=PATCH_SEQUENCE.index)
+    predicted = sorted({r.patch for r in rows}, key=patch_index)
     # **순서 끝은 다음이 없다.** 그냥 `+1` 하면 패널이 끝까지 차는 순간 죽는다.
     targets = tuple(n for p in predicted if (n := next_patch(p)) is not None)
-    if "--pilot" in sys.argv:
+    if asked:
+        targets = asked
+    elif "--pilot" in sys.argv:
         targets = tuple(p for p in targets if p in PILOT)
 
     items = sorted(wanted(targets))

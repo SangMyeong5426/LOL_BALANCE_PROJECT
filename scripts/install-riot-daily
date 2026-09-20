@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""직접 집계를 매일 쌓는 예약 작업을 이 맥에 걸거나 뗀다.
+
+    ./scripts/install-riot-daily              # 매일 05:10 에 fetch-riot-daily
+    ./scripts/install-riot-daily --uninstall  # 떼기
+
+macOS launchd 의 사용자 작업(`~/Library/LaunchAgents`)으로 건다. 시스템 설정은
+건드리지 않는다. **맥이 잠들어 있으면 깨어난 뒤 한 번 돈다.**
+
+기록은 `data/logs/riot-daily.log` 에 쌓인다. 키가 거절되면(개발 키는 24시간마다
+꺼진다) 거기 「거절됐다」가 남는다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+LABEL = "com.lolbalance.riot-daily"
+PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+LOG = ROOT / "data" / "logs" / "riot-daily.log"
+HOUR, MINUTE = 5, 10
+
+
+def job() -> dict[str, object]:
+    # launchd 의 PATH 에는 가상환경이 없다 — 파이썬을 경로로 박는다
+    command = (
+        f"cd '{ROOT}' && ./.venv/bin/python scripts/fetch-riot-daily >> '{LOG}' 2>&1"
+    )
+    return {
+        "Label": LABEL,
+        "ProgramArguments": ["/bin/sh", "-c", command],
+        "StartCalendarInterval": {"Hour": HOUR, "Minute": MINUTE},
+        "RunAtLoad": False,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--uninstall", action="store_true")
+    args = parser.parse_args()
+
+    if PLIST.exists():
+        subprocess.run(["launchctl", "unload", str(PLIST)], check=False)
+    if args.uninstall:
+        PLIST.unlink(missing_ok=True)
+        print(f"뗐다: {PLIST}")
+        return 0
+
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
+    PLIST.write_bytes(plistlib.dumps(job()))
+    subprocess.run(["launchctl", "load", str(PLIST)], check=True)
+    print(f"걸었다: 매일 {HOUR:02d}:{MINUTE:02d} · {PLIST}")
+    print(f"기록: {LOG}")
+    print("떼려면: ./scripts/install-riot-daily --uninstall")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

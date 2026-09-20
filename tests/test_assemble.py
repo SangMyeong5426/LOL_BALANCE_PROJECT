@@ -19,9 +19,40 @@ from lol_balance.assemble import (
     adjusted_in,
     directions_in,
     merge_directions,
+    rows_from_ranking,
     version,
     version_short,
 )
+from lol_balance.panel import PATCH_SEQUENCE, patch_index
+from lol_balance.ugg import ChampionRanking, ChampionRow
+
+
+def _ranking(
+    wins: dict[int, int], matches: dict[int, int], games: int
+) -> ChampionRanking:
+    """한 역할짜리 최소 지표. 행을 만드는 데 필요한 칸만 채운다."""
+    rows = tuple(
+        ChampionRow(
+            champion_id=champion,
+            role="mid",
+            wins=wins[champion],
+            matches=matches[champion],
+            damage=0,
+            gold=0,
+            kills=0,
+            deaths=0,
+            assists=0,
+            cs=0,
+        )
+        for champion in sorted(matches)
+    )
+    return ChampionRanking(
+        rows=rows,
+        bans=dict.fromkeys(matches, games // 10),
+        ban_denominator=games,
+        games=games,
+        updated_at="2026-09-20T00:00:00+00:00",
+    )
 
 
 def test_version_forms() -> None:
@@ -226,3 +257,38 @@ def test_forecast_rows_need_no_next_patch_note(tmp_path: Path) -> None:
     assert got  # 다음 패치 노트가 하나도 없는데도 만들어졌다
     assert all(not r.adjusted_next for r in got)
     assert all(r.direction_next is None for r in got)
+
+
+def test_patch_index_continues_past_the_range() -> None:
+    """직접 집계가 `16_15` 뒤를 본다 — 순서는 이어져야 한다(ADR 0010)."""
+    last = PATCH_SEQUENCE[-1]
+    assert patch_index("16_16") == patch_index(last) + 1
+    assert patch_index("16_18") == patch_index(last) + 3
+
+    with pytest.raises(KeyError):
+        patch_index("13_1")  # 범위 앞은 그대로 모른다
+    with pytest.raises(KeyError):
+        patch_index("17_1")  # 해가 바뀌면 그 해 패치 수를 알아야 한다
+
+
+def test_rows_from_ranking_uses_the_previous_patch_for_trend() -> None:
+    """파일 없이 지표 객체로 행을 만든다. 직전 패치가 있어야 추세가 붙는다."""
+    names = {1: "Ahri", 2: "Zed"}
+    first = rows_from_ranking(
+        PATCH_SEQUENCE[-1],
+        _ranking(wins={1: 600, 2: 400}, matches={1: 1000, 2: 1000}, games=2000),
+        names,
+    )
+    later = rows_from_ranking(
+        "16_16",
+        _ranking(wins={1: 500, 2: 500}, matches={1: 1000, 2: 1000}, games=2000),
+        names,
+        adjusted=frozenset({"Ahri"}),
+        known=first,
+    )
+
+    ahri = next(r for r in later if r.champion == "Ahri")
+    assert ahri.win_rate == pytest.approx(0.5)
+    assert ahri.d_win_rate == pytest.approx(-0.1)  # 0.6 → 0.5
+    assert ahri.adjusted_next is True
+    assert next(r for r in later if r.champion == "Zed").adjusted_next is False

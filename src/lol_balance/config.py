@@ -30,6 +30,9 @@ class Settings:
     anthropic_api_key: str | None
     agent_model: str = DEFAULT_AGENT_MODEL
     """`제공자:모델` 형식(LangChain `init_chat_model`). 로컬이면 키가 필요 없다."""
+    riot_api_key: str | None = None
+    """Riot 개인 키. **직접 집계에만 쓴다** — 없어도 기존 결과는 전부 나온다.
+    근거는 docs/adr/0010-riot-api-direct-aggregation.md"""
 
     @property
     def llm_available(self) -> bool:
@@ -72,4 +75,5 @@ def load_settings(env_file: Path | None = None) -> Settings:
         anthropic_api_key=key or None,
         agent_model=os.environ.get("LOL_BALANCE_AGENT_MODEL", "").strip()
         or DEFAULT_AGENT_MODEL,
+        riot_api_key=os.environ.get("RIOT_API_KEY", "").strip() or None,
     )
