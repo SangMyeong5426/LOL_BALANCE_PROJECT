@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from lol_balance.assemble import adjusted_in  # noqa: E402
 from lol_balance.builds import (  # noqa: E402
     MIN_GAMES,
     Usage,
@@ -75,6 +76,11 @@ def usage_of(patch: str) -> tuple[dict[int, Usage], dict[str, dict], int | None]
     items = read_items(ITEMS / f"{version(patch)}.json")
     cut = boundary(patch)
     return item_usage(read(patch), finished_items(items), cut), items, cut
+
+
+def adjusted(patch: str) -> frozenset[str]:
+    """그 패치 노트에 나온 챔피언. 구간 밖 패치의 노트는 `live/` 에 있다."""
+    return adjusted_in(patch, NOTES) | adjusted_in(patch, NOTES / "live")
 
 
 def names() -> dict[int, str]:
@@ -142,18 +148,24 @@ def main() -> int:
         return 0
     old_usage, old_items, _ = usage_of(previous)
     flagged = core_item_changes(old_usage, old_items, items)
+    touched = adjusted(patch)
+    quiet = [c for c in flagged if name(c.champion_id) not in touched]
     print(
         f"\n  경고 — {previous} 의 주요 아이템이 {patch} 에 바뀌었다: {len(flagged)}건"
+        f" · 그중 {patch} 에 **직접 조정은 없던** 챔피언 {len(quiet)}종"
     )
+    if not touched:
+        print(f"    ({patch} 패치 노트가 없어 직접 조정 여부는 모른다)")
     for c in flagged:
         detail = " · ".join(
             f"{x.field} {x.before:g}→{x.after:g}"
             for x in c.changes
             if x.before is not None and x.after is not None
         )
+        mark = "직접 조정 있음" if name(c.champion_id) in touched else "직접 조정 없음"
         print(
             f"    {name(c.champion_id):14} {item_name.get(c.item_id, c.item_id)}"
-            f" (사용률 {c.share:.0%} · {c.games}판)  {detail}"
+            f" (사용률 {c.share:.0%} · {c.games}판)  {detail}  — {mark}"
         )
     return 0
 
