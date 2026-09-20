@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""직접 집계로 다음 패치를 예측하고, 답이 있으면 채점한다.
+
+    ./scripts/run-live-predict 16_16 --score   # 16_17 노트로 채점
+    ./scripts/run-live-predict 16_18           # 16_19 예측 — 답이 아직 없다
+
+`predict` 는 u.gg 패널로 예측한다. 이것은 **예측 대상 패치의 지표만 직접 집계로
+바꾼다**(ADR 0012). 학습은 그대로 u.gg 구간이다.
+
+**출처가 다른 입력을 쓴다.** 같은 패치에서 견줘 보니 승률은 구분되지 않았지만
+픽률·밴율에 0.5~1.3%p 가 남았다([results](../docs/results/README.md)). 그만큼
+어긋난 입력으로 예측한다는 뜻이고, 그래서 이 점수를 u.gg 구간 성적과 나란히
+놓지 않는다.
+
+키가 필요 없다 — 받아 둔 것을 읽기만 한다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from lol_balance.arms import rank_candidates  # noqa: E402
+from lol_balance.assemble import (  # noqa: E402
+    adjusted_in,
+    directions_in,
+    rows_from_ranking,
+    version,
+)
+from lol_balance.builds import (  # noqa: E402
+    core_item_changes,
+    finished_items,
+    item_usage,
+)
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.direction import Direction  # noqa: E402
+from lol_balance.items import read_items  # noqa: E402
+from lol_balance.oracle import read_pro  # noqa: E402
+from lol_balance.panel import (  # noqa: E402
+    MIN_MATCHES,
+    PanelRow,
+    champion_names,
+    patch_index,
+)
+from lol_balance.riot import Match, loads, ranking  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+PANEL = ROOT / "data" / "panel.sqlite"
+RIOT = ROOT / "data" / "riot"
+ITEMS = ROOT / "data" / "items"
+NOTES = ROOT / "data" / "patchnotes"
+DDRAGON = ROOT / "data" / "ddragon"
+ORACLE = ROOT / "data" / "oracle"
+CDRAGON = ROOT / "data" / "cdragon"
+LABELS = ROOT / "ground_truth" / "directions"
+
+VIEWS = (("너프 후보", "nerf"), ("버프 후보", "buff"))
+
+
+def collected() -> list[str]:
+    """직접 집계가 있는 패치를 시간순으로."""
+    patches = [p.name for p in RIOT.iterdir() if p.is_dir() and p.name[0].isdigit()]
+    return sorted(
+        (p for p in patches if any((RIOT / p).glob("*.jsonl"))), key=patch_index
+    )
+
+
+def read(patch: str) -> list[Match]:
+    return [
+        loads(line)
+        for path in sorted((RIOT / patch).glob("*.jsonl"))
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
+
+
+def names_at(patch: str) -> dict[int, str]:
+    """그 패치의 Data Dragon 이름. 없으면 가장 최근 것."""
+    want = DDRAGON / f"{patch.replace('_', '.')}.1.json"
+    if not want.exists():
+        have = sorted(
+            (p for p in DDRAGON.glob("*.json") if p.stem[:1].isdigit()),
+            key=lambda p: tuple(int(x) for x in p.stem.split(".")),
+        )
+        want = have[-1]
+    return champion_names(json.loads(want.read_text())["data"])
+
+
+def adjusted(patch: str) -> frozenset[str]:
+    return adjusted_in(patch, NOTES) | adjusted_in(patch, NOTES / "live")
+
+
+def next_name(patch: str) -> str:
+    major, minor = (int(x) for x in patch.split("_"))
+    return f"{major}_{minor + 1}"
+
+
+def shaken(patch: str) -> dict[str, str]:
+    """앞 패치의 주요 아이템이 이 패치에 바뀐 챔피언 → 그 아이템 이름(ADR 0011)."""
+    previous = f"{patch.split('_')[0]}_{int(patch.split('_')[1]) - 1}"
+    files = [ITEMS / f"{p.replace('_', '.')}.1.json" for p in (previous, patch)]
+    if not all(f.exists() for f in files) or previous not in collected():
+        return {}
+    before, after = (read_items(f) for f in files)
+    usage = item_usage(read(previous), finished_items(before))
+    name = names_at(patch)
+    item = {int(k): v.get("name", k) for k, v in after.items()}
+    return {
+        name.get(c.champion_id, str(c.champion_id)): str(item.get(c.item_id, c.item_id))
+        for c in core_item_changes(usage, before, after)
+    }
+
+
+def note_dir(patch: str) -> Path:
+    """그 패치 노트가 있는 폴더. 우리 구간 밖은 `live/` 에 있다."""
+    return NOTES if (NOTES / f"{version(patch)}.html").exists() else NOTES / "live"
+
+
+def directions_for(base: str) -> dict[str, tuple[Direction, str]]:
+    """다음 패치의 방향 라벨. 노트나 수치 스냅샷이 없으면 빈 값이다."""
+    nxt = next_name(base)
+    if not (note_dir(nxt) / f"{version(nxt)}.html").exists():
+        return {}
+    try:
+        return directions_in(
+            nxt,
+            base,
+            ddragon=DDRAGON,
+            cdragon=CDRAGON,
+            notes=note_dir(nxt),
+            labels=LABELS,
+        )
+    except (FileNotFoundError, KeyError):
+        return {}
+
+
+def build(
+    patches: list[str], panel: tuple[PanelRow, ...], min_matches: int
+) -> dict[str, tuple[PanelRow, ...]]:
+    """직접 집계가 있는 패치의 행을 시간순으로 만든다. 이력은 앞선 행에서 온다."""
+    pro = read_pro(ORACLE) if ORACLE.is_dir() else None
+    out: dict[str, tuple[PanelRow, ...]] = {}
+    for patch in patches:
+        known = list(panel) + [r for p in out for r in out[p]]
+        short = patch.replace("_", ".")
+        out[patch] = rows_from_ranking(
+            patch,
+            ranking(read(patch)),
+            names_at(patch),
+            adjusted=adjusted(next_name(patch)),
+            known=known,
+            pro=dict(pro[short]) if pro and short in pro else None,
+            directions=directions_for(patch),
+            min_matches=min_matches,
+        )
+    return out
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("patch", help="기준 패치 — 예: 16_16")
+    parser.add_argument("--top", type=int, default=5)
+    parser.add_argument("--score", action="store_true", help="답이 있으면 채점한다")
+    parser.add_argument(
+        "--min-matches",
+        type=int,
+        default=MIN_MATCHES,
+        help=f"이만큼 나온 챔피언만 본다 (기본 {MIN_MATCHES})",
+    )
+    args = parser.parse_args()
+
+    panel = read_panel(PANEL)
+    if not panel:
+        print("패널이 비었다. ./scripts/build-panel 을 먼저 돌린다", file=sys.stderr)
+        return 1
+    patches = collected()
+    if args.patch not in patches:
+        print(f"{args.patch} 직접 집계가 없다. 있는 것: {patches}", file=sys.stderr)
+        return 2
+
+    rows = build(
+        [p for p in patches if patch_index(p) <= patch_index(args.patch)],
+        panel,
+        args.min_matches,
+    )
+    test = rows[args.patch]
+    train = tuple(r for r in panel if r.patch_index < patch_index(args.patch))
+    nxt = next_name(args.patch)
+    answer = adjusted(nxt)
+    warn = shaken(args.patch)
+
+    print(f"{args.patch} 직접 집계로 {nxt} 패치를 예측한다")
+    print(
+        f"  학습 {len(train):,}행 (u.gg ~{max(train, key=lambda r: r.patch_index).patch})"
+        f" · 대상 {len(test)}종({args.min_matches}판 이상)"
+        f" · 방향 라벨 {sum(r.direction_next is not None for r in test)}종"
+    )
+    print("  ⚠ 학습은 u.gg, 대상은 직접 집계다 — 출처가 다른 입력이다(ADR 0012)")
+    if warn:
+        print(f"  ⚠ 앞 패치의 주요 아이템이 {args.patch} 에 바뀐 챔피언 {len(warn)}종")
+
+    scored = args.score and bool(answer)
+    if args.score and not answer:
+        print(f"  ⚠ {nxt} 패치 노트가 없다 — 채점할 수 없다", file=sys.stderr)
+    base = sum(r.champion in answer for r in test) / len(test) if test else 0.0
+    labelled = sum(r.direction_next is not None for r in test)
+    if scored:
+        print(
+            f"  {nxt} 에서 조정된 챔피언 {len(answer)}종 ·"
+            f" 대상 {len(test)}종 중 {base:.1%} 가 조정됐다(기준선)"
+        )
+
+    seed = load_settings().seed
+    for label, want in VIEWS:
+        score = rank_candidates(train, test, want=want, with_pro=True, seed=seed)
+        order = np.argsort(-score)[: args.top]
+        print(f"\n=== {label} 상위 {args.top} ===")
+        picked = [test[j] for j in order]
+        for i, r in enumerate(picked, 1):
+            line = f"  {i:2} {r.champion:14}점수 {score[order[i - 1]]:.2f}"
+            if scored:
+                got = r.direction_next or ("조정" if r.champion in answer else "없음")
+                mark = "✅" if got == want else ("·" if r.champion in answer else "  ")
+                line += f"   {mark} 실제 {got}"
+            if r.champion in warn:
+                line += f"   ⚠ 주요 아이템 변경({warn[r.champion]})"
+            print(line)
+        if scored:
+            # **① 과 ② 를 따로 적는다.** 조정됐는지와 어느 쪽으로 조정됐는지는
+            # 다른 질문이고, 방향 라벨이 없으면 뒤쪽은 셀 수 없다.
+            touched = sum(r.champion in answer for r in picked)
+            expect = base * args.top
+            print(
+                f"  → 상위 {args.top} 중 조정된 챔피언 {touched}종"
+                f" (기준선이면 {expect:.1f}종)"
+            )
+            if labelled:
+                right = sum(r.direction_next == want for r in picked)
+                print(f"     그중 {want} 방향까지 맞은 것 {right}종")
+    if not scored:
+        print(f"\n{nxt} 노트가 나오면 --score 로 채점한다")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

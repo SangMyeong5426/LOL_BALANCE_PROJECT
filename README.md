@@ -29,7 +29,7 @@ Azir 의 사례가 이 도구의 목적을 보여 준다. 승률이 173종 중 1
 flowchart LR
   U["u.gg 아카이브<br/>승률·픽률·밴율"] --> P
   O["Oracle's Elixir<br/>프로 픽·밴"] --> P["패널<br/>52패치 8,767행"]
-  D["Data Dragon<br/>버전 diff"] --> L["정답지<br/>실제 조정 결과 1,599건"]
+  D["Data Dragon<br/>버전 diff"] --> L["정답지<br/>실제 조정 결과 1,630건"]
   N["패치 노트<br/>공식 위키"] --> L
   L --> P
   P --> R["검색 (RAG)<br/>사례·노트·수치"]
@@ -43,7 +43,7 @@ flowchart LR
 Data Dragon 버전 diff 와 공식 패치 노트로 만들어 두었다. 이것이 없으면 아래의 성적을
 측정할 수 없다.
 
-실행 시점에는 LLM API 를 호출하지 않는다. 모델이 만든 산출물(라벨 1,599종, 규칙
+실행 시점에는 LLM API 를 호출하지 않는다. 모델이 만든 산출물(라벨 1,630종, 규칙
 12개, 판단 314건)은 저장소에 텍스트로 두고 코드가 읽어 채점한다
 ([ADR 0003](docs/adr/0003-llm-provider-and-calling-convention.md)).
 
@@ -141,7 +141,7 @@ AUC 0.837 로 로지스틱 회귀와 사실상 동률이고, 검색 위에 올�
 「무엇이 바뀌었나」를 적지 「다음에 누가 바뀌나」를 적지 않는다. **검색이 정확한
 것과 그 검색이 예측에 쓸모 있는 것은 다르고, 따로 재 두었기에 갈렸다.**
 
-LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 314건이다. 셋 다
+LLM 이 만든 것은 정답지 라벨 1,630종, 밸런스 규칙 12개, 판단 314건이다. 셋 다
 대화 안에서 만들어 저장소에 텍스트로 두었고 코드는 그것을 읽어 채점만 한다.
 실행 시점에 API 를 호출하지 않으므로 **키 없이 전부 재현된다.** 에이전트(`B8`)의
 판단 1,029건은 로컬 모델이 만들었고, 이것도 텍스트로 두어 채점만 한다.
@@ -155,7 +155,7 @@ LLM 이 만든 것은 정답지 라벨 1,599종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 461개 · 검사 11개
+./scripts/check-all                 # 테스트 467개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -191,9 +191,9 @@ API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직
 ```text
 src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전트(agent/)
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
-ground_truth/      정답지. 실제 조정 결과 1,599건 (커밋한다)
+ground_truth/      정답지. 실제 조정 결과 1,630건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             461개 · 커버리지 96%
+tests/             467개 · 커버리지 96%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
@@ -253,6 +253,6 @@ ollama pull qwen3.5:9b && ollama serve
 | [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들. 무엇을 확인하고 접었는가 |
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
 | [`docs/agent.md`](docs/agent.md) | 에이전트(`B8`) — 화면 · 해설 · 코드 대조 · 평가 |
-| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 11건 |
+| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 12건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어. 여기 있는 말만 쓴다 |
 | [`CLAUDE.md`](CLAUDE.md) | 작업 규칙. 무엇을 만들고 무엇을 안 하는가 |

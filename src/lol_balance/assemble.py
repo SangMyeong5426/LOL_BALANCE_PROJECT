@@ -26,9 +26,15 @@ from lol_balance.direction import (
 )
 from lol_balance.groundtruth import read_labels
 from lol_balance.oracle import ProRates
-from lol_balance.panel import PATCH_SEQUENCE, PanelRow, champion_names, patch_rows
+from lol_balance.panel import (
+    MIN_MATCHES,
+    PanelRow,
+    champion_names,
+    patch_index,
+    patch_rows,
+)
 from lol_balance.patchnotes import champion_changes, changed_champions
-from lol_balance.ugg import parse_champion_ranking
+from lol_balance.ugg import ChampionRanking, parse_champion_ranking
 
 
 def version(patch: str) -> str:
@@ -156,23 +162,54 @@ def forecast_rows(
     거기서 가져온다. **직전 패치가 바로 앞이 아니면 추세는 `None` 이다** —
     `16_14` 가 결측이라 `16_15` 가 실제로 그렇다.
     """
-    index = PATCH_SEQUENCE.index(patch)
-    history: dict[int, list[PanelRow]] = {}
-    for row in sorted(known, key=lambda r: r.patch_index):
-        if row.patch_index < index:
-            history.setdefault(row.champion_id, []).append(row)
-
-    before = PATCH_SEQUENCE[index - 1] if index else None
-    prior = {r.champion_id: r for r in known if r.patch == before} if before else {}
-
-    return patch_rows(
+    return rows_from_ranking(
         patch,
         parse_champion_ranking(json.loads((ranking / f"{patch}.json").read_bytes())),
         champion_names(
             json.loads((ddragon / f"{version(patch)}.json").read_bytes())["data"]
         ),
-        frozenset(),  # 다음 패치 노트가 없다. **이 라벨은 읽지 않는다**
+        known=known,
+        pro=dict(at_patch)
+        if (at_patch := (pro or {}).get(version_short(patch)))
+        else None,
+    )
+
+
+def rows_from_ranking(
+    patch: str,
+    ranking: ChampionRanking,
+    names: dict[int, str],
+    *,
+    adjusted: frozenset[str] = frozenset(),
+    known: Sequence[PanelRow] = (),
+    pro: dict[str, ProRates] | None = None,
+    directions: dict[str, tuple[Direction, str]] | None = None,
+    min_matches: int = MIN_MATCHES,
+) -> tuple[PanelRow, ...]:
+    """이미 읽어 둔 지표로 한 패치의 행을 만든다.
+
+    파일에서 읽는 `forecast_rows` 와 같은 일을 하는데, 지표를 **객체로** 받는다.
+    직접 집계(ADR 0010)가 u.gg 파일 없이 같은 경로를 타게 하려는 것이다.
+
+    `known` 은 이 패치보다 앞선 행이고, 이력과 직전 대비 추세를 거기서 가져온다.
+    **직전이 바로 앞 패치가 아니면 추세는 `None` 이다.** `adjusted` 를 비워 두면
+    라벨이 없는 행이라 채점하면 안 된다.
+    """
+    index = patch_index(patch)
+    history: dict[int, list[PanelRow]] = {}
+    for row in sorted(known, key=lambda r: r.patch_index):
+        if row.patch_index < index:
+            history.setdefault(row.champion_id, []).append(row)
+    prior = {r.champion_id: r for r in known if r.patch_index == index - 1}
+
+    return patch_rows(
+        patch,
+        ranking,
+        names,
+        adjusted,
         prior or None,
+        min_matches=min_matches,
+        directions=directions,
         history=history,
-        pro=(pro or {}).get(version_short(patch)),
+        pro=pro,
     )

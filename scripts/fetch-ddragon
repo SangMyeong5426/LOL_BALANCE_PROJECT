@@ -40,10 +40,12 @@ def in_scope(version: str) -> bool:
 
 def main() -> int:
     take_all = "--all" in sys.argv
+    # 버전을 주면 그것만 받는다 — 우리 구간 뒤 패치의 방향 라벨을 만들 때(ADR 0012)
+    wanted = [a for a in sys.argv[1:] if not a.startswith("-")]
     versions = json.loads(
         get_with_retry(f"{BASE}/api/versions.json", validate=json.loads).decode()
     )
-    targets = versions if take_all else [v for v in versions if in_scope(v)]
+    targets = wanted or (versions if take_all else [v for v in versions if in_scope(v)])
     targets = sorted(set(targets))
     print(f"대상 {len(targets)}개 버전 (전체 {len(versions)}개 중)", flush=True)
 
