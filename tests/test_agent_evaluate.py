@@ -339,3 +339,59 @@ def test_tokens_count_what_was_sent_and_returned() -> None:
     assert counter.input == 4 + 4 + 10  # 낱말 넷 + 역할 몫 + 도구 정의
     assert counter.output > 4
     assert (counter.local_in, counter.local_out) == (30, 5)
+
+
+def test_stated_share_reads_the_counts_the_model_copied() -> None:
+    """이유가 옮겨 적은 이웃 셈을 뽑는다 — 없으면 None."""
+    assert ev.stated_share("유사 사례 25 건 중 버프 18 건, 너프 7 건") == 7 / 25
+    assert ev.stated_share("너프 20 건, 버프 5 건이다") == 20 / 25
+    assert ev.stated_share("근거가 부족하다") is None
+    assert ev.stated_share("") is None
+
+
+def test_stated_share_reads_both_word_orders() -> None:
+    """**어순이 모델마다 다르다.** 한쪽만 잡으면 그 모델만 0 건이 되어 비교가 거짓이 된다.
+
+    로컬은 「버프 18 건」, gpt-4.1-mini 는 「18건이 버프」로 쓴다.
+    """
+    assert ev.stated_share("과거 25건 사례 중 18건이 버프였고 7건이 너프였다") == 7 / 25
+    assert ev.stated_share("25개 사례 중 18건이 버프였고") == 7 / 25
+    assert ev.stated_share("비슷한 25개 사례 중 23건이 버프 조정이었다") == 2 / 25
+
+
+def test_stated_share_refuses_a_count_it_cannot_close() -> None:
+    """한쪽만 있고 총합을 모르면 비율을 지어내지 않는다."""
+    assert ev.stated_share("18건이 버프였다") is None
+    assert ev.stated_share("25개 사례 중 30건이 버프였다") is None
+
+
+def test_contradictions_catch_a_number_that_fights_its_own_reason() -> None:
+    """**옛 형식이 샜던 자리다.** 「버프가 다수」라고 써 놓고 98 을 적는다."""
+    lines = [
+        {"abstain": False, "nerf_prob": 98, "reason": "버프 24 건, 너프 1 건"},
+        {"abstain": False, "nerf_prob": 15, "reason": "버프 23 건, 너프 2 건"},
+        {"abstain": False, "nerf_prob": 80, "reason": "버프 5 건, 너프 20 건"},
+        {"abstain": True, "nerf_prob": 50, "reason": "버프 24 건, 너프 1 건"},
+        {"abstain": False, "nerf_prob": 60, "reason": "셈이 없다"},
+    ]
+    assert ev.contradictions(lines) == (1, 3)
+
+
+def test_contradictions_ignore_a_split_that_is_nearly_even() -> None:
+    """반반에 가까우면 어느 쪽이라 해도 반대라고 하지 않는다."""
+    lines = [{"abstain": False, "nerf_prob": 60, "reason": "버프 13 건, 너프 12 건"}]
+    assert ev.contradictions(lines) == (0, 0)
+
+
+def test_push_shows_which_side_the_scores_get_dragged_toward(
+    judged: list[ev.Case],
+) -> None:
+    """한쪽만 가운데로 밀리면 두 무리가 겹쳐 순위가 무너진다."""
+    low = [c for c in judged if c.b5 <= 0.2]
+    high = [c for c in judged if c.b5 >= 0.8]
+    if not (low and high):
+        pytest.skip("이 표본에는 한쪽으로 쏠린 사례가 없다")
+    pairs = [(c, c.b5 + 0.3) for c in low] + [(c, c.b5) for c in high]
+    buff_push, nerf_push = ev.push(pairs)
+    assert buff_push == pytest.approx(0.3)
+    assert nerf_push == pytest.approx(0.0)
