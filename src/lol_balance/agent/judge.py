@@ -31,8 +31,10 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.structured_output import ToolStrategy
 from langchain.chat_models import init_chat_model
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.outputs import LLMResult
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.runnables import (
     Runnable,
@@ -42,6 +44,7 @@ from langchain_core.runnables import (
 )
 from langgraph.graph.state import CompiledStateGraph
 
+from lol_balance import spend
 from lol_balance.agent.data import Corpus, lifetime_pro
 from lol_balance.agent.schema import Explanation, Judgment
 from lol_balance.agent.tools import make_tools
@@ -148,7 +151,7 @@ SYSTEM = """당신은 리그 오브 레전드 밸런스 조정 판단을 돕는 
 {at} 패치의 지표를 보고, 다음 패치({nxt})에서 {champion} 이
   ① 조정될 확률 (adjust_prob)
   ② 조정된다면 너프일 확률 (nerf_prob)
-을 0~100 정수로 답합니다.
+을 0~100 정수로 답합니다. **이유에 쓴 결론과 같은 쪽이어야 합니다.**
 
 ## 도구 — 전부 {at} 이전 기록만 보입니다
 - lookup_stats        R3 수치 조회. 챔피언의 과거 지표와 각 패치 다음의 결과
@@ -211,6 +214,37 @@ def guards() -> list[AgentMiddleware[Any, Any, Any]]:
 MAX_OUTPUT = 600
 
 
+class SpendGuard(BaseCallbackHandler):
+    """유료 호출을 **부르기 전에 막고, 부른 뒤에 적는다.**
+
+    호출 상한 미들웨어(ADR 0009)는 한 건 안의 루프를 막는다. 이것은 **건과 건
+    사이로 새는 것**을 막는다 — 조금씩 계속 쓰는 쪽은 아무도 안 보고 있었다.
+    로컬 모델에는 아무 일도 하지 않는다.
+    """
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        self.book = spend.ledger(PROJECT_ROOT)
+
+    def on_chat_model_start(
+        self, serialized: Any, messages: Any, **kwargs: Any
+    ) -> None:
+        self.book.check(self.model)
+
+    def on_llm_start(self, serialized: Any, prompts: Any, **kwargs: Any) -> None:
+        self.book.check(self.model)
+
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        for batch in response.generations:
+            for gen in batch:
+                message = getattr(gen, "message", None)
+                if message is None:
+                    continue
+                tin, tout = spend.usage_of(message)
+                if tin or tout:
+                    self.book.add(self.model, tin, tout, why="agent")
+
+
 def chat_model(model: str, **kwargs: Any) -> BaseChatModel:
     """모델을 만든다. **응답 한 번의 길이에 상한을 건다.**
 
@@ -224,7 +258,13 @@ def chat_model(model: str, **kwargs: Any) -> BaseChatModel:
         if model.startswith("ollama:")
         else {"max_tokens": MAX_OUTPUT}
     )
-    llm: BaseChatModel = init_chat_model(model, temperature=0, **{**cap, **kwargs})
+    extra: dict[str, Any] = {}
+    if spend.price(model) is not None:
+        # **유료면 장부를 붙인다.** 상한에 닿으면 호출 전에 멈춘다.
+        extra["callbacks"] = [SpendGuard(model), *kwargs.pop("callbacks", [])]
+    llm: BaseChatModel = init_chat_model(
+        model, temperature=0, **{**cap, **extra, **kwargs}
+    )
     return llm
 
 

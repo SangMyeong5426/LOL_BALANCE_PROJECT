@@ -33,6 +33,14 @@ class Evidence(BaseModel):
 
 
 class Judgment(BaseModel):
+    """**한때 방향을 말로 받아 봤고, 되돌렸다 (2026-09-21).**
+
+    `nerf_prob` 을 모델이 직접 적으면 이유와 반대쪽 숫자가 나오는 일이 25% 있었다.
+    그래서 `direction` + `confidence` 로 바꿔 봤더니 **세 비교 모두에서 더 나빴다** —
+    한쪽을 고르라고 하면 모델이 틀린 쪽에 그냥 선다. 숫자 칸은 50 언저리로
+    망설일 수 있고 그 망설임이 순위에 값을 한다([ADR 0007](../../../docs/adr/0007-answer-schema.md)).
+    """
+
     adjust_prob: int = Field(
         ge=0,
         le=100,
@@ -43,7 +51,7 @@ class Judgment(BaseModel):
         le=100,
         description=(
             "조정된다면 너프일 확률 (0~100 정수). 50 은 반반이다. ② 방향. "
-            "버프 쪽이 유력하면 50 보다 작게 준다"
+            "**이유에 쓴 결론과 같은 쪽이어야 한다** — 버프가 유력하면 50 보다 작게 준다"
         ),
     )
     reason: str = Field(description="판단 이유 두세 문장. 도구로 확인한 것만 쓴다")

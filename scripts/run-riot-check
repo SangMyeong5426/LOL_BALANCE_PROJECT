@@ -77,7 +77,16 @@ def describe(patch: str, matches: list[Match]) -> None:
     picks, wins = sum(t.picks.values()), sum(t.wins.values())
     print(f"## {patch} — 직접 집계 {t.games:,}판 · 뽑은 선수 {players:,}명")
     print("  플랫폼  " + " · ".join(f"{p} {n:,}" for p, n in sorted(platforms.items())))
-    print(f"  기간    {when(min(starts))} ~ {when(max(starts))}")
+    # **언제 모았는지가 승률을 흔든다** — 한 날에 몰리면 그 날의 메타가 패치
+    # 전체를 대표해 버린다(ADR 0010 · run-item-effect 의 날짜 균등).
+    per_day = Counter(
+        datetime.fromtimestamp(ms / 1000, UTC).strftime("%Y-%m-%d") for ms in starts
+    )
+    busiest = max(per_day.values())
+    print(
+        f"  기간    {when(min(starts))} ~ {when(max(starts))}"
+        f" · {len(per_day)}일 · 하루 최대 {busiest:,}판 ({busiest / len(starts):.0%})"
+    )
     print("  버전    " + " · ".join(f"{v} {n:,}" for v, n in versions.most_common(4)))
     ok = "맞다" if picks == 10 * t.games else "**어긋난다**"
     print(f"  항등식  픽 {picks:,} = 10 × 판수 — {ok} · 전체 승률 {wins / picks:.4%}")

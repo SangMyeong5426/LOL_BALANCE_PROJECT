@@ -20,6 +20,9 @@ cp runs/agent-dev-r1-ollama-qwen3.5-9b-nothink-no50.jsonl ground_truth/agent/dev
 
 **다 돈 것만 옮긴다.** `run-agent` 는 이어받으므로 `runs/` 의 기록은 중간일 수 있다.
 
+`r1v2` 는 **같은 변형(`r1`)에 답 형식만 바꾼 것**이다. 이름을 나눠 둔 것은 옛 기록을
+덮지 않기 위해서다 — 형식을 바꾼 효과는 그 둘을 나란히 놓아야 보인다.
+
 ## 파일
 
 | 파일 | 표본 | 변형 | 모델 | 50 금지 | |
@@ -30,6 +33,8 @@ cp runs/agent-dev-r1-ollama-qwen3.5-9b-nothink-no50.jsonl ground_truth/agent/dev
 | `dev-r1-ollama-qwen3.5-2b-nothink` | 개발 114 | `r1` | 2b | | |
 | `dev-r1-ollama-qwen3.5-2b-nothink-no50` | 개발 114 | `r1` | 2b | ✓ | |
 | `dev-r1-ollama-qwen3.5-9b-nothink-no50` | 개발 114 | `r1` | 9b | ✓ | |
+| `dev-r1v2-ollama-qwen3.5-9b-nothink-no50` | 개발 114 | `r1` | 9b | ✓ | **답 형식을 바꾼 뒤** (방향 + 확신 · ADR 0007) |
+| `dev-r1v2-openai-gpt-4.1-mini-no50` | 개발 25 | `r1` | gpt-4.1-mini | ✓ | 같은 형식 · 유료 모델. 앞 25건만 |
 
 규칙 에이전트(`--model rule`)의 기록은 두지 않는다. LLM 이 아니라 코드라서 언제
 돌려도 같은 것이 나온다.

@@ -133,7 +133,8 @@ SYSTEM = """당신은 리그 오브 레전드 밸런스 조정 판단을 돕는 
 ## 과제
 대상 {key} 는 다음 패치에 **조정되는 것이 확정**된 챔피언입니다.
 조정 여부가 아니라 **방향만** 판단합니다 — 너프인가 버프인가.
-nerf_prob 에 너프일 확률을 0~100 정수로 답합니다. adjust_prob 는 100 으로 둡니다.
+nerf_prob 에 너프일 확률을 0~100 정수로 답합니다. **이유에 쓴 결론과 같은 쪽이어야
+합니다** — 버프가 유력하면 50 보다 작게 줍니다. adjust_prob 는 100 으로 둡니다.
 
 ## 도구
 {tools}
@@ -425,6 +426,91 @@ def _answered(
     ]
 
 
+# ── 답이 자기 이유와 맞나 ─────────────────────────────────────────────
+
+# **어순이 모델마다 다르다.** 로컬은 「버프 18 건」, gpt-4.1-mini 는 「18건이 버프」로
+# 쓴다. 한쪽만 잡으면 그 모델만 0 건으로 나와 비교가 거짓이 된다.
+_COUNTED = {
+    "buff": (
+        re.compile(r"버프\s*(\d+)\s*건"),
+        re.compile(r"(\d+)\s*건[이은는]?\s*버프"),
+    ),
+    "nerf": (
+        re.compile(r"너프\s*(\d+)\s*건"),
+        re.compile(r"(\d+)\s*건[이은는]?\s*너프"),
+    ),
+}
+
+
+def _count(reason: str, side: str) -> int | None:
+    for pattern in _COUNTED[side]:
+        found = pattern.search(reason)
+        if found:
+            return int(found.group(1))
+    return None
+
+
+def stated_share(reason: str) -> float | None:
+    """이유 문장이 적은 **너프 비율**. 이웃 셈이 없으면 `None`.
+
+    모델은 「유사 사례 25 건 중 버프 18 건, 너프 7 건」처럼 도구가 준 셈을 그대로
+    옮겨 적는다. 그 비율은 `B5s` 와 같아야 하고, 실제로 같았다(122/122 · 상관 1.000).
+    그래서 **이 값과 점수를 견주면 「읽기」와 「적기」를 가를 수 있다.**
+
+    한쪽만 적은 문장(「25개 사례 중 18건이 버프」)은 나머지를 총합에서 뺀다.
+    """
+    text = reason or ""
+    buff, nerf = _count(text, "buff"), _count(text, "nerf")
+    if buff is not None and nerf is not None:
+        return nerf / (buff + nerf) if buff + nerf else None
+    known = buff if buff is not None else nerf
+    if known is None:
+        return None
+    total = re.search(r"(\d+)\s*(?:개|건)\s*(?:사례|의 사례|중)", text)
+    if total is None:
+        return None
+    whole = int(total.group(1))
+    if known > whole or whole == 0:
+        return None
+    other = whole - known
+    return (other if buff is not None else known) / whole
+
+
+def contradictions(lines: Sequence[dict[str, Any]]) -> tuple[int, int]:
+    """(이유와 반대쪽인 건, 방향이 적힌 건).
+
+    **옛 형식이 여기서 샜다** — 이유는 버프라고 써 놓고 `nerf_prob` 에 98 을 적는
+    일이 108건 중 27건이었다([ADR 0007](../../../docs/adr/0007-answer-schema.md)).
+    방향을 말로 받은 뒤로는 구조적으로 0 이어야 한다.
+    """
+    flipped = counted = 0
+    for x in lines:
+        if x["abstain"] or x.get("nerf_prob") is None:
+            continue
+        said = stated_share(x.get("reason", ""))
+        if said is None or abs(said - 0.5) < 0.04:
+            continue
+        counted += 1
+        if (said > 0.5) != (x["nerf_prob"] / 100 > 0.5):
+            flipped += 1
+    return flipped, counted
+
+
+def push(pairs: Sequence[tuple[Case, float]]) -> tuple[float, float]:
+    """이웃이 한쪽을 가리킬 때 점수가 **가운데로 얼마나 밀리나** (버프 쪽, 너프 쪽).
+
+    옛 형식은 버프 근거만 +0.14~+0.27 밀어 올리고 너프 근거는 그대로 통과시켰다.
+    한쪽만 밀면 두 무리의 점수가 겹쳐 순위가 무너진다.
+    """
+    out = []
+    for lo, hi in ((0.0, 0.2), (0.8, 1.01)):
+        picked = [(c.b5, v) for c, v in pairs if lo <= c.b5 < hi]
+        out.append(
+            float(np.mean([v - b for b, v in picked])) if picked else float("nan")
+        )
+    return out[0], out[1]
+
+
 def summary(
     all_cases: Sequence[Case],
     lines: Sequence[dict[str, Any]],
@@ -488,9 +574,10 @@ def paired_bootstrap(
 
 # ── 보고 — run-agent 와 score-agent 가 같이 쓴다 ─────────────────────────
 
-# gpt-4o-mini 가격 (100만 토큰당 달러). **2026-09-18 확인** —
-# https://developers.openai.com/api/docs/pricing. 바뀌면 여기만 고친다.
-PRICE = {"standard": (0.15, 0.60), "batch": (0.075, 0.30)}
+# 기본 유료 모델(`gpt-4.1-mini`)의 값, 100만 토큰당 달러. **2026-09-21 확인** —
+# https://developers.openai.com/api/docs/pricing. 바뀌면 여기와 `spend.PRICES` 를 같이 고친다.
+# **이 추정은 옛 기록용이다** — 실제로 부른 건은 `spend` 장부가 제공자 보고값으로 적는다.
+PRICE = {"standard": (0.40, 1.60), "batch": (0.20, 0.80)}
 # 같은 방식으로 더 크게 돌릴 때의 규모 — ① 대상 평가 구간 전체
 TARGET_ROWS = 3433
 # 짝지은 부트스트랩 횟수 — 결과 문서의 `B6` 대 `B5s` 와 같다
@@ -579,12 +666,24 @@ def report(all_cases: Sequence[Case], lines: Sequence[dict[str, Any]]) -> list[s
         f"토큰(OpenAI 기준) · {secs:.1f}초"
     )
     out.append(f"부르지 않은 도구를 출처로 적은 건 {fake}/{len(lines)}")
+    flipped, counted = contradictions(lines)
+    if counted:
+        out.append(
+            f"답이 자기 이유와 반대쪽인 건 {flipped}/{counted}"
+            f" ({flipped / counted:.0%}) — 형식이 아니라 모델이 정한다(ADR 0007)"
+        )
+    buff_push, nerf_push = push(pairs)
+    if pairs:
+        out.append(
+            f"이웃이 가리키는 쪽에서 점수가 가운데로 밀린 정도 —"
+            f" 버프 쪽 {buff_push:+.2f} · 너프 쪽 {nerf_push:+.2f}"
+        )
 
     # **토큰은 이 기록의 대화를 OpenAI 토크나이저로 센 것이다.** 모델이 다르면
     # 도구를 부르는 횟수와 답의 길이가 달라지므로 추정이다 — 규칙 에이전트
     # (호출 2회)가 바닥이다.
     out.append("")
-    out.append("키를 받아 gpt-4o-mini 로 같은 대화를 돌린다면 (추정)")
+    out.append("같은 대화를 gpt-4.1-mini 로 돌린다면 (토크나이저 추정)")
     for mode, (pin, pout) in PRICE.items():
         per = (tin * pin + tout * pout) / 1e6
         out.append(

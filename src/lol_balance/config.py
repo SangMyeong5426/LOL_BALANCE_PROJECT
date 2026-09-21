@@ -16,9 +16,22 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_LLM_MODEL = "claude-opus-5"
 DEFAULT_SEED = 20260824
-# 에이전트는 로컬 모델이 기본이다 — **키 없이 돈다.** 개발 표본에서 골랐다.
+# 에이전트 모델은 **키가 있으면 유료, 없으면 로컬**이다.
+# 로컬 9b 는 근거를 정확히 읽고도 방향을 반대로 고르는 일이 잦았다 — 개발 표본
+# 114건에서 이유와 반대인 답이 33~52% 였고, 같은 근거로 gpt-4.1-mini 는 0% 였다.
+# 키가 없는 사람도 그대로 돌아가야 하므로 **없으면 로컬로 내려온다.**
 # 근거는 docs/adr/0009-agent-framework-and-local-model.md
-DEFAULT_AGENT_MODEL = "ollama:qwen3.5:9b"
+LOCAL_AGENT_MODEL = "ollama:qwen3.5:9b"
+PAID_AGENT_MODEL = "openai:gpt-4.1-mini"
+
+
+def default_agent_model(has_openai_key: bool) -> str:
+    """키가 있으면 유료, 없으면 로컬. `LOL_BALANCE_AGENT_MODEL` 이 둘 다 이긴다."""
+    return PAID_AGENT_MODEL if has_openai_key else LOCAL_AGENT_MODEL
+
+
+# 옛 이름. 키를 안 보는 자리(테스트·문서)가 아직 쓴다.
+DEFAULT_AGENT_MODEL = LOCAL_AGENT_MODEL
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,6 @@ def load_settings(env_file: Path | None = None) -> Settings:
         or DEFAULT_LLM_MODEL,
         anthropic_api_key=key or None,
         agent_model=os.environ.get("LOL_BALANCE_AGENT_MODEL", "").strip()
-        or DEFAULT_AGENT_MODEL,
+        or default_agent_model(bool(os.environ.get("OPENAI_API_KEY", "").strip())),
         riot_api_key=os.environ.get("RIOT_API_KEY", "").strip() or None,
     )

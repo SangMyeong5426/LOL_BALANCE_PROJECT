@@ -6,7 +6,7 @@
 
     adjusted_in         ① 대상의 정답 — 그 패치 노트에 이름이 올랐나
     merge_directions    Data Dragon 과 cdragon 이 반대를 말할 때
-    directions_in       ② 방향의 정답 — 손 라벨이 기계 판정을 이긴다
+    directions_in       ② 방향의 정답 — 손 라벨이 자동 판정을 이긴다
 """
 
 from __future__ import annotations
@@ -90,12 +90,12 @@ def directions_in(
     labels: Path,
     previous_notes: Path | None = None,
 ) -> dict[str, tuple[Direction, str]]:
-    """그 패치의 챔피언별 방향. **손 라벨이 기계 판정을 이긴다.**
+    """그 패치의 챔피언별 방향. **손 라벨이 자동 판정을 이긴다.**
 
     `previous_notes` 는 직전 패치 노트가 다른 폴더에 있을 때 준다 — 우리 구간 밖
     노트는 `live/` 에 있어서 `16_16` 의 직전(`16_15`)은 본 폴더에 있다.
 
-    기계 판정은 두 출처를 합친 것이다.
+    자동 판정은 두 출처를 합친 것이다.
 
         auto    Data Dragon — 스탯 · 쿨다운 · 코스트 · 사거리
         value   CommunityDragon — 피해량 · 계수 (ADR-0005)
@@ -140,7 +140,7 @@ def directions_in(
             continue
         out[name] = (merged, _source(from_stats, from_values))
 
-    # **손 라벨이 마지막에 덮는다.** 순서가 뒤집히면 기계 판정이 이긴다.
+    # **손 라벨이 마지막에 덮는다.** 순서가 뒤집히면 자동 판정이 이긴다.
     for label in read_labels(labels / f"{patch}.jsonl"):
         out[label.champion] = (label.direction, "label")
     return out
