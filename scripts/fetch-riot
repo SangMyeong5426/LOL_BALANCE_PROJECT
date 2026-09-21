@@ -6,7 +6,7 @@ docs/adr/0010-riot-api-direct-aggregation.md. 없어도 기존 결과는 전부 
 
     ./scripts/fetch-riot 16_15 --since 2026-07-28 --until 2026-07-31T14:05:23Z --per-region 2500
     ./scripts/fetch-riot 16_18 --since 2026-09-11 --per-region 1500
-    ./scripts/fetch-riot 16_18 --since 2026-09-17 --add 300     # 매일 쌓기
+    ./scripts/fetch-riot 16_18 --since 2026-09-17 --add 300     # 매일 수집
 
 플랫폼(`kr` · `euw1` · `na1`)마다 따로 돈다. 요청 한도가 권역마다 따로 걸리므로
 셋을 동시에 돌리면 세 배 빠르다.
