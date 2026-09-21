@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""① 대상 예측이 **왜 안 맞나** — 틀린 것을 종류별로 갈라 본다.
+
+    ./scripts/diagnose-predict 16_16 --snapshot eval-2026-09-21
+    ./scripts/diagnose-predict 16_16 16_17 --top 10
+
+② 방향(너프냐 버프냐)과 섞지 않는다. 여기서 보는 것은 **누가 조정되는가** 하나다.
+
+틀린 것을 넷으로 나눈다.
+
+    추천했는데 안 됨      상위 N 에 넣었는데 다음 패치 노트에 없다
+    반대로 조정됨        상위 N 에 넣었고 조정도 됐는데 방향이 반대다
+    조정됐는데 빠짐      노트에 있는데 상위 N 밖이다 — 순위와 점수를 같이 적는다
+    표본 부족으로 제외    노트에 있는데 `--min-matches` 아래라 아예 못 봤다
+
+각 줄에 순위·점수·표본 수·피처·노트 근거를 붙인다. **사후 노트는 오류 분석에만
+쓴다** — 예측 입력에는 안 들어간다(ADR 0012).
+
+키가 필요 없다 — 받아 둔 것을 읽기만 한다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance import snapshot  # noqa: E402
+from lol_balance.arms import rank_candidates  # noqa: E402
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.panel import PanelRow, patch_index  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+PREDICT = ROOT / "scripts" / "run-live-predict"
+
+
+def load_predict():
+    """`run-live-predict` 를 모듈로 읽는다 — 예측 경로를 그대로 쓴다."""
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader("rlp", str(PREDICT))
+    spec = importlib.util.spec_from_loader("rlp", loader)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["rlp"] = mod
+    loader.exec_module(mod)
+    return mod
+
+
+def evidence(rlp, patch: str, champion: str) -> str:
+    """그 챔피언이 노트에서 어떤 절에 걸렸나 — 사후 근거다."""
+    notes = rlp.adjusted(patch)
+    return "노트에 있음" if champion in notes else "노트에 없음"
+
+
+def kinds(
+    rlp,
+    patch: str,
+    top: int,
+    min_matches: int,
+    pinned: dict[str, frozenset[str]] | None,
+) -> dict[str, object]:
+    panel = read_panel(PANEL)
+    patches = [p for p in rlp.collected() if patch_index(p) <= patch_index(patch)]
+    rows = rlp.build(patches, panel, min_matches, None, pinned)
+    test = rows[patch]
+    train = tuple(r for r in panel if r.patch_index < patch_index(patch))
+    nxt = rlp.next_name(patch)
+    answer = rlp.adjusted(nxt)
+    seed = load_settings().seed
+
+    # 표본 문턱을 없애면 누가 더 보이나 — 「제외돼서 못 맞힌 것」을 세려면 필요하다.
+    wide = rlp.build(patches, panel, 0, None, pinned)[patch]
+    seen = {r.champion for r in test}
+    dropped = [r for r in wide if r.champion not in seen and r.champion in answer]
+
+    score = rank_candidates(train, test, want=None, with_pro=True, seed=seed)
+    order = np.argsort(-score)
+    rank = {test[int(i)].champion: n + 1 for n, i in enumerate(order)}
+    picked = [test[int(i)] for i in order[:top]]
+
+    hit = [r for r in picked if r.champion in answer]
+    miss_picked = [r for r in picked if r.champion not in answer]
+    missed = sorted(
+        (r for r in test if r.champion in answer and rank[r.champion] > top),
+        key=lambda r: rank[r.champion],
+    )
+
+    def line(r: PanelRow) -> dict[str, object]:
+        return {
+            "champion": r.champion,
+            "rank": rank.get(r.champion),
+            "score": round(
+                float(score[[t.champion for t in test].index(r.champion)]), 3
+            )
+            if r.champion in rank
+            else None,
+            "matches": r.matches,
+            "win_rate": round(r.win_rate, 4),
+            "d_win_rate": None if r.d_win_rate is None else round(r.d_win_rate, 4),
+            "pick_rate": round(r.pick_rate, 4),
+            "ban_rate": round(r.ban_rate, 4),
+            "history_len": r.history_len,
+            "recent_adjustments": r.recent_adjustments,
+            "high_wr_streak": r.high_wr_streak,
+            "pro_pick_rate": None
+            if r.pro_pick_rate is None
+            else round(r.pro_pick_rate, 4),
+            "note": evidence(rlp, nxt, r.champion),
+        }
+
+    return {
+        "base": patch,
+        "answer_patch": nxt,
+        "top": top,
+        "min_matches": min_matches,
+        "targets": len(test),
+        "targets_no_threshold": len(wide),
+        "adjusted_in_answer": len(answer),
+        "adjusted_among_targets": sum(r.champion in answer for r in test),
+        "baseline_rate": round(sum(r.champion in answer for r in test) / len(test), 4)
+        if test
+        else 0.0,
+        "hit": [line(r) for r in hit],
+        "recommended_not_adjusted": [line(r) for r in miss_picked],
+        "adjusted_but_ranked_below": [line(r) for r in missed],
+        "dropped_by_threshold": [
+            {"champion": r.champion, "matches": r.matches, "note": "노트에 있음"}
+            for r in dropped
+        ],
+    }
+
+
+def show(out: dict) -> None:
+    print(
+        f"## {out['base']} → {out['answer_patch']} · 상위 {out['top']}"
+        f" · 문턱 {out['min_matches']}판"
+    )
+    print(
+        f"  대상 {out['targets']}종 (문턱 없으면 {out['targets_no_threshold']}종)"
+        f" · {out['answer_patch']} 조정 {out['adjusted_in_answer']}종"
+        f" 중 대상 안 {out['adjusted_among_targets']}종"
+        f" · 기준선 {out['baseline_rate']:.1%}"
+    )
+    n_hit = len(out["hit"])
+    expect = out["baseline_rate"] * out["top"]
+    print(
+        f"  맞힌 것 {n_hit}/{out['top']} (기준선이면 {expect:.1f}) ·"
+        f" 재현율 {n_hit}/{out['adjusted_among_targets']}"
+    )
+    for name, key in (
+        ("맞힘", "hit"),
+        ("추천했는데 안 됨", "recommended_not_adjusted"),
+        ("조정됐는데 순위 밖", "adjusted_but_ranked_below"),
+    ):
+        rows = out[key]
+        if not rows:
+            continue
+        print(f"\n  [{name}] {len(rows)}건")
+        for r in rows:
+            print(
+                f"    {str(r['rank']):>3}위 {r['champion']:14} 점수 {r['score']:.2f}"
+                f" · {r['matches']:>4}판 · 승률 {r['win_rate']:.1%}"
+                f" · 최근조정 {r['recent_adjustments']} · 고승률연속 {r['high_wr_streak']}"
+            )
+    if out["dropped_by_threshold"]:
+        rows = out["dropped_by_threshold"]
+        print(f"\n  [표본 부족으로 아예 못 봄] {len(rows)}건 — 조정됐는데 문턱 아래다")
+        for r in rows:
+            print(f"    {r['champion']:14} {r['matches']:>4}판")
+    print()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("patches", nargs="+", help="기준 패치 — 예: 16_16 16_17")
+    parser.add_argument("--top", type=int, default=5)
+    parser.add_argument("--min-matches", type=int, default=200)
+    parser.add_argument("--snapshot", metavar="이름", help="고정 묶음으로 읽는다")
+    parser.add_argument("--json", metavar="경로", help="자세한 것을 파일로")
+    args = parser.parse_args()
+
+    rlp = load_predict()
+    pinned = snapshot.ids(ROOT, args.snapshot) if args.snapshot else None
+    if args.snapshot:
+        print(snapshot.label(ROOT, args.snapshot) + "\n")
+    else:
+        print("⚠ 고정 묶음 없이 돈다 — 매일 수집이 불린 최신 자료다\n")
+
+    everything = []
+    for patch in args.patches:
+        out = kinds(rlp, patch, args.top, args.min_matches, pinned)
+        show(out)
+        everything.append(out)
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps(everything, ensure_ascii=False, indent=2) + "\n"
+        )
+        print(f"자세한 것 → {args.json}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

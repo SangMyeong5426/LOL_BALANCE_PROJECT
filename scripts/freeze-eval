@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""평가에 쓸 **고정 데이터 묶음**을 만든다 — 매일 수집이 불려도 안 움직인다.
+
+    ./scripts/freeze-eval                      # 지금 있는 것 전부로 묶음 하나
+    ./scripts/freeze-eval --name pre-16_19     # 이름을 붙인다
+    ./scripts/freeze-eval --list               # 만들어 둔 묶음
+
+**왜 필요한가.** 매일 수집(`fetch-riot-daily`)이 현재 패치를 계속 불린다. 같은
+분석을 다음 날 돌리면 다른 숫자가 나온다. 「현황 화면」은 그래야 맞지만 **코드나
+모델을 견주는 자리에서는 같은 자료를 읽어야 한다** — 안 그러면 무엇이 바뀌어서
+숫자가 달라졌는지 못 가른다.
+
+묶음은 **경기 ID 목록**이다. 집계값이 아니라 어느 경기를 셌는지를 굳힌다. 집계는
+코드가 바뀌면 바뀌어야 하고, 그 차이를 보려고 자료를 굳히는 것이다.
+
+    data/snapshots/<이름>/           경기 ID 목록 (원자료라 커밋하지 않는다)
+    ground_truth/snapshots/<이름>.json   해시와 셈 (커밋한다)
+
+**덮어쓰지 않는다.** 같은 이름이 있으면 멈춘다.
+
+키가 필요 없다 — 받아 둔 것을 읽기만 한다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import subprocess
+import sys
+from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.riot import SCHEMA, invalid, loads  # noqa: E402
+
+RIOT = ROOT / "data" / "riot"
+OUT = ROOT / "data" / "snapshots"
+MANIFEST = ROOT / "ground_truth" / "snapshots"
+
+
+def git(*args: str) -> str:
+    done = subprocess.run(
+        ["git", *args], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    return done.stdout.strip()
+
+
+def code_version() -> dict[str, object]:
+    """무엇으로 만들었나. **작업 트리가 더러우면 그대로 적는다.**"""
+    dirty = git("status", "--porcelain", "--untracked-files=no")
+    return {
+        "commit": git("rev-parse", "HEAD"),
+        "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "dirty": bool(dirty),
+        "dirty_files": sorted(line[3:] for line in dirty.splitlines()) if dirty else [],
+    }
+
+
+def digest(items: list[str]) -> str:
+    h = hashlib.sha256()
+    for x in items:
+        h.update(x.encode())
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def freeze(name: str) -> int:
+    folder, manifest = OUT / name, MANIFEST / f"{name}.json"
+    for path in (folder, manifest):
+        if path.exists():
+            print(f"{path} 가 이미 있다. 덮어쓰지 않는다", file=sys.stderr)
+            return 2
+
+    patches: dict[str, object] = {}
+    totals = Counter()
+    for d in sorted(p for p in RIOT.iterdir() if p.is_dir() and p.name[0].isdigit()):
+        kept: list[str] = []
+        seen: set[str] = set()
+        dup = 0
+        dropped: Counter[str] = Counter()
+        platform: Counter[str] = Counter()
+        version: Counter[str] = Counter()
+        span = [float("inf"), float("-inf")]
+        for f in sorted(d.glob("*.jsonl")):
+            for line in f.read_text().splitlines():
+                if not line.strip():
+                    continue
+                m = loads(line)
+                if m.match_id in seen:
+                    dup += 1
+                    continue
+                seen.add(m.match_id)
+                why = invalid(m)
+                if why:
+                    dropped[why] += 1
+                    continue
+                kept.append(m.match_id)
+                platform[m.platform] += 1
+                version[".".join(m.version.split(".")[:3])] += 1
+                span[0] = min(span[0], m.start_ms)
+                span[1] = max(span[1], m.start_ms)
+        kept.sort()
+        (folder).mkdir(parents=True, exist_ok=True)
+        (folder / f"{d.name}.txt").write_text("\n".join(kept) + "\n")
+        patches[d.name] = {
+            "games": len(kept),
+            "sha256": digest(kept),
+            "stored": len(seen) + dup,
+            "duplicate_ids": dup,
+            "dropped": dict(dropped),
+            "platform": dict(sorted(platform.items())),
+            "version": dict(version.most_common()),
+            "first_game": when(span[0]),
+            "last_game": when(span[1]),
+        }
+        totals["games"] += len(kept)
+        totals["dropped"] += sum(dropped.values())
+
+    settings = load_settings()
+    body = {
+        "name": name,
+        "as_of": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "purpose": "코드·모델 비교 — 같은 자료를 읽어야 하는 자리",
+        "include": "data/riot 의 경기 중 riot.invalid 이 통과시킨 것 전부",
+        "exclude": "이긴 쪽이 다섯이 아닌 경기 · 다른 플랫폼 id 를 가진 경기 · 같은 id 중복",
+        "schema": SCHEMA,
+        "seed": settings.seed,
+        "agent_model": settings.agent_model,
+        "llm_model": settings.llm_model,
+        "code": code_version(),
+        "totals": dict(totals),
+        "patches": patches,
+    }
+    MANIFEST.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n")
+
+    print(f"묶음 «{name}» — 경기 {totals['games']:,} · 제외 {totals['dropped']:,}")
+    for patch, info in patches.items():
+        assert isinstance(info, dict)
+        print(f"  {patch:6} {info['games']:6,}판  sha256 {str(info['sha256'])[:16]}…")
+    print(f"\n  ID 목록  {folder}")
+    print(f"  해시·셈  {manifest}")
+    if body["code"]["dirty"]:  # type: ignore[index]
+        print("  ⚠ 작업 트리에 커밋 안 된 변경이 있다 — 묶음에 그대로 적었다")
+    return 0
+
+
+def when(ms: float) -> str:
+    return datetime.fromtimestamp(ms / 1000, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--name", help="묶음 이름 (기본: 지금 시각)")
+    parser.add_argument("--list", action="store_true", help="만들어 둔 묶음")
+    args = parser.parse_args()
+
+    if args.list:
+        found = sorted(MANIFEST.glob("*.json")) if MANIFEST.is_dir() else []
+        if not found:
+            print("묶음이 없다. ./scripts/freeze-eval 로 만든다")
+            return 0
+        for f in found:
+            b = json.loads(f.read_text())
+            here = "있음" if (OUT / b["name"]).is_dir() else "**ID 목록 없음**"
+            print(
+                f"{b['name']:24} {b['as_of']}  경기 {b['totals']['games']:,}"
+                f"  코드 {b['code']['commit'][:8]}  ID 목록 {here}"
+            )
+        return 0
+
+    name = args.name or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return freeze(name)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

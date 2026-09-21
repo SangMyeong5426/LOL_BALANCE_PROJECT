@@ -31,3 +31,4 @@
 - [ADR 0010: u.gg 가 끊긴 뒤를 Riot API 로 직접 센다 — 키가 필요한 선택 경로](0010-riot-api-direct-aggregation.md)
 - [ADR 0011: 챔피언별 아이템 사용을 최종 아이템으로 센다](0011-champion-item-usage.md)
 - [ADR 0012: 직접 집계로 다음 패치를 예측한다 — 학습은 u.gg, 대상만 우리 집계](0012-predicting-with-direct-aggregation.md)
+- [ADR 0013: 평가는 고정 묶음을 읽는다](0013-frozen-evaluation-snapshots.md)
