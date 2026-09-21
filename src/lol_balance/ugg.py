@@ -133,7 +133,7 @@ def check_win_rate_identity(ranking: ChampionRanking, tolerance: float = 2e-3) -
 
 
 def check_games_identity(ranking: ChampionRanking) -> None:
-    """선수-게임 합계가 게임 수의 10배인지 확인한다.
+    """이용자-게임 합계가 게임 수의 10배인지 확인한다.
 
     한 게임에 열 명이 들어가므로 그래야 한다. 역할이 빠졌거나 응답이 잘리면
     여기서 걸린다.

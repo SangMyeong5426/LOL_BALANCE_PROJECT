@@ -6,7 +6,7 @@
 가장 먼저 지키는 것은 둘이다.
 
 1. **키는 헤더로만 간다** — 주소에 들어가면 로그와 오류 문구에 남는다
-2. **선수를 가리키는 칸은 저장되지 않는다** — `slim` 이 버린다
+2. **이용자를 가리키는 칸은 저장되지 않는다** — `slim` 이 버린다
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def payload(
     remake: bool = False,
     start_ms: int = START_MS,
 ) -> dict[str, Any]:
-    """매치 응답 흉내. **선수 식별 칸을 일부러 넣어 둔다** — 버려지는지 본다."""
+    """매치 응답 흉내. **이용자 식별 칸을 일부러 넣어 둔다** — 버려지는지 본다."""
     participants = [
         {
             "puuid": f"secret-puuid-{i}",
@@ -490,7 +490,7 @@ def test_collect_keeps_only_the_patch_and_skips_the_rest(
     origins = {(m.origin.tier, m.origin.division) for m in written}
     assert origins <= {("EMERALD", "IV"), ("CHALLENGER", "")}
     assert all(m.origin.looked_up > 0 for m in written)
-    assert "더 뽑을 선수가 없다" in lines[-1]
+    assert "더 뽑을 이용자가 없다" in lines[-1]
     # 랭킹은 플랫폼에, 경기는 권역에 묻는다
     hosts = {host for host, path in small_ladder.calls if "/league/" in path}
     assert hosts == {"kr"}
@@ -519,7 +519,7 @@ def test_collect_stops_when_nobody_played_in_the_window(
     got, _, _, lines = run_collect(small_ladder, target=5)
 
     assert got == 0
-    assert "창 안에 경기가 있는 선수가" in lines[-1]
+    assert "창 안에 경기가 있는 이용자가" in lines[-1]
 
 
 def test_collect_stops_when_every_fetched_game_is_another_patch(
@@ -697,7 +697,7 @@ def test_player_bootstrap_is_seeded_and_clusters_by_player() -> None:
     assert once == again
     assert all(v > 0 for v in once["pick"].values())
 
-    # 선수가 하나뿐이면 다시 뽑아도 같은 표본이다 — 퍼짐이 0
+    # 이용자가 하나뿐이면 다시 뽑아도 같은 표본이다 — 퍼짐이 0
     alone = [Match(**{**m.__dict__, "player": 0}) for m in matches]
     spread = player_bootstrap(alone, draws=50, seed=1)["pick"].values()
     assert max(spread) == pytest.approx(0.0, abs=1e-12)
