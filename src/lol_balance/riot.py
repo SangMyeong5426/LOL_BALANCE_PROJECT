@@ -32,6 +32,7 @@ from collections import Counter, deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
@@ -71,6 +72,12 @@ PER_PLAYER = 20
 # 창 안에 경기가 없는 선수가 이만큼 이어지면 멈춘다. 창을 잘못 줬거나 과거가
 # 너무 멀어 지금 랭커가 그때 안 뛰었다는 뜻이라, 계속 돌리면 한도만 쓴다.
 MAX_IDLE_PLAYERS = 400
+
+# 받은 경기가 **전부** 버려지는 선수가 이만큼 이어져도 멈춘다. 패치가 바뀌는 날
+# Data Dragon 이 라이브보다 앞서거나 뒤처지면 창 안 경기가 전부 다른 패치라서,
+# 이것이 없으면 사다리 전체를 돌며 한도만 쓴다 — 매일 수집이 그렇게 며칠씩 막힐
+# 수 있었다(2026-09-20 감사). 선수 40명이면 요청 800회 남짓, 15분이다.
+MAX_WASTED_PLAYERS = 40
 
 # 요청에 밝히는 이름. **파이썬 기본 이름(`Python-urllib`)은 Cloudflare 가
 # 거절한다**(오류 1010, 2026-09-18). 브라우저로 위장하지 않고 이 프로젝트를 밝힌다.
@@ -385,6 +392,11 @@ def slim(
     if any(p.get("gameEndedInEarlySurrender") for p in participants):
         return None
     picks = tuple(_pick(p) for p in participants)
+    # **이긴 쪽이 정확히 다섯이어야 한다.** `EUW1_7950894381`(16_16 · 822초)은
+    # 열 명 전부 `win: false` 로 왔다 — 조기 항복 표시도 없는 무승부 기록이다.
+    # 그대로 세면 열 패배가 들어가 전체 승률이 50% 에서 어긋난다(2026-09-20 발견).
+    if sum(p.win for p in picks) != 5:
+        return None
     bans = tuple(
         int(b["championId"])
         for team in info.get("teams") or []
@@ -445,6 +457,33 @@ def dumps(match: Match) -> str:
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def invalid(match: Match) -> str | None:
+    """저장된 경기가 셀 수 없는 것이면 그 이유. **형식 2 초기 파일에 둘이 섞여 있었다.**
+
+    `slim` 이 나중에 거르게 된 것을 읽는 쪽에서도 거른다 — 파일을 다시 받지 않아도
+    같은 규칙이 서게. 승자가 다섯이 아닌 경기 1판, 다른 플랫폼에서 치른 경기 88판
+    (2026-09-20 감사).
+    """
+    if sum(p.win for p in match.picks) != 5:
+        return "이긴 쪽이 다섯이 아니다"
+    if match.match_id.split("_", 1)[0] != match.platform.upper():
+        return "다른 플랫폼의 경기다"
+    return None
+
+
+def read_games(folder: Path) -> list[Match]:
+    """한 패치 폴더의 경기 전부. 셀 수 없는 것은 조용히 빼지 않고 `dropped` 로 센다."""
+    out: list[Match] = []
+    for path in sorted(folder.glob("*.jsonl")):
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            m = loads(line)
+            if invalid(m) is None:
+                out.append(m)
+    return out
 
 
 def loads(line: str) -> Match:
@@ -656,6 +695,7 @@ def collect(
     collected = 0
     idle = 0
     misses = 0
+    wasted = 0
     while collected < target:
         pick = draw_player(ladder, groups, rng)
         if pick is None or pick.puuid in drawn:
@@ -677,7 +717,14 @@ def collect(
                 "count": 100,
             },
         )
-        fresh = [str(i) for i in (ids or []) if str(i) not in seen]
+        # 권역 목록에는 다른 플랫폼에서 치른 경기도 섞여 온다(`EUN1_…` 이 euw1
+        # 사다리에). 경기 id 의 앞머리가 이 플랫폼이 아니면 받지 않는다 —
+        # 플랫폼별 비교가 그 플랫폼의 경기여야 하기 때문이다(2026-09-20 감사).
+        fresh = [
+            str(i)
+            for i in (ids or [])
+            if str(i) not in seen and str(i).split("_", 1)[0] == platform.upper()
+        ]
         if not fresh:
             idle += 1
             if idle >= MAX_IDLE_PLAYERS:
@@ -686,6 +733,7 @@ def collect(
             continue
         idle = 0
         player += 1
+        written_here = 0
         for match_id in rng.sample(fresh, min(PER_PLAYER, len(fresh))):
             seen.add(match_id)
             payload = client.get(route, f"/lol/match/v5/matches/{match_id}")
@@ -699,12 +747,20 @@ def collect(
                 continue
             write(match)
             collected += 1
+            written_here += 1
             if collected % 100 == 0:
                 log(
                     f"[{platform}] {collected:,}/{target:,}판 · 선수 {player - first_player}"
                 )
             if collected >= target:
                 break
+        wasted = 0 if written_here else wasted + 1
+        if wasted >= MAX_WASTED_PLAYERS:
+            log(
+                f"[{platform}] 받은 경기가 전부 버려지는 선수가 {wasted}명째다"
+                " — 창 안 경기가 다른 패치다. 멈춘다"
+            )
+            break
     return collected
 
 
@@ -722,7 +778,7 @@ class Tally:
 def tally(matches: Iterable[Match]) -> Tally:
     """판수를 센다. **밴은 경기 단위다** — 한 경기에서 두 팀이 같은 챔피언을 밴해도 한 번.
 
-    처음에는 밴 칸을 그대로 셌다(ADR 0010). 그런데 `16_15` 를 u.gg 와 견주니 밴율만
+    처음에는 밴 칸을 그대로 셌다. 그런데 `16_15` 를 u.gg 와 견주니 밴율만
     계통으로 높았다. 세어 보니 **경기의 45.2% 에서 같은 챔피언이 두 번 밴**됐고,
     칸으로 세면 9.635개/판인데 서로 다른 챔피언은 9.084종/판, u.gg 는 8.939 였다.
     u.gg 가 경기 단위로 센다는 뜻이라 정의를 맞췄다(2026-09-20).

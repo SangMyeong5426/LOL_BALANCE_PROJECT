@@ -9,6 +9,7 @@ from lol_balance.builds import (
     MIN_GAMES,
     Usage,
     core_item_changes,
+    evolved_forms,
     finished_items,
     item_usage,
 )
@@ -16,6 +17,7 @@ from lol_balance.riot import Match, Origin, Pick
 
 ORIGIN = Origin("EMERALD", "I", 0)
 REAVER, BLADE, BOOTS, DAGGER = 3508, 3031, 3006, 1042
+MANAMUNE, MURAMANA = 3004, 3042
 
 ITEMS: dict[str, Any] = {
     str(REAVER): {"name": "Essence Reaver", "gold": {"total": 2900}},
@@ -123,3 +125,28 @@ def test_previous_core_item_that_changed_is_flagged() -> None:
 def test_nothing_changed_means_no_warning() -> None:
     previous = {236: Usage(236, 200, {REAVER: 150})}
     assert core_item_changes(previous, ITEMS, ITEMS) == []
+
+
+def test_evolved_form_counts_as_its_base_item() -> None:
+    """경기 끝에는 Muramana 만 남는다 — Manamune 을 쓴 판으로 세야 한다."""
+    raw: dict[str, Any] = {
+        str(MANAMUNE): {
+            "name": "Manamune",
+            "gold": {"total": 2900, "purchasable": True},
+            "maps": {"11": True},
+        },
+        str(MURAMANA): {
+            "name": "Muramana",
+            "gold": {"total": 2900, "purchasable": False},
+            "maps": {"11": True},
+            "specialRecipe": MANAMUNE,
+        },
+    }
+    back = evolved_forms(raw)
+    assert back == {MURAMANA: MANAMUNE}
+
+    finished = finished_items({str(MANAMUNE): raw[str(MANAMUNE)]})
+    matches = [game(1, {81: (MURAMANA, 0, 0, 0, 0, 0, 0)})]
+
+    assert item_usage(matches, finished)[81].counts == {}  # 되돌리기 전
+    assert item_usage(matches, finished, evolved=back)[81].counts == {MANAMUNE: 1}
