@@ -67,6 +67,9 @@ MIN_GAMES = 100
 DRAWS = 20_000
 # 무리가 이보다 작으면 평균을 말하지 않는다.
 MIN_GROUP = 3
+# 무리가 이보다 작으면 부트스트랩 구간이 **판수에서 나오는 오차보다 좁게** 나온다 —
+# 우연히 모인 몇 값의 퍼짐을 재게 돼서다. 그때는 해석적 구간을 같이 낸다.
+SMALL_GROUP = 15
 # 80% 검정력 · 양측 5% 에서 가를 수 있는 최소 차이 = 이 배수 × 표준오차
 POWER_FACTOR = 2.8
 
@@ -221,13 +224,22 @@ def compare(
         return [math.sqrt(new[c].se ** 2 + old[c].se ** 2) * 100 for c in ids]
 
     diff, low, high = gap(moved(hit), moved(rest), seed)
-    least = POWER_FACTOR * analytic_se(delta_se(hit), delta_se(rest))
+    se = analytic_se(delta_se(hit), delta_se(rest))
+    least = POWER_FACTOR * se
     verdict = "0 을 지난다" if low <= 0 <= high else "0 을 안 지난다"
     print(
         f"  {label:<24}{len(hit):>3}종 {np.mean(moved(hit)):+.2f}%p · 그 외 {len(rest):>3}종"
         f" {np.mean(moved(rest)):+.2f}%p · 차이 {diff:+.2f}%p [{low:+.2f}, {high:+.2f}]"
         f" {verdict} · 가를 수 있는 최소 차이 {least:.1f}%p"
     )
+    if min(len(hit), len(rest)) < SMALL_GROUP:
+        wide = 1.96 * se
+        narrower = (high - low) / 2 < wide
+        print(
+            f"  {'':<24}└ 무리가 {SMALL_GROUP}종 미만이라 해석적 구간도 낸다"
+            f" [{diff - wide:+.2f}, {diff + wide:+.2f}]"
+            + (" — 부트스트랩 쪽이 더 좁다" if narrower else "")
+        )
 
 
 def span(games: list[Match]) -> str:
@@ -273,6 +285,8 @@ def pair(patch: str, seed: int, champion: dict[int, str]) -> None:
         f"  두 패치 다 {MIN_GAMES}판 넘는 챔피언 {len(both)}종 · 주요 아이템이 바뀐"
         f" {len(flagged)}종 (판수 모자라 빠짐 {len(dropped)}: {', '.join(dropped) or '없음'})"
         f" · {patch} 에 직접 조정된 {len(same)}종은 본 결과에서 뺀다"
+        f" (바뀐 쪽 {len(same & flagged)}/{len(set(both) & flagged)}"
+        f" · 그 외 {len(same - flagged)}/{len(set(both) - flagged)})"
     )
     if not flagged:
         print("  아이템 값이 안 바뀌어 견줄 것이 없다\n")
@@ -301,25 +315,37 @@ def pair(patch: str, seed: int, champion: dict[int, str]) -> None:
     # 위약 — 아이템이 안 바뀐 같은 패치 안에서 앞 반 → 뒤 반. 비슷한 차이가 나오면
     # 그것은 아이템이 아니라 시간과 표본이 만든 것이다.
     cut = sorted(m.start_ms for m in old_games)[len(old_games) // 2]
-    early = win_rates([m for m in old_games if m.start_ms < cut], False)
-    late = win_rates([m for m in old_games if m.start_ms >= cut], False)
+    first_half = [m for m in old_games if m.start_ms < cut]
+    second_half = [m for m in old_games if m.start_ms >= cut]
     half = MIN_GAMES // 2
-    ok = [
-        c
-        for c in hit_all + rest_all
-        if c in early and c in late and early[c].games >= half and late[c].games >= half
-    ]
     print(
-        f"\n  위약 — {before} 안에서 앞 반 → 뒤 반 (아이템 변경 없음 · 판 단위 · {half}판 이상)"
+        f"\n  위약 — {before} 안에서 앞 반 → 뒤 반 (아이템 변경 없음 · {half}판 이상)"
     )
-    compare(
-        "바뀐 챔피언 전부(방향 무시)",
-        [c for c in ok if c in flagged],
-        [c for c in ok if c not in flagged],
-        early,
-        late,
-        seed,
-    )
+    # **본 결과와 같은 방식으로도 낸다.** 위약이 첫 판 방식으로만 나오면, 고친
+    # 방식에 같은 함정이 없다는 것을 아무도 못 본다.
+    for note, equal_days, pool in (
+        ("본 결과와 같게 · 날짜 균등 · 직접 조정 제외", True, clean),
+        ("첫 판과 같게 · 판 단위 · 직접 조정 포함", False, both),
+    ):
+        early = win_rates(first_half, equal_days)
+        late = win_rates(second_half, equal_days)
+        ok = [
+            c
+            for c in pool
+            if c in early
+            and c in late
+            and early[c].games >= half
+            and late[c].games >= half
+        ]
+        print(f"  {note}")
+        compare(
+            "바뀐 챔피언 전부(방향 무시)",
+            [c for c in ok if c in flagged],
+            [c for c in ok if c not in flagged],
+            early,
+            late,
+            seed,
+        )
 
     nxt = f"{patch.split('_')[0]}_{int(patch.split('_')[1]) + 1}"
     later = adjusted(nxt)
