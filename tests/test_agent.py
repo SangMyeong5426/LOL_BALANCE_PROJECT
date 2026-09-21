@@ -278,6 +278,19 @@ def test_fifty_is_refused_only_under_strict() -> None:
     assert StrictJudgment.__name__ == "Judgment"  # 도구 이름이 여기서 나온다
 
 
+def test_the_score_keeps_its_full_range() -> None:
+    """**0~100 정수 그대로다.** 방향+확신으로 바꿔 봤다가 되돌린 자리다.
+
+    한쪽을 고르라고 하면 모델이 틀린 쪽에 그냥 선다 — 세 비교 모두에서 더
+    나빴다(ADR 0007 · 2026-09-21). 숫자 칸은 50 언저리로 망설일 수 있다.
+    """
+    assert Judgment(adjust_prob=100, nerf_prob=0, reason="r").nerf_prob == 0
+    assert Judgment(adjust_prob=100, nerf_prob=100, reason="r").nerf_prob == 100
+    for bad in (-1, 101):
+        with pytest.raises(ValueError):
+            Judgment(adjust_prob=100, nerf_prob=bad, reason="r")
+
+
 # ── 해설자 ─────────────────────────────────────────────────────────────
 
 

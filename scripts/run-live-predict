@@ -3,6 +3,13 @@
 
     ./scripts/run-live-predict 16_16 --score   # 16_17 노트로 채점
     ./scripts/run-live-predict 16_18           # 16_19 예측 — 답이 아직 없다
+    ./scripts/run-live-predict 16_18 --until 2026-09-19   # 그날까지의 자료로만
+    ./scripts/run-live-predict 16_18 --snapshot eval-2026-09-21   # 고정 묶음으로만
+
+**미리 적어 둔 예측은 `--until` 로 고정한다.** 매일 수집이 현재 패치를 계속
+불려서, 같은 명령이 다음 날 다른 목록을 낸다. 미리 공개한 예측을 채점하려면
+공개하던 날의 자료로 잘라야 한다 — 그러지 않으면 아무도 미리 적지 않은 목록을
+채점하게 된다.
 
 `predict` 는 u.gg 패널로 예측한다. 이것은 **예측 대상 패치의 지표만 직접 집계로
 바꾼다**(ADR 0012). 학습은 그대로 u.gg 구간이다.
@@ -18,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import sys
 from pathlib import Path
@@ -26,6 +34,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from lol_balance import snapshot  # noqa: E402
 from lol_balance.arms import rank_candidates  # noqa: E402
 from lol_balance.assemble import (  # noqa: E402
     adjusted_in,
@@ -72,8 +81,23 @@ def collected() -> list[str]:
     )
 
 
-def read(patch: str) -> list[Match]:
-    return read_games(RIOT / patch)
+def read(
+    patch: str,
+    until_ms: float | None = None,
+    keep: frozenset[str] | None = None,
+) -> list[Match]:
+    games = read_games(RIOT / patch)
+    if keep is not None:
+        games = [m for m in games if m.match_id in keep]
+    if until_ms is None:
+        return games
+    return [m for m in games if m.start_ms < until_ms]
+
+
+def cut_at(text: str) -> float:
+    """`YYYY-MM-DD` 를 그날 0시(UTC) 밀리초로. 끝난 패치에는 아무 영향이 없다."""
+    day = datetime.datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=datetime.UTC)
+    return day.timestamp() * 1000
 
 
 def names_at(patch: str) -> dict[int, str]:
@@ -138,7 +162,11 @@ def directions_for(base: str) -> dict[str, tuple[Direction, str]]:
 
 
 def build(
-    patches: list[str], panel: tuple[PanelRow, ...], min_matches: int
+    patches: list[str],
+    panel: tuple[PanelRow, ...],
+    min_matches: int,
+    until_ms: float | None = None,
+    pinned: dict[str, frozenset[str]] | None = None,
 ) -> dict[str, tuple[PanelRow, ...]]:
     """직접 집계가 있는 패치의 행을 시간순으로 만든다. 이력은 앞선 행에서 온다."""
     pro = read_pro(ORACLE) if ORACLE.is_dir() else None
@@ -151,7 +179,7 @@ def build(
         short = patch.replace("_", ".")
         out[patch] = rows_from_ranking(
             patch,
-            ranking(read(patch)),
+            ranking(read(patch, until_ms, pinned.get(patch) if pinned else None)),
             names_at(patch),
             adjusted=adjusted(next_name(patch)),
             known=known,
@@ -167,6 +195,16 @@ def main() -> int:
     parser.add_argument("patch", help="기준 패치 — 예: 16_16")
     parser.add_argument("--top", type=int, default=5)
     parser.add_argument("--score", action="store_true", help="답이 있으면 채점한다")
+    parser.add_argument(
+        "--until",
+        metavar="YYYY-MM-DD",
+        help="그날 0시(UTC) 전 경기만 쓴다 — 미리 적어 둔 예측을 그대로 되살린다",
+    )
+    parser.add_argument(
+        "--snapshot",
+        metavar="이름",
+        help="고정 묶음의 경기만 쓴다 — 코드·모델을 견줄 때(./scripts/freeze-eval)",
+    )
     parser.add_argument(
         "--min-matches",
         type=int,
@@ -184,10 +222,14 @@ def main() -> int:
         print(f"{args.patch} 직접 집계가 없다. 있는 것: {patches}", file=sys.stderr)
         return 2
 
+    until_ms = cut_at(args.until) if args.until else None
+    pinned = snapshot.ids(ROOT, args.snapshot) if args.snapshot else None
     rows = build(
         [p for p in patches if patch_index(p) <= patch_index(args.patch)],
         panel,
         args.min_matches,
+        until_ms,
+        pinned,
     )
     test = rows[args.patch]
     train = tuple(r for r in panel if r.patch_index < patch_index(args.patch))
@@ -202,6 +244,18 @@ def main() -> int:
         f" · 방향 라벨 {sum(r.direction_next is not None for r in test)}종"
     )
     print("  ⚠ 학습은 u.gg, 대상은 직접 집계다 — 출처가 다른 입력이다(ADR 0012)")
+    seen = read(args.patch, until_ms, pinned.get(args.patch) if pinned else None)
+    print(
+        f"  {args.patch} 자료 {len(seen):,}판"
+        + (f" · {args.until} 0시(UTC) 이전으로 잘랐다" if args.until else "")
+    )
+    if args.snapshot:
+        print("  " + snapshot.label(ROOT, args.snapshot))
+    if not args.until and not args.snapshot:
+        print(
+            "  ⚠ 매일 수집이 현재 패치를 불린다 — 미리 적어 둔 예측을 채점하려면"
+            " --until 로 그날까지 잘라야 한다"
+        )
     if warn:
         print(f"  ⚠ 앞 패치의 주요 아이템이 {args.patch} 에 바뀐 챔피언 {len(warn)}종")
 

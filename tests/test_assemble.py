@@ -5,7 +5,7 @@
 
     adjusted_in         ① 대상의 정답
     merge_directions    두 기계 출처가 반대를 말할 때
-    directions_in       ② 방향의 정답 — 손 라벨이 기계 판정을 이긴다
+    directions_in       ② 방향의 정답 — 손 라벨이 자동 판정을 이긴다
 """
 
 from __future__ import annotations

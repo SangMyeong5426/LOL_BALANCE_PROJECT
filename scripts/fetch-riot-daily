@@ -33,6 +33,28 @@ VERSIONS = "https://ddragon.leagueoflegends.com/api/versions.json"
 WINDOW_HOURS = 26
 
 
+def code_line() -> str:
+    """**어느 코드가 이 경기를 받았나.**
+
+    예약 작업은 `cd <저장소>` 만 하고 브랜치를 고정하지 않는다. 실험 브랜치를
+    체크아웃해 둔 채 자면 다음 날 수집이 그 코드로 돈다 — 거르는 규칙이나 창이
+    바뀐 코드일 수 있다. 막지는 않는다(하루를 통째로 잃는 쪽이 더 나쁘다).
+    **대신 무엇으로 받았는지 로그에 남겨 나중에 되짚을 수 있게 한다.**
+    """
+
+    def git(*args: str) -> str:
+        done = subprocess.run(
+            ["git", *args], cwd=ROOT, capture_output=True, text=True, check=False
+        )
+        return done.stdout.strip()
+
+    branch = git("rev-parse", "--abbrev-ref", "HEAD") or "?"
+    commit = git("rev-parse", "--short", "HEAD") or "?"
+    dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
+    mark = "" if branch == "main" else "  ⚠ main 이 아니다"
+    return f"코드 {branch} {commit}{' · 작업 트리 더러움' if dirty else ''}{mark}"
+
+
 def current_patch() -> str:
     """Data Dragon 의 가장 새 버전 → 우리 패치 표기."""
     versions = json.loads(get_with_retry(VERSIONS, validate=json.loads).decode())
@@ -48,7 +70,10 @@ def main() -> int:
     patch = current_patch()
     since = datetime.fromtimestamp(time.time() - WINDOW_HOURS * 3600, UTC)
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%MZ")
-    print(f"=== {stamp} · 현재 패치 {patch} · 지난 {WINDOW_HOURS}시간", flush=True)
+    print(
+        f"=== {stamp} · 현재 패치 {patch} · 지난 {WINDOW_HOURS}시간 · {code_line()}",
+        flush=True,
+    )
     return subprocess.call(
         [
             sys.executable,

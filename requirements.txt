@@ -41,6 +41,10 @@ langgraph-checkpoint-sqlite==3.1.1
 # 「ollama:」 접두사를 보고 불러온다. 이것이 키 없는 길이다
 langchain-ollama==1.1.0
 
+# 유료 모델과 견줄 때만 쓴다 — `openai:gpt-4.1-mini`. 키가 없으면 안 불린다.
+# 기본 모델은 그대로 로컬이다(ADR 0009).
+langchain-openai==1.6.2
+
 # 에이전트 화면 (scripts/app). 과정 과제가 Gradio 를 쓴다
 gradio==6.27.0
 
