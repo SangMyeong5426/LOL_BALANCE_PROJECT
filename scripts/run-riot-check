@@ -42,7 +42,7 @@ RIOT = ROOT / "data" / "riot"
 UGG = ROOT / "data" / "ugg" / "champion_ranking"
 DDRAGON = ROOT / "data" / "ddragon"
 
-# 선수 단위 부트스트랩 횟수. 표준오차를 내는 데는 이만하면 된다.
+# 이용자 단위 부트스트랩 횟수. 표준오차를 내는 데는 이만하면 된다.
 DRAWS = 2_000
 # 현재 패치 요약에서 승률을 보여 줄 최소 판수
 MIN_SHOWN = 100
@@ -75,7 +75,7 @@ def describe(patch: str, matches: list[Match]) -> None:
     versions = Counter(".".join(m.version.split(".")[:3]) for m in matches)
     starts = [m.start_ms for m in matches]
     picks, wins = sum(t.picks.values()), sum(t.wins.values())
-    print(f"## {patch} — 직접 집계 {t.games:,}판 · 뽑은 선수 {players:,}명")
+    print(f"## {patch} — 직접 집계 {t.games:,}판 · 뽑은 이용자 {players:,}명")
     print("  플랫폼  " + " · ".join(f"{p} {n:,}" for p, n in sorted(platforms.items())))
     # **언제 모았는지가 승률을 흔든다** — 한 날에 몰리면 그 날의 메타가 패치
     # 전체를 대표해 버린다(ADR 0010 · run-item-effect 의 날짜 균등).
