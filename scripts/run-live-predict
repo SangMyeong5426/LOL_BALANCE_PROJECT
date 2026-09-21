@@ -37,10 +37,10 @@ from lol_balance.builds import (  # noqa: E402
     core_item_changes,
     finished_items,
     item_usage,
+    load_items,
 )
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.direction import Direction  # noqa: E402
-from lol_balance.items import read_items  # noqa: E402
 from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
     MIN_MATCHES,
@@ -48,7 +48,7 @@ from lol_balance.panel import (  # noqa: E402
     champion_names,
     patch_index,
 )
-from lol_balance.riot import Match, loads, ranking  # noqa: E402
+from lol_balance.riot import Match, ranking, read_games  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,12 +73,7 @@ def collected() -> list[str]:
 
 
 def read(patch: str) -> list[Match]:
-    return [
-        loads(line)
-        for path in sorted((RIOT / patch).glob("*.jsonl"))
-        for line in path.read_text().splitlines()
-        if line.strip()
-    ]
+    return read_games(RIOT / patch)
 
 
 def names_at(patch: str) -> dict[int, str]:
@@ -108,8 +103,8 @@ def shaken(patch: str) -> dict[str, str]:
     files = [ITEMS / f"{p.replace('_', '.')}.1.json" for p in (previous, patch)]
     if not all(f.exists() for f in files) or previous not in collected():
         return {}
-    before, after = (read_items(f) for f in files)
-    usage = item_usage(read(previous), finished_items(before))
+    (before, evolved), (after, _) = (load_items(f) for f in files)
+    usage = item_usage(read(previous), finished_items(before), evolved=evolved)
     name = names_at(patch)
     item = {int(k): v.get("name", k) for k, v in after.items()}
     return {
@@ -136,6 +131,7 @@ def directions_for(base: str) -> dict[str, tuple[Direction, str]]:
             cdragon=CDRAGON,
             notes=note_dir(nxt),
             labels=LABELS,
+            previous_notes=note_dir(base),
         )
     except (FileNotFoundError, KeyError):
         return {}
@@ -147,8 +143,11 @@ def build(
     """직접 집계가 있는 패치의 행을 시간순으로 만든다. 이력은 앞선 행에서 온다."""
     pro = read_pro(ORACLE) if ORACLE.is_dir() else None
     out: dict[str, tuple[PanelRow, ...]] = {}
+    # **한 패치가 이력에 두 번 들어가면 안 된다.** `16_13` 은 u.gg 패널에도 있고
+    # 직접 집계(재현 확인용)에도 있다. 패널에 있는 패치는 패널 행만 쓴다.
+    in_panel = {r.patch for r in panel}
     for patch in patches:
-        known = list(panel) + [r for p in out for r in out[p]]
+        known = list(panel) + [r for p in out if p not in in_panel for r in out[p]]
         short = patch.replace("_", ".")
         out[patch] = rows_from_ranking(
             patch,

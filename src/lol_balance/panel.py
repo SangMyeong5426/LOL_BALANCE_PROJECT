@@ -81,6 +81,20 @@ def as_patch(text: str) -> str:
     return re.sub(r"[.\-\s]+", "_", text.strip())
 
 
+def previous_patch(patch: str) -> str | None:
+    """바로 앞 패치. 첫 패치면 None.
+
+    순서표 안이면 순서표를 따른다 — `14_1` 의 앞은 `13_24` 이지 `14_0` 이 아니다.
+    순서표 뒤(직접 집계가 보는 `16_16` 이후)는 같은 해 안이라 번호 하나를 뺀다.
+    """
+    if patch in _INDEX:
+        i = _INDEX[patch]
+        return PATCH_SEQUENCE[i - 1] if i else None
+    patch_index(patch)  # 범위 밖이면 여기서 KeyError
+    major, minor = _parts(patch)
+    return f"{major}_{minor - 1}"
+
+
 def next_patch(patch: str) -> str | None:
     """바로 다음 패치. **순서 끝이면 없다.**
 

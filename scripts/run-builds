@@ -30,11 +30,11 @@ from lol_balance.builds import (  # noqa: E402
     core_item_changes,
     finished_items,
     item_usage,
+    load_items,
 )
-from lol_balance.items import read_items  # noqa: E402
 from lol_balance.panel import champion_names  # noqa: E402
 from lol_balance.patchnotes import release_date  # noqa: E402
-from lol_balance.riot import Match, loads  # noqa: E402
+from lol_balance.riot import Match, read_games  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 RIOT = ROOT / "data" / "riot"
@@ -53,10 +53,7 @@ def neighbour(patch: str, step: int) -> str:
 
 
 def read(patch: str) -> list[Match]:
-    out: list[Match] = []
-    for path in sorted((RIOT / patch).glob("*.jsonl")):
-        out += [loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return out
+    return read_games(RIOT / patch)
 
 
 def boundary(patch: str) -> int | None:
@@ -73,9 +70,10 @@ def boundary(patch: str) -> int | None:
 
 
 def usage_of(patch: str) -> tuple[dict[int, Usage], dict[str, dict], int | None]:
-    items = read_items(ITEMS / f"{version(patch)}.json")
+    items, evolved = load_items(ITEMS / f"{version(patch)}.json")
     cut = boundary(patch)
-    return item_usage(read(patch), finished_items(items), cut), items, cut
+    usage = item_usage(read(patch), finished_items(items), cut, evolved=evolved)
+    return usage, items, cut
 
 
 def adjusted(patch: str) -> frozenset[str]:
@@ -149,9 +147,10 @@ def main() -> int:
     old_usage, old_items, _ = usage_of(previous)
     flagged = core_item_changes(old_usage, old_items, items)
     touched = adjusted(patch)
-    quiet = [c for c in flagged if name(c.champion_id) not in touched]
+    quiet = {c.champion_id for c in flagged if name(c.champion_id) not in touched}
     print(
         f"\n  경고 — {previous} 의 주요 아이템이 {patch} 에 바뀌었다: {len(flagged)}건"
+        f" · 챔피언 {len({c.champion_id for c in flagged})}종"
         f" · 그중 {patch} 에 **직접 조정은 없던** 챔피언 {len(quiet)}종"
     )
     if not touched:

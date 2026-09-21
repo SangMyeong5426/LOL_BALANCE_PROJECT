@@ -21,16 +21,33 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction, drop_mass_changes  # noqa: E402
 from lol_balance.groundtruth import compare, read_labels  # noqa: E402
-from lol_balance.panel import PATCH_SEQUENCE  # noqa: E402
+from lol_balance.panel import previous_patch  # noqa: E402
 from lol_balance.patchnotes import changed_champions  # noqa: E402
 
 LABELS = ROOT / "ground_truth" / "directions"
 
 
+def before_or_die(patch: str) -> str:
+    """바로 앞 패치. 첫 패치에는 앞이 없다."""
+    before = previous_patch(patch)
+    if before is None:
+        raise SystemExit(f"{patch} 은 순서표의 첫 패치라 앞 패치가 없다")
+    return before
+
+
+def note_path(version: str) -> Path:
+    """그 버전의 노트. 우리 구간 밖은 `live/` 에 있다(fetch-patchnotes)."""
+    here = ROOT / "data" / "patchnotes" / f"{version}.html"
+    return (
+        here
+        if here.exists()
+        else ROOT / "data" / "patchnotes" / "live" / f"{version}.html"
+    )
+
+
 def automatic(patch: str) -> dict[str, str]:
-    i = PATCH_SEQUENCE.index(patch)
     version = patch.replace("_", ".") + ".1"
-    previous = PATCH_SEQUENCE[i - 1].replace("_", ".") + ".1"
+    previous = before_or_die(patch).replace("_", ".") + ".1"
     after = json.loads((ROOT / f"data/ddragon/{version}.json").read_bytes())["data"]
     before = json.loads((ROOT / f"data/ddragon/{previous}.json").read_bytes())["data"]
     standard = standard_champions(after)
@@ -39,8 +56,7 @@ def automatic(patch: str) -> dict[str, str]:
     for change in drop_mass_changes(diff_versions(before, after), len(standard)):
         grouped.setdefault(change.champion, []).append(change)
     # 직전 패치의 조정이 이 diff 에 처음 나타난다 — 그것은 직전 패치 것이다.
-    notes = ROOT / "data" / "patchnotes"
-    late = changed_champions((notes / f"{previous}.html").read_bytes())
+    late = changed_champions(note_path(previous).read_bytes())
     return {
         name: direction
         for cid, changes in grouped.items()

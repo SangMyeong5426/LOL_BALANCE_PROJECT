@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction, drop_mass_changes  # noqa: E402
 from lol_balance.groundtruth import DirectionLabel, compare, write_labels  # noqa: E402
+from lol_balance.panel import previous_patch  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 
 OUT = ROOT / "ground_truth" / "directions"
@@ -31,10 +32,12 @@ def version(patch: str) -> str:
     return patch.replace("_", ".") + ".1"
 
 
-def previous(patch: str) -> str:
-    """바로 앞 패치 이름. **순서표 밖 패치도 다룬다** — 직접 집계가 `16_15` 뒤를 본다."""
-    major, minor = (int(x) for x in patch.split("_"))
-    return f"{major}_{minor - 1}"
+def before_or_die(patch: str) -> str:
+    """바로 앞 패치. 첫 패치에는 앞이 없다."""
+    before = previous_patch(patch)
+    if before is None:
+        raise SystemExit(f"{patch} 은 순서표의 첫 패치라 앞 패치가 없다")
+    return before
 
 
 def note_path(patch: str) -> Path:
@@ -58,7 +61,7 @@ def released_in(patch: str) -> set[str]:
         "data"
     ]
     before = json.loads(
-        (ROOT / f"data/ddragon/{version(previous(patch))}.json").read_bytes()
+        (ROOT / f"data/ddragon/{version(before_or_die(patch))}.json").read_bytes()
     )["data"]
     fresh = set(standard_champions(after)) - set(standard_champions(before))
     return {after[cid].get("name", cid) for cid in fresh}
@@ -70,7 +73,7 @@ def automatic(patch: str) -> dict[str, str]:
         "data"
     ]
     before = json.loads(
-        (ROOT / f"data/ddragon/{version(previous(patch))}.json").read_bytes()
+        (ROOT / f"data/ddragon/{version(before_or_die(patch))}.json").read_bytes()
     )["data"]
     standard = standard_champions(after)
     names = {k: v.get("name", k) for k, v in standard.items()}

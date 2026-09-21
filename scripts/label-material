@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.ddragon import diff_versions, standard_champions  # noqa: E402
 from lol_balance.direction import champion_direction  # noqa: E402
-from lol_balance.panel import next_patch, patch_index  # noqa: E402
+from lol_balance.panel import next_patch, patch_index, previous_patch  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.store import read_panel  # noqa: E402
 
@@ -37,10 +37,12 @@ def version(patch: str) -> str:
     return patch.replace("_", ".") + ".1"
 
 
-def previous(patch: str) -> str:
-    """바로 앞 패치 이름. **순서표 밖 패치도 다룬다** — 직접 집계가 `16_15` 뒤를 본다."""
-    major, minor = (int(x) for x in patch.split("_"))
-    return f"{major}_{minor - 1}"
+def before_or_die(patch: str) -> str:
+    """바로 앞 패치. 첫 패치에는 앞이 없다."""
+    before = previous_patch(patch)
+    if before is None:
+        raise SystemExit(f"{patch} 은 순서표의 첫 패치라 앞 패치가 없다")
+    return before
 
 
 def note_path(patch: str) -> Path:
@@ -52,7 +54,7 @@ def note_path(patch: str) -> Path:
 
 def automatic(patch: str) -> dict[str, str]:
     """그 패치에서 Data Dragon 이 방향을 아는 챔피언."""
-    before = DDRAGON / f"{version(previous(patch))}.json"
+    before = DDRAGON / f"{version(before_or_die(patch))}.json"
     after = DDRAGON / f"{version(patch)}.json"
     if not (before.exists() and after.exists()):
         return {}
