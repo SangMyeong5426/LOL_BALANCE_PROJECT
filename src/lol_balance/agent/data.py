@@ -13,12 +13,25 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import cache, lru_cache
+from pathlib import Path
 
-from lol_balance.assemble import forecast_rows, rows_from_ranking
+from lol_balance.assemble import (
+    adjusted_in,
+    directions_in,
+    forecast_rows,
+    rows_from_ranking,
+    version,
+)
 from lol_balance.config import PROJECT_ROOT, load_settings
+from lol_balance.direction import Direction
 from lol_balance.items import Churn, churn_by_patch
 from lol_balance.oracle import read_pro
-from lol_balance.panel import PanelRow, champion_names, patch_index
+from lol_balance.panel import (
+    PanelRow,
+    champion_names,
+    next_patch,
+    patch_index,
+)
 from lol_balance.patchnotes import ChangeBlock, champion_changes
 from lol_balance.riot import ranking, read_games
 from lol_balance.rules import Rule, read_rules
@@ -33,6 +46,8 @@ ORACLE = DATA / "oracle"
 ITEMS = DATA / "items"
 RULES = PROJECT_ROOT / "rules" / "proposed.jsonl"
 RIOT = DATA / "riot"
+CDRAGON = DATA / "cdragon"
+LABELS = PROJECT_ROOT / "ground_truth" / "directions"
 
 
 @dataclass(frozen=True)
@@ -89,6 +104,38 @@ def available() -> bool:
     return PANEL.exists()
 
 
+def _note_dir(patch: str) -> Path:
+    """그 패치 노트가 있는 폴더. 우리 구간 밖은 `live/` 에 있다."""
+    return NOTES if (NOTES / f"{version(patch)}.html").exists() else NOTES / "live"
+
+
+def _answers_for(patch: str) -> tuple[frozenset[str], dict[str, tuple[Direction, str]]]:
+    """**다음 패치 노트에서 그 패치의 답을 읽는다.**
+
+    안 읽으면 전 챔피언이 조용히 「조정 안 됨」이 되고, 화면은 「답이 없다」고
+    말한다 — `16_17` 은 `16_18` 노트가 있는데도 채점을 못 했다(2026-09-22).
+    `run-live-predict` 와 같은 경로다.
+    """
+    nxt = next_patch(patch)
+    if nxt is None or not (_note_dir(nxt) / f"{version(nxt)}.html").is_file():
+        return frozenset(), {}
+    notes = _note_dir(nxt)
+    adjusted = adjusted_in(nxt, notes)
+    try:
+        directions = directions_in(
+            nxt,
+            patch,
+            ddragon=DDRAGON,
+            cdragon=CDRAGON,
+            notes=notes,
+            labels=LABELS,
+            previous_notes=_note_dir(patch),
+        )
+    except (FileNotFoundError, KeyError):
+        directions = {}
+    return adjusted, directions
+
+
 @cache
 def _names_for(patch: str) -> dict[int, str]:
     """그 패치의 Data Dragon 이름. 없으면 가장 최근 것."""
@@ -137,16 +184,21 @@ def load() -> Corpus:
             games = read_games(folder)
             if not games:
                 continue
+            adjusted, directions = _answers_for(folder.name)
             rows = rows + rows_from_ranking(
                 folder.name,
                 ranking(games),
                 _names_for(folder.name),
+                adjusted=adjusted,
                 known=rows,
                 pro=dict(pro[folder.name.replace("_", ".")])
                 if pro and folder.name.replace("_", ".") in pro
                 else None,
+                directions=directions,
             )
             direct.add(folder.name)
+            if adjusted:
+                labeled = labeled | {folder.name}
             newest = patch_index(folder.name)
 
     return Corpus(
