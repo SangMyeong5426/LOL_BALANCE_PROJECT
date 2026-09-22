@@ -68,6 +68,8 @@ def test_target_arms_cover_every_baseline(make_row: PanelRowFactory) -> None:
         "A7",
         "A7h",
         "A7p",
+        "A7i",
+        "A7ip",
         "A7nerf",
         "A7nerfp",
         "A7buff",

@@ -86,7 +86,7 @@ AUC 0.837 로 로지스틱 회귀와 사실상 동률이고, 검색 위에 올�
 
 **이 표의 수치는 전부 스크립트가 낸다.** `run-report` 가 arm 비교를, `run-effect` 가
 조정의 효과를, `run-metrics` 가 분류 지표·상위 k·점수 눈금·성능 상한을 낸다. 전체
-비교표 37개 arm 과 지표 전량(PR-AUC · MCC · Brier)은
+비교표 39개 arm 과 지표 전량(PR-AUC · MCC · Brier)은
 [`docs/results/README.md`](docs/results/README.md)에 있다.
 
 
@@ -253,6 +253,6 @@ ollama pull qwen3.5:9b && ollama serve
 | [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들. 무엇을 확인하고 접었는가 |
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
 | [`docs/agent.md`](docs/agent.md) | 에이전트(`B8`) — 화면 · 해설 · 코드 대조 · 평가 |
-| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 14건 |
+| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 15건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어. 여기 있는 말만 쓴다 |
 | [`CLAUDE.md`](CLAUDE.md) | 작업 규칙. 무엇을 만들고 무엇을 안 하는가 |
