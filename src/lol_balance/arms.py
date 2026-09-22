@@ -206,6 +206,26 @@ def _narrow(rows: tuple[PanelRow, ...], want: str) -> tuple[PanelRow, ...]:
     return tuple(replace(r, adjusted_next=(r.direction_next == want)) for r in rows)
 
 
+def intended(rows: tuple[PanelRow, ...]) -> tuple[PanelRow, ...]:
+    """`adjusted_next` 를 「**밸런스 의도로** 조정되나」로 바꿔 끼운다.
+
+    노트의 챔피언 절에 이름이 오르면 전부 「조정」으로 세고 있었다. 그런데 평가
+    구간 516건 중 **193건(37%)이 `adjust`** — 버그 수정·이펙트·스킨 이름이다.
+    개발사가 「이 챔피언이 세다」고 판단해서 한 일이 아니므로 **승률·픽률로 예측될
+    이유가 없다.** 맞히라고 요구하던 쪽이 잘못이었다.
+
+    `mixed` 는 **뺀다.** 카시오페아 `16_18` 처럼 기본 피해를 깎고 계수를 올리는
+    재분배는 개발사의 밸런스 판단이 맞다. 실제로 `mixed` 까지 빼면 성적이 도로
+    나빠진다(배수 2.27 → 1.97).
+
+    **라벨만 바꾸고 피처는 그대로 둔다** — `_narrow` 와 같은 이유다.
+    """
+    return tuple(
+        replace(r, adjusted_next=(r.adjusted_next and r.direction_next != "adjust"))
+        for r in rows
+    )
+
+
 def target_arms(
     rows: tuple[PanelRow, ...],
     at: str,
@@ -284,6 +304,26 @@ def target_arms(
         boost = _boosting(seed).fit(tr.x, tr.y)
         out.append(
             Result(arm, label, False, _rank_scores(ts, boost.predict_proba(ts.x)[:, 1]))
+        )
+
+    # **버그 수정을 정답에서 뺀다.** 승률로 예측될 이유가 없는 것을 맞히라고
+    # 요구하고 있었다. 기준선이 같이 내려가므로 **적중률이 아니라 배수로 읽는다.**
+    for tag, pro in (("", False), ("p", True)):
+        intended_train, intended_test = intended(train), intended(test)
+        enc = fit_encoder(intended_train, with_trend=True, with_pro=pro)
+        tr, ts = encode(intended_train, enc), encode(intended_test, enc)
+        boost = _boosting(seed).fit(tr.x, tr.y)
+        ranked = _rank_scores(ts, boost.predict_proba(ts.x)[:, 1])
+        ranked["기준선"] = sum(r.adjusted_next for r in intended_test) / len(
+            intended_test
+        )
+        out.append(
+            Result(
+                "A7i" + tag,
+                "부스팅 — 버그 수정 뺀 조정" + (" + 프로" if pro else ""),
+                False,
+                ranked,
+            )
         )
 
     # **예측 대상을 방향으로 좁힌다.** 「조정되나」 하나만 물으면 프로 픽·밴율의
