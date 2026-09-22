@@ -303,7 +303,7 @@ def test_explainer_sees_the_baseline_but_never_the_answer(tiny_corpus: Corpus) -
     )
     prompt = explain_task(tiny_corpus, ctx)
     assert "__정답__" not in prompt
-    assert "베이스라인" in prompt and f"{ctx.baseline['버프'][1]}위" in prompt
+    assert "통계 모델 점수" in prompt and f"{ctx.baseline['버프'][1]}위" in prompt
     assert all(w in prompt for w in ctx.warnings)
 
 
@@ -376,7 +376,7 @@ def test_explain_chain_fetches_all_evidence_and_hides_the_answer(
     assert isinstance(out["answer"], Explanation)
     text = seen["text"]
     assert "__정답__" not in text
-    assert "조정된 사례" in text and "베이스라인 점수" in text
+    assert "조정된 사례" in text and "통계 모델 점수" in text
     # 경계 — 조회 결과에 기준 패치 행이 없다
     body = out["found"]["R3 과거 지표"].replace(f"(경계: {AT} 이전 기록만)", "")
     assert AT not in body
@@ -457,7 +457,7 @@ def test_load_reads_the_panel_and_marks_answered_patches(
     panel = tmp_path / "panel.sqlite"
     write_panel(panel, tiny_corpus.rows)
     monkeypatch.setattr(data, "PANEL", panel)
-    for name in ("NOTES", "RANKING", "ORACLE", "ITEMS", "RULES"):
+    for name in ("NOTES", "RANKING", "ORACLE", "ITEMS", "RULES", "RIOT"):
         monkeypatch.setattr(data, name, tmp_path / "없음" / name)
     assert data.available()
 

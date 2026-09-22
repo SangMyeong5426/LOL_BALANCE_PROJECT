@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "balance-app",
+      "runtimeExecutable": "./.venv/bin/python",
+      "runtimeArgs": ["scripts/app"],
+      "port": 7861
+    }
+  ]
+}

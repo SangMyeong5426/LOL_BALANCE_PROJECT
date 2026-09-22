@@ -102,8 +102,18 @@ def next_patch(patch: str) -> str | None:
     쓰면 **마지막 패치에서 `IndexError` 로 죽는다.** 지금은 패널이 순서 끝에 못
     미쳐 안 걸리지만, 패치 하나만 더 받으면 걸린다. 세 군데가 그렇게 돼 있었다.
     """
-    index = _INDEX[patch] + 1
-    return PATCH_SEQUENCE[index] if index < len(PATCH_SEQUENCE) else None
+    index = _INDEX.get(patch, -1) + 1
+    if 0 < index < len(PATCH_SEQUENCE):
+        return PATCH_SEQUENCE[index]
+    # **표 끝과 표 밖은 셈으로 잇는다.** 직접 집계가 표 끝(`16_15`) 뒤를 보므로
+    # 여기서 `None` 을 내면 화면이 최신 패치를 못 연다. 해가 바뀌면 그 해에 패치가
+    # 몇 개인지 알아야 이어지므로 **같은 해 안에서만** 잇는다 — `patch_index` 와
+    # 같은 규칙이다(followups 30).
+    major, minor = _parts(patch)
+    last_major, last_minor = _parts(PATCH_SEQUENCE[-1])
+    if major != last_major or minor < last_minor:
+        return None
+    return f"{major}_{minor + 1}"
 
 
 @dataclass(frozen=True)
