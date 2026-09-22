@@ -80,6 +80,29 @@ DIRECTION_NAMES = {
 }
 
 
+# **규칙 이름을 화면에 그대로 보이지 않는다.** `A-popular` 는 만든 사람만 아는 말이다.
+# 조건은 `pick_rate >= 0.08` 처럼 코드 표기라 그것도 못 쓴다. 사람 말로 옮겨 둔다.
+# 규칙이 바뀌면 여기도 바꾼다 — 없는 이름은 그대로 보인다([balance-rules](../../docs/results/balance-rules.md)).
+RULE_WORDS = {
+    "A-ban": "밴율이 20% 를 넘는다",
+    "A-gap": "승률이 5할에서 3%p 넘게 벌어져 있다",
+    "A-strong": "승률이 53% 를 넘는다",
+    "A-popular": "많이 뽑히면서(8%↑) 많이 밴된다(10%↑)",
+    "D-ban": "밴율이 15% 를 넘는다",
+    "D-strong": "승률 51% 이상이면서 픽률 8% 이상",
+    "D-above": "승률이 50.5% 를 넘는다",
+    "D-weak": "승률이 49% 아래다",
+    "D-unpopular": "밴율 5% 아래에 승률도 5할 아래다",
+    "D-fading": "승률이 49% 아래이고 지난 패치보다 더 내려갔다",
+    "D-losing-ground": "픽률 6% 아래이고 승률이 지난 패치보다 내려갔다",
+    "D-banned-strong": "승률 50.5% 이상이면서 밴율 8% 이상",
+}
+
+
+def rule_in_words(rule: Rule) -> str:
+    return RULE_WORDS.get(rule.id, rule.id)
+
+
 def outcome(row: PanelRow) -> str:
     """그 챔피언이 실제로 어떻게 됐나. `predict` 와 `ask` 가 같이 쓴다."""
     if not row.adjusted_next:
@@ -152,7 +175,10 @@ def reasons(
     fired = [r for r in rules if r.fires(row)]
     if fired:
         out.append(
-            Note("걸린 규칙 " + " · ".join(r.id for r in fired[:4]), source="규칙")
+            Note(
+                "해당하는 규칙 — " + " · ".join(rule_in_words(r) for r in fired[:4]),
+                source="규칙",
+            )
         )
 
     directed = [c for c in cases if c.row.direction_next in ("nerf", "buff")]
