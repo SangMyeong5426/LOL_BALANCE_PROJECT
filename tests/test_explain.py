@@ -98,7 +98,11 @@ def test_a_low_pro_rate_is_still_reported(make_row: PanelRowFactory) -> None:
 
 
 def test_fired_rules_are_named(make_row: PanelRowFactory) -> None:
-    """어떤 규칙이 걸렸는지가 근거다. **규칙 이름을 그대로 보인다.**"""
+    """어떤 규칙이 걸렸는지가 근거다. **사람 말로 옮겨 보인다.**
+
+    `A-ban` 은 만든 사람만 아는 이름이고 조건(`ban_rate >= 0.2`)은 코드 표기다.
+    화면에 그대로 내보내면 보는 사람이 읽을 수 없다(2026-09-22).
+    """
     row = make_row("16_13", 1, ban_rate=0.30)
     rule = Rule(
         id="A-ban",
@@ -108,7 +112,9 @@ def test_fired_rules_are_named(make_row: PanelRowFactory) -> None:
         rationale="밴이 몰리면 건드린다",
     )
 
-    assert "A-ban" in texts(reasons(row, [row], rules=(rule,)))
+    said = texts(reasons(row, [row], rules=(rule,)))
+    assert "밴율이 20% 를 넘는다" in said
+    assert "A-ban" not in said  # 안에서 쓰는 이름은 안 보인다
 
 
 def test_neighbour_split_is_counted(make_row: PanelRowFactory) -> None:

@@ -88,11 +88,19 @@ def _bar(p: float) -> str:
 
 
 def patch_info(at: str) -> str:
+    where = (
+        "**우리가 직접 모은 경기**로 만든 지표입니다"
+        if at in CORPUS.direct
+        else "u.gg 아카이브 지표입니다"
+    )
     if at in CORPUS.labeled:
-        return f"**{at}** — 답이 있는 패치. 판단 뒤 「답 열기」로 맞춰 볼 수 있다."
+        return (
+            f"**{at}** — {where}. 다음 패치에 무엇이 바뀌었는지 **답이 있습니다.** "
+            "먼저 판단해 보신 뒤 아래에서 정답을 열어 맞춰 보세요."
+        )
     return (
-        f"**{at}** — 가장 최근 지표. **답이 아직 없다** (다음 패치 지표가 u.gg "
-        "아카이브에 없다 — 2026-09-18 확인). 예측만 된다."
+        f"**{at}** — {where}. **답이 아직 없습니다** — 다음 패치가 안 나왔습니다. "
+        "예측만 볼 수 있습니다."
     )
 
 
@@ -129,17 +137,17 @@ def code_side(champion: str, at: str) -> tuple[str, str]:
     if ctx.warnings:
         warn = "### ⚠ 주의\n" + "\n".join(f"- **{w}**" for w in ctx.warnings)
     else:
-        warn = "### 주의할 점 없음\n경고는 조건이 걸릴 때만 뜬다 (ADR 0007)."
+        warn = "### 주의할 점 없음\n해당하는 조건이 있을 때만 표시됩니다."
 
     lines = [
-        f"### 베이스라인 — {at} → {ctx.nxt}",
+        f"### 통계 모델의 점수 — {at} 다음 패치({ctx.nxt})에 조정될까",
         "| 과제 | 점수 | 순위 |",
         "| --- | --- | --- |",
     ]
     for label, (score, place, total) in ctx.baseline.items():
         lines.append(f"| {label} | `{score:.2f}` {_bar(score)} | {place}위 / {total} |")
     lines.append(
-        f"\n조정 안 됨 `{1 - ctx.baseline['조정'][0]:.2f}` — 조정의 여집합이라 따로 재지 않는다."
+        f"\n손대지 않을 확률 `{1 - ctx.baseline['조정'][0]:.2f}` — 위의 조정 점수를 1 에서 뺀 값입니다."
     )
     lines.append("\n**근거**\n" + "\n".join(f"- {f}" for f in ctx.facts))
     return warn, "\n".join(lines)
@@ -148,14 +156,34 @@ def code_side(champion: str, at: str) -> tuple[str, str]:
 # ── 에이전트 쪽 ─────────────────────────────────────────────────────────
 
 
+# 화면에 쓰는 이름. **안에서 쓰는 이름을 그대로 보이지 않는다** — 보는 사람은
+# `R1` 이나 `find_similar_cases` 가 무엇인지 알 도리가 없다.
+TOOL_NAMES = {
+    "find_similar_cases": "비슷했던 과거 사례 찾기",
+    "search_patch_notes": "지난 패치 노트 찾기",
+    "lookup_stats": "이 챔피언의 지표 조회",
+}
+SOURCE_NAMES = {
+    "R1": "비슷한 사례",
+    "R2": "패치 노트",
+    "R3": "지표 조회",
+    "베이스라인": "통계 모델 점수",
+    "수치": "화면에 보이는 지표",
+}
+
+
+def _source(name: str) -> str:
+    return SOURCE_NAMES.get(name, name)
+
+
 def _trace(steps) -> str:
     if not steps:
-        return "_아직 부른 도구가 없다._"
+        return "_아직 찾아본 것이 없습니다._"
     out = []
     for i, s in enumerate(steps, 1):
-        args = ", ".join(f"{k}={v!r}" for k, v in s.args.items())
-        out.append(f"**{i}. `{s.tool}`**({args})")
-        out.append("```text\n" + (s.output or "…실행 중") + "\n```")
+        args = ", ".join(str(v) for v in s.args.values())
+        out.append(f"**{i}. {TOOL_NAMES.get(s.tool, s.tool)}** — {args}")
+        out.append("```text\n" + (s.output or "…찾는 중") + "\n```")
     return "\n".join(out)
 
 
@@ -168,35 +196,42 @@ def _checks(ctx, e, fake: list[str] | None = None) -> str:
     side = misread_baseline(e, ctx)
     if side:
         flags.append(
-            f"베이스라인을 **거꾸로 읽었다** — 실제로는 **{side}** 쪽 점수가 높다"
+            f"AI 가 점수를 **거꾸로 읽었습니다** — 실제로는 **{side}** 쪽이 높습니다"
         )
     if misquoted_warning(e, ctx):
-        flags.append("경고를 **바꿔 옮겼다** — 인용한 문구가 코드가 낸 경고에 없다")
+        flags.append(
+            "AI 가 주의 문구를 **바꿔 적었습니다** — 원래 문구에 없는 말입니다"
+        )
     if invented_tension(e, ctx):
-        flags.append("경고가 없는데 **부딪히는 지점을 만들어 냈다**")
+        flags.append("주의할 점이 없는데 **있다고 지어냈습니다**")
     if fake:
-        flags.append(f"부르지 않은 도구를 **출처로 적었다**: {', '.join(fake)}")
+        names = ", ".join(_source(x) for x in fake)
+        flags.append(f"찾아보지 않은 자료를 **근거로 적었습니다**: {names}")
     if not flags:
-        return "> ✅ 코드 대조 통과 — 베이스라인 방향·경고 인용·출처가 맞다\n\n"
-    return "".join(f"> ⚠ {f}\n" for f in flags) + "> **이 해설은 믿지 않는다.**\n\n"
+        return "> ✅ 코드 대조 통과 — 점수 방향·주의 문구·근거 출처가 모두 맞습니다\n\n"
+    return "".join(f"> ⚠ {f}\n" for f in flags) + "> **이 설명은 믿지 마세요.**\n\n"
 
 
 def _explanation(ctx, e) -> str:
     """해설. **확률을 두지 않는다** — 검증 안 된 숫자를 검증된 베이스라인 옆에 같은
     무게로 놓으면 오독된다(점검 결과). 근거와 다른 신호를 나눠 보인다."""
     lines = [
-        f"### 에이전트 해설 — {ctx.champion} · {ctx.at} → {ctx.nxt}",
-        f"**베이스라인에 {STANCE.get(e.stance, '')} {e.stance}**",
+        f"### AI 의 설명 — {ctx.champion} · {ctx.at} 다음 패치({ctx.nxt})",
+        f"**통계 모델의 판단에 {STANCE.get(e.stance, '')} {e.stance}**",
         "",
         e.summary,
         "",
         "**뒷받침하는 근거**",
     ]
-    lines += [f"- `{p.source}` {p.text}" for p in e.supporting] or ["- (없음)"]
-    lines += ["", "**베이스라인과 다른 신호**"]
-    lines += [f"- `{p.source}` {p.text}" for p in e.against] or ["- 없다고 봤다"]
+    lines += [f"- **{_source(p.source)}** — {p.text}" for p in e.supporting] or [
+        "- (없음)"
+    ]
+    lines += ["", "**통계 모델과 다른 신호**"]
+    lines += [f"- **{_source(p.source)}** — {p.text}" for p in e.against] or [
+        "- 없다고 봤습니다"
+    ]
     if e.tension.strip():
-        lines += ["", f"**⚠ 경고와 부딪히는 지점** — {e.tension}"]
+        lines += ["", f"**⚠ 주의할 점과 어긋나는 대목** — {e.tension}"]
     return "\n".join(lines)
 
 
@@ -208,7 +243,7 @@ def explain(champion: str, at: str, model: str, mode: str = "체인"):
         yield (
             f"### {need} 가 없다\n`.env` 에 넣고 화면을 다시 시작하거나, 모델을 "
             f"**`{LOCAL}`** 로 바꾼다 — 로컬 모델은 키 없이 돈다. "
-            "왼쪽의 경고·베이스라인은 키 없이도 나온다.",
+            "왼쪽의 주의할 점과 통계 모델 점수는 키가 없어도 나옵니다.",
             "",
             None,
         )
@@ -217,7 +252,7 @@ def explain(champion: str, at: str, model: str, mode: str = "체인"):
     # 로컬 모델은 thinking 을 끈다 — qwen3.5:2b 에서 76초 → 18초였다.
     kwargs = {"reasoning": False} if model.startswith("ollama:") else {}
     if mode == "체인":
-        yield "### 조회 중 — R1·R2·R3 를 한꺼번에…", "", None
+        yield "### 자료를 찾는 중…", "", None
         try:
             out = build_explain_chain(CORPUS, ctx, model, **kwargs).invoke({})
         except Exception as exc:
@@ -242,7 +277,7 @@ def explain(champion: str, at: str, model: str, mode: str = "체인"):
         yield _checks(ctx, e) + _explanation(ctx, e), found, line
         return
 
-    yield "### 해설 중…", _trace([]), None
+    yield "### AI 가 설명을 쓰는 중…", _trace([]), None
     try:
         agent = build_explainer(CORPUS, ctx, model, **kwargs)
     except Exception as exc:
@@ -252,7 +287,9 @@ def explain(champion: str, at: str, model: str, mode: str = "체인"):
     run = None
     for run in stream(agent, explain_task(CORPUS, ctx)):
         status = (
-            "### 해설 중…" if run.judgment is None else _explanation(ctx, run.judgment)
+            "### AI 가 설명을 쓰는 중…"
+            if run.judgment is None
+            else _explanation(ctx, run.judgment)
         )
         yield status, _trace(run.steps), None
 
@@ -362,14 +399,19 @@ def reveal(champion: str, at: str, opened: bool) -> str:
 with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
     gr.Markdown(
         "# 리그 오브 레전드 밸런스 조정 판단 보조\n"
-        "**172종을 10종으로 좁히고, 근거와 주의할 점을 붙인다. 최종 판단은 사람이 한다.**  \n"
-        "경고·베이스라인은 코드가, 해설은 에이전트(`B8`)가 쓰고 코드가 대조한다."
+        "**챔피언 172종 중 다음 패치에 손볼 만한 10종을 골라 주고, 왜 그런지 설명을 붙입니다.**  \n"
+        "**최종 판단은 사람이 합니다.**  \n"
+        "후보와 주의할 점은 통계 모델이 계산하고, 설명은 AI 가 씁니다. "
+        "AI 가 쓴 설명은 코드가 다시 대조해 틀린 곳을 표시합니다."
     )
 
     with gr.Row():
         at = gr.Dropdown(PATCHES, value=PATCHES[0], label="기준 패치", scale=1)
         want = gr.Radio(
-            ["너프", "버프", "조정"], value=DEFAULT_WANT, label="후보 기준", scale=1
+            ["너프", "버프", "조정"],
+            value=DEFAULT_WANT,
+            label="어느 쪽 후보를 볼까요",
+            scale=1,
         )
         model = gr.Dropdown(
             MODELS, value=DEFAULT_MODEL, label="모델", allow_custom_value=True, scale=2
@@ -378,7 +420,9 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
 
     with gr.Row():
         with gr.Column(scale=2):
-            gr.Markdown("### 베이스라인 후보 10종\n행을 누르면 그 챔피언을 고른다")
+            gr.Markdown(
+                "### 통계 모델이 고른 후보 10종\n줄을 누르면 그 챔피언을 봅니다"
+            )
             table = gr.Dataframe(
                 headers=["순위", "챔피언", "점수"],
                 value=candidate_table(PATCHES[0], DEFAULT_WANT),
@@ -395,21 +439,24 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
             mode = gr.Radio(
                 ["체인", "에이전트"],
                 value="체인",
-                label="해설 방식",
-                info="체인: 코드가 R1·R2·R3 를 한꺼번에 조회 · 에이전트: 모델이 골라 조회",
+                label="설명을 만드는 방식",
+                info=(
+                    "체인: 자료 세 가지를 한꺼번에 찾아 AI 에게 넘깁니다 · "
+                    "에이전트: AI 가 필요한 자료를 스스로 골라 찾아봅니다"
+                ),
             )
-            run_btn = gr.Button("에이전트에게 해설 맡기기", variant="primary")
+            run_btn = gr.Button("AI 에게 설명 맡기기", variant="primary")
             warn = gr.Markdown()
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("## 코드가 낸 것")
+            gr.Markdown("## 통계 모델이 계산한 것")
             base = gr.Markdown()
         with gr.Column():
-            gr.Markdown("## 에이전트 해설")
-            verdict = gr.Markdown("_「에이전트에게 해설 맡기기」를 누른다._")
+            gr.Markdown("## AI 가 쓴 설명")
+            verdict = gr.Markdown("_위의 「AI 에게 설명 맡기기」를 눌러 주세요._")
 
-    with gr.Accordion("조회 기록 — 무엇을 찾아봤나", open=False):
+    with gr.Accordion("AI 가 무엇을 찾아봤나", open=False):
         trace = gr.Markdown()
 
     explained = gr.State("")
@@ -418,14 +465,12 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
     visitor = gr.BrowserState(
         None, storage_key="lol-balance-visitor", secret="lol-balance-followup"
     )
-    with gr.Accordion(
-        "해설에 대해 더 묻기 — 대화가 이어진다 (Checkpointer)", open=True
-    ):
+    with gr.Accordion("설명에 대해 더 묻기 — 대화가 이어집니다", open=True):
         gr.Markdown(
-            "같은 브라우저에서 같은 챔피언을 다시 고르면 **이전 대화를 잇는다** — 새로고침해도, "
-            "화면을 껐다 켜도 된다(`SqliteSaver`). 후속 답은 **코드 대조를 거치지 않는** 자유 서술이다."
+            "같은 챔피언을 다시 고르면 **이전 대화가 이어집니다.** 새로고침해도, 화면을 껐다 켜도 됩니다.  \n"
+            "**여기 답은 코드 대조를 거치지 않습니다** — 위의 설명과 달리 틀린 곳을 표시해 주지 않습니다."
         )
-        chat = gr.Chatbot(label="후속 대화", height=320)
+        chat = gr.Chatbot(label="이어지는 대화", height=320)
         with gr.Row():
             question = gr.Textbox(
                 placeholder="예: 버프 쪽 신호는 없었어?", label="질문", scale=4
@@ -435,13 +480,13 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
 
     with gr.Row():
         opened = gr.Checkbox(
-            label="답 열기 (근거와 판단을 먼저 읽은 뒤에)",
+            label="정답 보기 (근거와 설명을 먼저 읽은 뒤에)",
             value=False,
             interactive=PATCHES[0] in CORPUS.labeled,
         )
     answer = gr.Markdown()
 
-    with gr.Accordion("저장된 기록", open=False):
+    with gr.Accordion("지금까지 저장된 기록", open=False):
         saved = gr.JSON()
 
     # **패치를 바꾸면 챔피언이 그대로여도 전부 다시 그린다.** 1위 후보가 같은

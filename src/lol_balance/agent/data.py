@@ -9,16 +9,18 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache, lru_cache
 
-from lol_balance.assemble import forecast_rows
+from lol_balance.assemble import forecast_rows, rows_from_ranking
 from lol_balance.config import PROJECT_ROOT, load_settings
 from lol_balance.items import Churn, churn_by_patch
 from lol_balance.oracle import read_pro
-from lol_balance.panel import PanelRow, patch_index
+from lol_balance.panel import PanelRow, champion_names, patch_index
 from lol_balance.patchnotes import ChangeBlock, champion_changes
+from lol_balance.riot import ranking, read_games
 from lol_balance.rules import Rule, read_rules
 from lol_balance.store import read_panel
 
@@ -30,6 +32,7 @@ DDRAGON = DATA / "ddragon"
 ORACLE = DATA / "oracle"
 ITEMS = DATA / "items"
 RULES = PROJECT_ROOT / "rules" / "proposed.jsonl"
+RIOT = DATA / "riot"
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,12 @@ class Corpus:
     seed: int
     labeled: frozenset[str]
     """답(다음 패치의 조정 여부)이 있는 패치. 없는 것은 예측만 된다."""
+    direct: frozenset[str] = frozenset()
+    """**우리가 직접 모은 경기로 만든** 패치. u.gg 가 끊긴 `16_15` 뒤가 여기 온다.
+
+    학습은 u.gg 구간이고 이 패치들만 직접 집계다 — **출처가 섞인다**([ADR 0012](
+    ../../../docs/adr/0012-predicting-with-direct-aggregation.md)).
+    """
 
     @property
     def patches(self) -> list[str]:
@@ -80,6 +89,21 @@ def available() -> bool:
     return PANEL.exists()
 
 
+@cache
+def _names_for(patch: str) -> dict[int, str]:
+    """그 패치의 Data Dragon 이름. 없으면 가장 최근 것."""
+    want = DDRAGON / f"{patch.replace('_', '.')}.1.json"
+    if not want.is_file():
+        have = sorted(
+            (x for x in DDRAGON.glob("*.json") if x.stem[:1].isdigit()),
+            key=lambda x: tuple(int(n) for n in x.stem.split(".")),
+        )
+        if not have:
+            return {}
+        want = have[-1]
+    return champion_names(json.loads(want.read_text())["data"])
+
+
 @lru_cache(maxsize=1)
 def load() -> Corpus:
     rows = read_panel(PANEL)
@@ -97,8 +121,37 @@ def load() -> Corpus:
                 path.stem, rows, ranking=RANKING, ddragon=DDRAGON, pro=pro
             )
 
+    # **u.gg 가 끊긴 뒤는 우리가 모은 경기로 만든다.** 화면이 최신 패치를 못 보면
+    # 이 저장소의 가장 최근 성과가 화면에 안 나온다(ADR 0010 · 0012).
+    direct: set[str] = set()
+    if RIOT.is_dir():
+        have = {r.patch for r in rows}
+        newest = max(patch_index(p) for p in have)
+        folders = sorted(
+            (x for x in RIOT.iterdir() if x.is_dir() and x.name[:1].isdigit()),
+            key=lambda x: patch_index(x.name),
+        )
+        for folder in folders:
+            if patch_index(folder.name) <= newest or not any(folder.glob("*.jsonl")):
+                continue
+            games = read_games(folder)
+            if not games:
+                continue
+            rows = rows + rows_from_ranking(
+                folder.name,
+                ranking(games),
+                _names_for(folder.name),
+                known=rows,
+                pro=dict(pro[folder.name.replace("_", ".")])
+                if pro and folder.name.replace("_", ".") in pro
+                else None,
+            )
+            direct.add(folder.name)
+            newest = patch_index(folder.name)
+
     return Corpus(
         rows=rows,
+        direct=frozenset(direct),
         blocks=_note_blocks(),
         rules=read_rules(RULES) if RULES.exists() else (),
         churn=churn_by_patch(ITEMS) if ITEMS.is_dir() else {},
