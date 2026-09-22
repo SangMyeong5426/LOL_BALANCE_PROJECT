@@ -200,14 +200,17 @@ def test_next_patch_walks_forward() -> None:
     assert next_patch("13_14") == "13_15"
 
 
-def test_next_patch_stops_at_the_end() -> None:
+def test_next_patch_does_not_die_at_the_end() -> None:
     """**순서 끝에서 죽지 않는다.**
 
     `PATCH_SEQUENCE[i + 1]` 을 그냥 쓰던 곳이 셋 있었다(`predict` ·
-    `fetch-cdragon` · `label-material`). 지금은 패널이 순서 끝에 못 미쳐 안
-    걸리지만, **패치 하나만 더 받으면 `IndexError` 로 죽는다.**
+    `fetch-cdragon` · `label-material`). 표 끝에서는 **셈으로 잇는다** — 직접
+    집계가 그 뒤를 보기 때문이다(2026-09-22). 해가 바뀌면 거기서 멈춘다.
     """
-    assert next_patch(PATCH_SEQUENCE[-1]) is None
+    last = PATCH_SEQUENCE[-1]
+    major, minor = (int(x) for x in last.split("_"))
+    assert next_patch(last) == f"{major}_{minor + 1}"
+    assert next_patch(f"{major + 1}_1") is None
 
 
 def test_name_after_increments_the_minor() -> None:
@@ -298,3 +301,15 @@ def test_with_pro_rates_swaps_only_the_pro_columns(make_row: PanelRowFactory) ->
     assert (swapped[1].pro_pick_rate, swapped[1].pro_ban_rate) == (0.0, 0.0)
     assert swapped[2].pro_pick_rate is None and swapped[2].pro_presence is None
     assert swapped[0].win_rate == rows[0].win_rate and swapped[0].patch == "14_1"
+
+
+def test_next_patch_continues_past_the_table() -> None:
+    """**표 끝에서 멈추면 화면이 최신 패치를 못 연다.**
+
+    직접 집계가 표 끝(`16_15`) 뒤를 보므로 그 다음을 셈으로 잇는다. 해가 바뀌면
+    그 해에 패치가 몇 개인지 알아야 하므로 거기서는 멈춘다(followups 30).
+    """
+    assert next_patch("13_14") == "13_15"  # 표 안은 그대로
+    assert next_patch("16_15") == "16_16"  # 표 끝 — 셈으로 잇는다
+    assert next_patch("16_18") == "16_19"  # 표 밖
+    assert next_patch("17_1") is None  # 해가 바뀌면 모른다

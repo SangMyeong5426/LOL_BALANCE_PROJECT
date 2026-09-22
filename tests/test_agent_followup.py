@@ -63,7 +63,7 @@ def test_second_question_remembers_the_first(setup: Setup) -> None:
     # 깔아 둔 맥락 2 + (질문·답) × 2 — 둘째 호출은 새 질문만 보냈다
     assert len(messages) == 6
     assert isinstance(messages[0], HumanMessage)
-    assert "베이스라인 점수" in messages[0].content
+    assert "통계 모델 점수" in messages[0].content
     assert messages[1].content == "해설 본문"
 
 
