@@ -69,7 +69,7 @@ def test_zero_padded_minors_are_normalised(raw: str, expected: str) -> None:
 
 
 def test_picks_come_from_player_rows_and_bans_from_team_rows(tmp_path: Path) -> None:
-    """**한 경기가 12줄이다** — 선수 10 + 팀 2.
+    """**한 경기가 12줄이다** — 프로 선수 10 + 팀 2.
 
     안 가르면 팀 줄의 빈 `champion` 이 픽으로 세어지거나 밴이 두 번 세어진다.
     """

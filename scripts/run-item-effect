@@ -249,7 +249,7 @@ def span(games: list[Match]) -> str:
     players = len({(m.platform, m.player) for m in games})
     return (
         f"{min(days)} ~ {max(days)} · {len(days)}일 · 하루 최대 {top:,}판"
-        f" ({top / len(games):.0%}) · 뽑은 선수 {players:,}명"
+        f" ({top / len(games):.0%}) · 뽑은 이용자 {players:,}명"
     )
 
 

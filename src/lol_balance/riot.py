@@ -7,8 +7,8 @@
 
 1. `RiotClient` — 요청 한 건. 키는 **주소가 아니라 헤더**로 보내고, 호스트마다
    요청 한도를 지킨다
-2. `collect` · `slim` — 지금 에메랄드 이상인 선수를 무작위로 뽑아 그 경기를 받고,
-   필요한 칸만 남긴다. **선수를 가리키는 칸은 받자마자 버린다**
+2. `collect` · `slim` — 지금 에메랄드 이상인 이용자를 무작위로 뽑아 그 경기를 받고,
+   필요한 칸만 남긴다. **이용자를 가리키는 칸은 받자마자 버린다**
 3. `tally` · `rates` · `compare` — 솔랭 지표와 같은 식으로 세고 u.gg 와 견준다
 
 **u.gg 와 똑같이 셀 수는 없다.** u.gg 가 지역을 어떤 비율로 섞는지, 「에메랄드
@@ -66,17 +66,17 @@ APEX: tuple[str, ...] = ("master", "grandmaster", "challenger")
 # 랭킹 한 쪽의 크기. 마지막 쪽만 모자란다.
 PAGE_SIZE = 205
 
-# 한 선수에게서 가져올 최대 경기 수 — 한 선수가 표본을 채우지 않게.
+# 한 이용자에게서 가져올 최대 경기 수 — 한 이용자가 표본을 채우지 않게.
 PER_PLAYER = 20
 
-# 창 안에 경기가 없는 선수가 이만큼 이어지면 멈춘다. 창을 잘못 줬거나 과거가
+# 창 안에 경기가 없는 이용자가 이만큼 이어지면 멈춘다. 창을 잘못 줬거나 과거가
 # 너무 멀어 지금 랭커가 그때 안 뛰었다는 뜻이라, 계속 돌리면 한도만 쓴다.
 MAX_IDLE_PLAYERS = 400
 
-# 받은 경기가 **전부** 버려지는 선수가 이만큼 이어져도 멈춘다. 패치가 바뀌는 날
+# 받은 경기가 **전부** 버려지는 이용자가 이만큼 이어져도 멈춘다. 패치가 바뀌는 날
 # Data Dragon 이 라이브보다 앞서거나 뒤처지면 창 안 경기가 전부 다른 패치라서,
 # 이것이 없으면 사다리 전체를 돌며 한도만 쓴다 — 매일 수집이 그렇게 며칠씩 막힐
-# 수 있었다(2026-09-20 감사). 선수 40명이면 요청 800회 남짓, 15분이다.
+# 수 있었다(2026-09-20 감사). 이용자 40명이면 요청 800회 남짓, 15분이다.
 MAX_WASTED_PLAYERS = 40
 
 # 요청에 밝히는 이름. **파이썬 기본 이름(`Python-urllib`)은 Cloudflare 가
@@ -165,7 +165,7 @@ def _urlopen(request: urllib.request.Request, timeout: float) -> Response:
 
 
 def _redact(path: str) -> str:
-    """오류 문구에 선수 식별자가 남지 않게 한다."""
+    """오류 문구에 이용자 식별자가 남지 않게 한다."""
     return re.sub(r"/by-puuid/[^/?]+", "/by-puuid/…", path)
 
 
@@ -263,7 +263,7 @@ class RiotClient:
 
 @dataclass(frozen=True)
 class Pick:
-    """한 선수의 한 판. **선수가 누구인지는 남기지 않는다.**
+    """한 이용자의 한 판. **이용자가 누구인지는 남기지 않는다.**
 
     `items` 는 경기가 끝났을 때의 일곱 칸이고 마지막이 장신구, 0 은 빈 칸이다 —
     **최종 아이템이지 구매 이력이 아니다.** 판 것 · 다 쓴 것은 남지 않는다.
@@ -289,10 +289,10 @@ class Pick:
 
 @dataclass(frozen=True)
 class Origin:
-    """이 경기를 가져온 선수를 **어디서 · 언제** 뽑았나.
+    """이 경기를 가져온 이용자를 **어디서 · 언제** 뽑았나.
 
     랭크는 **조회한 시각의** 것이다 — 그 경기를 치른 때의 랭크가 아니다. 그래서
-    이 표본은 「지금 에메랄드 이상인 선수에서 출발해 모은 경기」이지 「그때
+    이 표본은 「지금 에메랄드 이상인 이용자에서 출발해 모은 경기」이지 「그때
     에메랄드 이상이던 경기」가 아니다. 마스터 이상은 단계가 없어 `division` 이 빈다.
     """
 
@@ -305,8 +305,8 @@ class Origin:
 class Match:
     """경기 한 판에서 필요한 칸만.
 
-    `player` 는 이 경기를 가져온 선수의 **일련번호**다 — 선수 단위 부트스트랩에
-    필요한 것은 「같은 선수에게서 왔는가」뿐이라 식별자 대신 번호를 둔다.
+    `player` 는 이 경기를 가져온 이용자의 **일련번호**다 — 이용자 단위 부트스트랩에
+    필요한 것은 「같은 이용자에게서 왔는가」뿐이라 식별자 대신 번호를 둔다.
     번호는 플랫폼마다 따로 센다.
     """
 
@@ -377,7 +377,7 @@ def slim(
 ) -> Match | None:
     """매치 응답에서 필요한 칸만 남긴다. 셀 수 없는 판이면 None.
 
-    **선수를 가리키는 칸(`puuid` · 이름 · 소환사 id)은 여기서 버린다.** 저장하는
+    **이용자를 가리키는 칸(`puuid` · 이름 · 소환사 id)은 여기서 버린다.** 저장하는
     것은 이 함수가 돌려준 것뿐이다.
 
     None 이 되는 판: 솔로 랭크가 아닌 것, 열 명이 아닌 것, 리메이크.
@@ -635,7 +635,7 @@ def strata(ladder: Ladder) -> list[Stratum]:
 
 @dataclass(frozen=True)
 class Drawn:
-    """뽑은 선수. `puuid` 는 여기까지만 간다 — 저장되는 것은 `origin` 이다."""
+    """뽑은 이용자. `puuid` 는 여기까지만 간다 — 저장되는 것은 `origin` 이다."""
 
     puuid: str
     origin: Origin
@@ -644,7 +644,7 @@ class Drawn:
 def draw_player(
     ladder: Ladder, groups: Sequence[Stratum], rng: random.Random
 ) -> Drawn | None:
-    """지금 에메랄드 이상인 선수 한 명을 **인원에 비례해** 무작위로 뽑는다.
+    """지금 에메랄드 이상인 이용자 한 명을 **인원에 비례해** 무작위로 뽑는다.
 
     단계마다 같은 수를 뽑지 않는다 — 그러면 사람이 적은 위쪽 단계가 실제보다 많이
     뽑혀 가중치로 되돌려야 한다. 인원에 비례해 뽑으면 그대로 합쳐도 된다.
@@ -701,7 +701,7 @@ def collect(
         if pick is None or pick.puuid in drawn:
             misses += 1
             if misses > 1000 or len(drawn) >= population:
-                log(f"[{platform}] 더 뽑을 선수가 없다 — 멈춘다")
+                log(f"[{platform}] 더 뽑을 이용자가 없다 — 멈춘다")
                 break
             continue
         misses = 0
@@ -728,7 +728,9 @@ def collect(
         if not fresh:
             idle += 1
             if idle >= MAX_IDLE_PLAYERS:
-                log(f"[{platform}] 창 안에 경기가 있는 선수가 {idle}명째 없다 — 멈춘다")
+                log(
+                    f"[{platform}] 창 안에 경기가 있는 이용자가 {idle}명째 없다 — 멈춘다"
+                )
                 break
             continue
         idle = 0
@@ -750,14 +752,14 @@ def collect(
             written_here += 1
             if collected % 100 == 0:
                 log(
-                    f"[{platform}] {collected:,}/{target:,}판 · 선수 {player - first_player}"
+                    f"[{platform}] {collected:,}/{target:,}판 · 이용자 {player - first_player}"
                 )
             if collected >= target:
                 break
         wasted = 0 if written_here else wasted + 1
         if wasted >= MAX_WASTED_PLAYERS:
             log(
-                f"[{platform}] 받은 경기가 전부 버려지는 선수가 {wasted}명째다"
+                f"[{platform}] 받은 경기가 전부 버려지는 이용자가 {wasted}명째다"
                 " — 창 안 경기가 다른 패치다. 멈춘다"
             )
             break
@@ -911,9 +913,9 @@ def binomial_se(r: Rates) -> dict[str, dict[int, float]]:
 def player_bootstrap(
     matches: Sequence[Match], draws: int, seed: int
 ) -> dict[str, dict[int, float]]:
-    """**뽑은 선수 단위로** 다시 뽑아 비율마다 표준오차를 낸다.
+    """**뽑은 이용자 단위로** 다시 뽑아 비율마다 표준오차를 낸다.
 
-    경기를 한 판씩 독립으로 보면 표준오차가 작게 나온다 — 같은 선수의 경기는
+    경기를 한 판씩 독립으로 보면 표준오차가 작게 나온다 — 같은 이용자의 경기는
     챔피언 폭과 실력이 닮았다. 그러면 표본 잡음이 「두 출처가 다르다」로 읽힌다.
     """
     players = sorted({(m.platform, m.player) for m in matches})
