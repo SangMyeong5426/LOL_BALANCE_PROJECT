@@ -34,7 +34,7 @@ AUC 0.658 로 갈리는데 버프된 챔피언은 0.473 이다 — 합치면 0.5
 
 ## 한 경기가 12줄이다
 
-선수 10줄 + 팀 2줄. **픽은 선수 줄에, 밴은 팀 줄에** 있다. 안 가르면 밴이
+프로 선수 10줄 + 팀 2줄. **픽은 프로 선수 줄에, 밴은 팀 줄에** 있다. 안 가르면 밴이
 팀당 5개씩 두 번 세어진다.
 """
 
@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-# 팀 줄을 알아보는 표시. 나머지는 선수 줄이다.
+# 팀 줄을 알아보는 표시. 나머지는 프로 선수 줄이다.
 TEAM_ROW = "team"
 
 # 한 팀이 거는 밴 수. 열 이름이 `ban1` … `ban5` 다.
@@ -166,7 +166,7 @@ def _day(text: str | None) -> date | None:
 
 
 def read_games(root: Path) -> dict[str, Game]:
-    """`data/oracle/*.csv` → `gameid` → 경기. **픽은 선수 줄에서, 밴은 팀 줄에서.**"""
+    """`data/oracle/*.csv` → `gameid` → 경기. **픽은 프로 선수 줄에서, 밴은 팀 줄에서.**"""
     patch_of: dict[str, str] = {}
     day_of: dict[str, date | None] = {}
     picks: defaultdict[str, list[str]] = defaultdict(list)
