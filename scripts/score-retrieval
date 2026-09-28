@@ -48,6 +48,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance import spend  # noqa: E402
+from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.groundtruth import read_labels  # noqa: E402
 from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.retrieval import NoteSearch  # noqa: E402
@@ -86,20 +88,56 @@ def score(
     return rank_sum / n, hits / n
 
 
-def embedder(spec: str) -> tuple[Callable[[list[str]], np.ndarray], str, str]:
-    """`ollama:모델` → (문장 목록을 단위 벡터로 바꾸는 함수, 질의 앞말, 문서 앞말)."""
+def unit(rows: list[list[float]]) -> np.ndarray:
+    matrix = np.asarray(rows, dtype=np.float64)
+    return matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
+
+
+def openai_embedder(
+    name: str, ledger: spend.Ledger
+) -> Callable[[list[str]], np.ndarray]:
+    """유료 임베딩. **부르기 전에 상한을 보고, 부른 뒤 장부에 적는다.**
+
+    `OpenAIEmbeddings.embed_documents` 는 벡터만 돌려주고 사용량을 버린다. 그래서
+    감싼 클라이언트를 직접 불러 **제공자가 보고한 토큰 수**를 받는다 — 토크나이저
+    로 어림하지 않는다.
+    """
+    from langchain_openai import OpenAIEmbeddings
+
+    load_settings()  # .env 의 OPENAI_API_KEY 를 환경으로 올린다
+    model = OpenAIEmbeddings(model=name)
+
+    def embed(texts: list[str]) -> np.ndarray:
+        rows: list[list[float]] = []
+        for start in range(0, len(texts), BATCH):
+            ledger.check(name)
+            reply = model.client.create(input=texts[start : start + BATCH], model=name)
+            rows += [item.embedding for item in reply.data]
+            ledger.add(name, reply.usage.prompt_tokens, 0, why="score-retrieval")
+        return unit(rows)
+
+    return embed
+
+
+def embedder(
+    spec: str, ledger: spend.Ledger
+) -> tuple[Callable[[list[str]], np.ndarray], str, str]:
+    """`ollama:모델` 또는 `openai:모델` → (벡터로 바꾸는 함수, 질의 앞말, 문서 앞말)."""
+    name = spec.split(":", 1)[1] if ":" in spec else spec
+    query_prefix, doc_prefix = PREFIX.get(name.split(":")[0], ("", ""))
+
+    if spec.startswith("openai:"):
+        return openai_embedder(name, ledger), query_prefix, doc_prefix
+
     from langchain_ollama import OllamaEmbeddings
 
-    name = spec.split(":", 1)[1] if spec.startswith("ollama:") else spec
     model = OllamaEmbeddings(model=name)
-    query_prefix, doc_prefix = PREFIX.get(name.split(":")[0], ("", ""))
 
     def embed(texts: list[str]) -> np.ndarray:
         rows: list[list[float]] = []
         for start in range(0, len(texts), BATCH):
             rows += model.embed_documents(texts[start : start + BATCH])
-        matrix = np.asarray(rows, dtype=np.float64)
-        return matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
+        return unit(rows)
 
     return embed, query_prefix, doc_prefix
 
@@ -153,8 +191,10 @@ def main() -> int:
         print(f"{label:16}{mrr:>9.3f}{recall:>11.1%}")
 
     specs = [sys.argv[i + 1] for i, a in enumerate(sys.argv) if a == "--embed"]
+    ledger = spend.Ledger(ROOT / "data" / spend.LEDGER)
     for spec in specs:
-        embed, query_prefix, doc_prefix = embedder(spec)
+        before = ledger.spent()
+        embed, query_prefix, doc_prefix = embedder(spec, ledger)
         # BM25 가 색인하는 것과 **같은 문서 · 같은 문자열**이다(`NoteSearch.__init__`).
         docs = [(patch, block) for patch, block, _ in search.docs]
         texts = [
@@ -196,6 +236,10 @@ def main() -> int:
                 fused[q] = sorted(votes, key=lambda i: -votes[i])[:k]
             mrr, recall = score(queries, gold, lambda c, p, f=fused: f[(c, p)])
             print(f"{'BM25 + 임베딩':16}{mrr:>9.3f}{recall:>11.1%}   (RRF)")
+
+        used = ledger.spent() - before
+        if used > 0:
+            print(f"{'':16}이 측정에 ${used:.4f} · 누적 ${ledger.spent():.4f}")
 
     print("\n**이것은 검색부만 잰다.** 판단이 얼마나 맞는지는 `run-report` 의 B6 다.")
     return 0
