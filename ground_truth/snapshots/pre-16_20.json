@@ -1,0 +1,141 @@
+{
+  "name": "pre-16_20",
+  "as_of": "2026-09-28T01:42:53Z",
+  "purpose": "코드·모델 비교 — 같은 자료를 읽어야 하는 자리",
+  "include": "data/riot 의 경기 중 riot.invalid 이 통과시킨 것 전부",
+  "exclude": "이긴 쪽이 다섯이 아닌 경기 · 다른 플랫폼 id 를 가진 경기 · 같은 id 중복",
+  "schema": 2,
+  "seed": 20260824,
+  "agent_model": "openai:gpt-4.1-mini",
+  "llm_model": "claude-opus-5",
+  "code": {
+    "commit": "cfc6bc6945c245e2dddadd1f1d78030564698d4a",
+    "branch": "main",
+    "dirty": false,
+    "dirty_files": []
+  },
+  "totals": {
+    "games": 35311,
+    "dropped": 89
+  },
+  "patches": {
+    "16_13": {
+      "games": 4479,
+      "sha256": "b24d9a536db6f136e1f78b8559dae3fd5ade861e473c252cf7b57f9841ab859d",
+      "stored": 4500,
+      "duplicate_ids": 0,
+      "dropped": {
+        "다른 플랫폼의 경기다": 21
+      },
+      "platform": {
+        "euw1": 1479,
+        "kr": 1500,
+        "na1": 1500
+      },
+      "version": {
+        "16.13.791": 3534,
+        "16.13.790": 731,
+        "16.13.789": 214
+      },
+      "first_game": "2026-06-24T00:00:21Z",
+      "last_game": "2026-07-06T18:04:26Z"
+    },
+    "16_15": {
+      "games": 7468,
+      "sha256": "57efd94300c04b1bc052012a4f92b6e7d2406bd623175213858f533158234654",
+      "stored": 7500,
+      "duplicate_ids": 0,
+      "dropped": {
+        "다른 플랫폼의 경기다": 32
+      },
+      "platform": {
+        "euw1": 2481,
+        "kr": 2500,
+        "na1": 2487
+      },
+      "version": {
+        "16.15.802": 2016,
+        "16.15.800": 1996,
+        "16.15.801": 1983,
+        "16.15.799": 1473
+      },
+      "first_game": "2026-07-29T07:03:59Z",
+      "last_game": "2026-08-12T07:17:03Z"
+    },
+    "16_16": {
+      "games": 2979,
+      "sha256": "1b02c8439c83599a6dbe2d32fe569d9c5e54882694f6d059df2d8cec87bb3a2f",
+      "stored": 3000,
+      "duplicate_ids": 0,
+      "dropped": {
+        "이긴 쪽이 다섯이 아니다": 1,
+        "다른 플랫폼의 경기다": 20
+      },
+      "platform": {
+        "euw1": 979,
+        "kr": 1000,
+        "na1": 1000
+      },
+      "version": {
+        "16.16.804": 2979
+      },
+      "first_game": "2026-08-12T00:40:53Z",
+      "last_game": "2026-08-26T08:00:04Z"
+    },
+    "16_17": {
+      "games": 2985,
+      "sha256": "087e9ad01d74cf7564e2c9f04b9ca277cb5dfd4d347bb33445b679e4a3d87381",
+      "stored": 3000,
+      "duplicate_ids": 0,
+      "dropped": {
+        "다른 플랫폼의 경기다": 15
+      },
+      "platform": {
+        "euw1": 985,
+        "kr": 1000,
+        "na1": 1000
+      },
+      "version": {
+        "16.17.810": 2985
+      },
+      "first_game": "2026-08-26T03:33:49Z",
+      "last_game": "2026-09-10T06:08:09Z"
+    },
+    "16_18": {
+      "games": 11400,
+      "sha256": "3478b582227a2f761fa724fbc35808a741b66e61c8800746ed94efc1dcc6c09c",
+      "stored": 11400,
+      "duplicate_ids": 0,
+      "dropped": {},
+      "platform": {
+        "euw1": 3600,
+        "kr": 3900,
+        "na1": 3900
+      },
+      "version": {
+        "16.18.817": 11035,
+        "16.18.816": 365
+      },
+      "first_game": "2026-09-11T00:00:27Z",
+      "last_game": "2026-09-22T19:38:55Z"
+    },
+    "16_19": {
+      "games": 6000,
+      "sha256": "0d98465bee322c70aaf6dfd68b32082931f718298c64407c02b328c75473bbd9",
+      "stored": 6000,
+      "duplicate_ids": 0,
+      "dropped": {},
+      "platform": {
+        "euw1": 2000,
+        "kr": 2000,
+        "na1": 2000
+      },
+      "version": {
+        "16.19.821": 5940,
+        "16.19.820": 60
+      },
+      "first_game": "2026-09-24T00:02:45Z",
+      "last_game": "2026-09-28T00:03:02Z"
+    }
+  }
+}
