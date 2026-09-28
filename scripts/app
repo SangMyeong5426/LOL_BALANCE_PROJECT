@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""밸런스 조정 판단 보조 화면 — 에이전트(`B8`) × Gradio.  교재 8·9장.
+"""밸런스 조정 판단 보조 화면 — 해설 체인 · 후속 질문 에이전트 × Gradio.  교재 8·9장.
 
     ./scripts/app        → http://127.0.0.1:7861
 
-화면이 세 덩어리로 갈린다. **누가 만든 것인지를 섞지 않는다.**
+화면이 네 덩어리로 갈린다. **누가 만든 것인지를 섞지 않는다.**
 
     ⚠ 경고 · 근거 · 베이스라인    코드 (explain · arms)
-    해설 · 대조 · 호출 기록        에이전트가 쓰고 코드가 대조한다
+    해설 · 대조 · 조회 기록        체인 — 코드가 조회하고 모델이 쓰고 코드가 대조한다
+    후속 질문                      에이전트가 도구를 골라 답한다 — 대조를 거치지 않는다
     답                             패널 라벨 — 누르기 전에는 안 보인다
+
+**첫 해설은 체인 하나로만 만든다.** 한때 에이전트 방식도 고를 수 있었는데, 두 방식의
+해설이 같은 기록에 섞이면 첫 해설끼리 견줄 수 없다(에이전트 기록에는 방식 표시도
+없었다). 에이전트 해설(`judge.build_explainer`)은 비교 실험용으로만 남는다.
 
 `scripts/ask` 의 순서를 따른다 — *근거를 읽고 스스로 판단한 뒤, 모델과 맞춰
 보고, 그다음 답을 연다.*
@@ -36,15 +41,11 @@ from lol_balance.agent.judge import (  # noqa: E402
     RUNS,
     build_context,
     build_explain_chain,
-    build_explainer,
     candidates,
-    explain_task,
     invented_tension,
     misquoted_warning,
     misread_baseline,
     save,
-    stream,
-    unverified,
 )
 from lol_balance.config import DEFAULT_AGENT_MODEL, load_settings  # noqa: E402
 
@@ -153,7 +154,7 @@ def code_side(champion: str, at: str) -> tuple[str, str]:
     return warn, "\n".join(lines)
 
 
-# ── 에이전트 쪽 ─────────────────────────────────────────────────────────
+# ── 해설 쪽 ─────────────────────────────────────────────────────────────
 
 
 # 화면에 쓰는 이름. **안에서 쓰는 이름을 그대로 보이지 않는다** — 보는 사람은
@@ -176,21 +177,10 @@ def _source(name: str) -> str:
     return SOURCE_NAMES.get(name, name)
 
 
-def _trace(steps) -> str:
-    if not steps:
-        return "_아직 찾아본 것이 없습니다._"
-    out = []
-    for i, s in enumerate(steps, 1):
-        args = ", ".join(str(v) for v in s.args.values())
-        out.append(f"**{i}. {TOOL_NAMES.get(s.tool, s.tool)}** — {args}")
-        out.append("```text\n" + (s.output or "…찾는 중") + "\n```")
-    return "\n".join(out)
-
-
 STANCE = {"동의": "🟢", "부분 동의": "🟡", "반대": "🔴", "판단 보류": "⚪"}
 
 
-def _checks(ctx, e, fake: list[str] | None = None) -> str:
+def _checks(ctx, e) -> str:
     """코드가 해설을 대조한 결과. **모델에게 묻지 않고 코드가 잰다.**"""
     flags = []
     side = misread_baseline(e, ctx)
@@ -204,9 +194,6 @@ def _checks(ctx, e, fake: list[str] | None = None) -> str:
         )
     if invented_tension(e, ctx):
         flags.append("주의할 점이 없는데 **있다고 지어냈습니다**")
-    if fake:
-        names = ", ".join(_source(x) for x in fake)
-        flags.append(f"찾아보지 않은 자료를 **근거로 적었습니다**: {names}")
     if not flags:
         return "> ✅ 코드 대조 통과 — 점수 방향·주의 문구·근거 출처가 모두 맞습니다\n\n"
     return "".join(f"> ⚠ {f}\n" for f in flags) + "> **이 설명은 믿지 마세요.**\n\n"
@@ -235,8 +222,8 @@ def _explanation(ctx, e) -> str:
     return "\n".join(lines)
 
 
-def explain(champion: str, at: str, model: str, mode: str = "체인"):
-    """체인이면 조회를 코드가 한 번에 하고, 에이전트면 모델이 골라 부른다."""
+def explain(champion: str, at: str, model: str):
+    """체인 — 조회는 코드가 한 번에 하고, 모델은 받은 것만 해석한다."""
     ctx = build_context(CORPUS, champion, at)
     need = missing_key(model)
     if need:
@@ -251,82 +238,28 @@ def explain(champion: str, at: str, model: str, mode: str = "체인"):
 
     # 로컬 모델은 thinking 을 끈다 — qwen3.5:2b 에서 76초 → 18초였다.
     kwargs = {"reasoning": False} if model.startswith("ollama:") else {}
-    if mode == "체인":
-        yield "### 자료를 찾는 중…", "", None
-        try:
-            out = build_explain_chain(CORPUS, ctx, model, **kwargs).invoke({})
-        except Exception as exc:
-            yield f"### 실패\n`{type(exc).__name__}: {exc}`", "", None
-            return
-        found = "\n".join(
-            f"**{k}**\n```text\n{v}\n```" for k, v in out["found"].items()
-        )
-        e = out["answer"]
-        line = {
-            "at": at,
-            "champion": champion,
-            "model": model,
-            "mode": mode,
-            **e.model_dump(),
-            "misread_baseline": misread_baseline(e, ctx),
-            "misquoted_warning": misquoted_warning(e, ctx),
-            "invented_tension": invented_tension(e, ctx),
-            "warnings": ctx.warnings,
-        }
-        save(line, "explain-demo.jsonl")
-        yield _checks(ctx, e) + _explanation(ctx, e), found, line
-        return
-
-    yield "### AI 가 설명을 쓰는 중…", _trace([]), None
+    yield "### 자료를 찾는 중…", "", None
     try:
-        agent = build_explainer(CORPUS, ctx, model, **kwargs)
+        out = build_explain_chain(CORPUS, ctx, model, **kwargs).invoke({})
     except Exception as exc:
-        yield f"### 모델을 못 만들었다\n`{type(exc).__name__}: {exc}`", "", None
+        yield f"### 실패\n`{type(exc).__name__}: {exc}`", "", None
         return
-
-    run = None
-    for run in stream(agent, explain_task(CORPUS, ctx)):
-        status = (
-            "### AI 가 설명을 쓰는 중…"
-            if run.judgment is None
-            else _explanation(ctx, run.judgment)
-        )
-        yield status, _trace(run.steps), None
-
-    if run is None or run.error:
-        yield (
-            f"### 실패\n`{run.error if run else '응답 없음'}`",
-            _trace(run.steps if run else []),
-            None,
-        )
-        return
-    if run.judgment is None:
-        yield (
-            "### 구조화된 답이 안 왔다\n모델이 형식을 따르지 않았다. 다시 누르거나 "
-            "더 큰 모델로 바꾼다.",
-            _trace(run.steps),
-            None,
-        )
-        return
-
-    fake = unverified(run)
+    found = "\n".join(f"**{k}**\n```text\n{v}\n```" for k, v in out["found"].items())
+    e = out["answer"]
     line = {
         "at": at,
         "champion": champion,
         "model": model,
-        **run.judgment.model_dump(),
-        "tools": [s.tool for s in run.steps],
-        "unverified_sources": fake,
+        # 방식은 하나뿐이지만 적어 둔다 — 이전 기록에 에이전트 해설이 섞여 있다
+        "mode": "체인",
+        **e.model_dump(),
+        "misread_baseline": misread_baseline(e, ctx),
+        "misquoted_warning": misquoted_warning(e, ctx),
+        "invented_tension": invented_tension(e, ctx),
         "warnings": ctx.warnings,  # 코드가 낸 것 — 모델이 쓴 칸이 아니다
     }
-    line["misread_baseline"] = misread_baseline(run.judgment, ctx)
-    line["misquoted_warning"] = misquoted_warning(run.judgment, ctx)
     save(line, "explain-demo.jsonl")
-    yield (
-        _checks(ctx, run.judgment, fake) + _explanation(ctx, run.judgment),
-        _trace(run.steps),
-        line,
-    )
+    yield _checks(ctx, e) + _explanation(ctx, e), found, line
 
 
 def clear():
@@ -334,7 +267,7 @@ def clear():
 
     남겨 두면 **이전 챔피언의 판단이 새 챔피언 옆에 붙어** 읽힌다.
     """
-    return "_「에이전트에게 해설 맡기기」를 누른다._", "", None, ""
+    return "_위의 「AI 에게 설명 맡기기」를 눌러 주세요._", "", None, ""
 
 
 def visitor_id(current: str | None) -> str:
@@ -380,7 +313,7 @@ def ask_followup(question, champion, at, model, explanation, visitor):
         _, steps = followup.ask(agent, thread, question, CORPUS, ctx, explanation)
     except Exception as exc:
         return shown, question, f"실패: `{type(exc).__name__}: {exc}`"
-    used = ", ".join(f"`{s.tool}`" for s in steps) or "없음"
+    used = ", ".join(TOOL_NAMES.get(s.tool, s.tool) for s in steps) or "없음"
     note = f"이번 답에 부른 도구: {used} · **코드 대조를 거치지 않은 자유 서술이다**"
     return followup.history(agent, thread), "", note
 
@@ -436,15 +369,6 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
                 ],
                 label="챔피언",
             )
-            mode = gr.Radio(
-                ["체인", "에이전트"],
-                value="체인",
-                label="설명을 만드는 방식",
-                info=(
-                    "체인: 자료 세 가지를 한꺼번에 찾아 AI 에게 넘깁니다 · "
-                    "에이전트: AI 가 필요한 자료를 스스로 골라 찾아봅니다"
-                ),
-            )
             run_btn = gr.Button("AI 에게 설명 맡기기", variant="primary")
             warn = gr.Markdown()
 
@@ -456,7 +380,7 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
             gr.Markdown("## AI 가 쓴 설명")
             verdict = gr.Markdown("_위의 「AI 에게 설명 맡기기」를 눌러 주세요._")
 
-    with gr.Accordion("AI 가 무엇을 찾아봤나", open=False):
+    with gr.Accordion("AI 에게 넘긴 자료", open=False):
         trace = gr.Markdown()
 
     explained = gr.State("")
@@ -499,7 +423,7 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
     champion.change(code_side, [champion, at], [warn, base]).then(
         clear, None, [verdict, trace, saved, answer]
     ).then(lambda: False, None, opened)
-    run_btn.click(explain, [champion, at, model, mode], [verdict, trace, saved]).then(
+    run_btn.click(explain, [champion, at, model], [verdict, trace, saved]).then(
         lambda text: text, verdict, explained
     )
     ask_btn.click(

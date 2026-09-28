@@ -31,6 +31,11 @@ from lol_balance.fetch import get_with_retry  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = "https://ddragon.leagueoflegends.com/api/versions.json"
 WINDOW_HOURS = 26
+# **한 번에 이만큼을 넘기면 포기한다.** 맥이 자는 동안 멈췄다 깨기를 되풀이하면
+# 한 실행이 며칠씩 걸리고, `launchd` 는 같은 작업이 돌고 있으면 새로 안 띄운다.
+# 그래서 하루가 늦는 것이 아니라 **그 뒤로 전부 건너뛴다** — 2026-09-22 실행이
+# 엿새를 붙들어 닷새치를 통째로 잃었다. 창이 26시간이라 놓친 날은 못 채운다.
+DEADLINE_MINUTES = 150
 
 
 def code_line() -> str:
@@ -65,6 +70,12 @@ def current_patch() -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--add", type=int, default=300, help="플랫폼마다 더 받을 판수")
+    parser.add_argument(
+        "--deadline",
+        type=int,
+        default=DEADLINE_MINUTES,
+        help=f"이 분을 넘기면 포기한다 (기본 {DEADLINE_MINUTES})",
+    )
     args = parser.parse_args()
 
     patch = current_patch()
@@ -74,18 +85,28 @@ def main() -> int:
         f"=== {stamp} · 현재 패치 {patch} · 지난 {WINDOW_HOURS}시간 · {code_line()}",
         flush=True,
     )
-    return subprocess.call(
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "fetch-riot"),
-            patch,
-            "--since",
-            since.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "--add",
-            str(args.add),
-        ],
-        cwd=ROOT,
-    )
+    try:
+        return subprocess.call(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "fetch-riot"),
+                patch,
+                "--since",
+                since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "--add",
+                str(args.add),
+            ],
+            cwd=ROOT,
+            timeout=args.deadline * 60,
+        )
+    except subprocess.TimeoutExpired:
+        # **받은 것은 남는다** — `fetch-riot` 은 한 판씩 파일에 덧붙인다.
+        print(
+            f"멈춤 — {args.deadline}분을 넘겨 포기한다. 받은 것까지는 남는다."
+            " 내일 실행이 막히지 않게 여기서 끊는다.",
+            flush=True,
+        )
+        return 1
 
 
 if __name__ == "__main__":
