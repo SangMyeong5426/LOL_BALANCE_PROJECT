@@ -26,6 +26,9 @@ PRICES: dict[str, tuple[float, float]] = {
     "gpt-4.1-mini": (0.40, 1.60),
     "gpt-4.1-nano": (0.10, 0.40),
     "gpt-4o-mini": (0.15, 0.60),
+    # 임베딩은 입력만 과금한다. 출력 단가를 0 으로 두면 `cost` 가 그대로 맞는다.
+    "text-embedding-3-small": (0.02, 0.0),
+    "text-embedding-3-large": (0.13, 0.0),
 }
 
 DEFAULT_CAP = 5.0
