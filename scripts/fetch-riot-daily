@@ -31,6 +31,11 @@ from lol_balance.fetch import get_with_retry  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = "https://ddragon.leagueoflegends.com/api/versions.json"
 WINDOW_HOURS = 26
+# **놓친 날은 마지막으로 받은 경기부터 메운다.** 맥이 자거나 꺼져 있으면 그날
+# 실행이 통째로 빠지고, 26시간 창만 보면 그 사이가 영영 빈다. 그렇다고 무한정
+# 거슬러 올라갈 수는 없다 — 이용자 기록은 최근 20판까지만 보여서, 하루 다섯 판을
+# 치면 **나흘쯤이 한계**다. 그 너머를 요청해도 받은 경기가 전부 창 밖이라 버려진다.
+CATCH_UP_LIMIT_HOURS = 96
 # **한 번에 이만큼을 넘기면 포기한다.** 맥이 자는 동안 멈췄다 깨기를 되풀이하면
 # 한 실행이 며칠씩 걸리고, `launchd` 는 같은 작업이 돌고 있으면 새로 안 띄운다.
 # 그래서 하루가 늦는 것이 아니라 **그 뒤로 전부 건너뛴다** — 2026-09-22 실행이
@@ -60,6 +65,40 @@ def code_line() -> str:
     return f"코드 {branch} {commit}{' · 작업 트리 더러움' if dirty else ''}{mark}"
 
 
+def last_game(patch: str) -> datetime | None:
+    """그 패치에서 **마지막으로 받은 경기의 시작 시각.** 없으면 `None`."""
+    folder = ROOT / "data" / "riot" / patch
+    if not folder.is_dir():
+        return None
+    newest = 0
+    for f in folder.glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                # 저장 칸 이름은 `start` 다(riot.dumps). 여기서 어긋나면 조용히 못 메운다.
+                newest = max(newest, int(json.loads(line)["start"]))
+            except (KeyError, ValueError, TypeError):
+                continue
+    return datetime.fromtimestamp(newest / 1000, UTC) if newest else None
+
+
+def window_start(patch: str) -> datetime:
+    """창의 시작. **놓친 날이 있으면 거기부터 메운다.**
+
+    보통은 지난 26시간이다(두 시간을 겹쳐 틈을 없앤다). 며칠 못 돌았으면 마지막
+    경기부터 잡아 그 사이를 메우되, `CATCH_UP_LIMIT_HOURS` 보다 더 거슬러 가지
+    않는다 — 이용자 기록이 거기까지만 보여서 더 요청해도 버려지기만 한다.
+    """
+    now = time.time()
+    usual = datetime.fromtimestamp(now - WINDOW_HOURS * 3600, UTC)
+    floor = datetime.fromtimestamp(now - CATCH_UP_LIMIT_HOURS * 3600, UTC)
+    seen = last_game(patch)
+    if seen is None or seen >= usual:
+        return usual
+    return max(seen, floor)
+
+
 def current_patch() -> str:
     """Data Dragon 의 가장 새 버전 → 우리 패치 표기."""
     versions = json.loads(get_with_retry(VERSIONS, validate=json.loads).decode())
@@ -79,12 +118,15 @@ def main() -> int:
     args = parser.parse_args()
 
     patch = current_patch()
-    since = datetime.fromtimestamp(time.time() - WINDOW_HOURS * 3600, UTC)
+    since = window_start(patch)
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%MZ")
-    print(
-        f"=== {stamp} · 현재 패치 {patch} · 지난 {WINDOW_HOURS}시간 · {code_line()}",
-        flush=True,
+    gap = (datetime.now(UTC) - since).total_seconds() / 3600
+    how = (
+        f"지난 {WINDOW_HOURS}시간"
+        if gap <= WINDOW_HOURS + 1
+        else f"**{gap:.0f}시간을 메운다** — 마지막 경기 뒤로 못 돌았다"
     )
+    print(f"=== {stamp} · 현재 패치 {patch} · {how} · {code_line()}", flush=True)
     try:
         return subprocess.call(
             [
