@@ -84,6 +84,9 @@
   .foot img{max-width:100%;border:1px solid var(--line);border-radius:6px;margin:6px 0}
   .note{background:var(--panel);border:1px solid var(--line);border-radius:8px;
     padding:14px 16px;color:var(--dim);font-size:13.5px;margin-top:22px}
+  .scope{border-left:3px solid var(--line);padding:2px 0 2px 12px;
+    color:var(--dim);font-size:13.5px;margin:-12px 0 22px}
+  .scope b{color:var(--ink);font-weight:600}
 </style>
 
 <div class="wrap">
@@ -91,6 +94,15 @@
   <p class="sub">공개 데이터만으로 다음 패치에 조정될 챔피언을 좁힌다.
     <span id="asof"></span>
     <a href="https://github.com/SangMyeong5426/LOL_BALANCE_PROJECT">저장소 →</a></p>
+
+  <!-- **어디까지 싣는지 화면이 스스로 말한다.** 그 뒤 패치는 개인 키로 모은
+       직접 집계라 공개 페이지에 올리지 않는다(ADR 0010, 2026-09-29).
+       u.gg 패널 구간이 바뀌면 이 문구의 패치와 날짜도 같이 고친다. -->
+  <p class="scope"><b>최신 패치는 이 페이지에 없습니다.</b>
+    여기 쓴 솔랭 지표는 u.gg 아카이브에서 온 것이라 16_13 패치(2026-06-24 출시)까지의
+    자료만 싣습니다. 그 뒤 패치는 Riot API 로 우리가 직접 모은 경기로 예측하는데, 그 경기를
+    모은 개인 키는 Riot 규정상 공개용으로 쓸 수 없어 여기 올리지 않습니다. 최신 패치 예측은
+    개발자의 로컬 화면에서만 봅니다.</p>
 
   <div class="bar">
     <label for="p">기준 패치</label>
@@ -142,7 +154,7 @@ fetch('data.json', { cache: 'no-cache' }).then(r => r.json()).then(d => {
   $('#p').value = d.built;
   // **미리 계산해 둔 자료다.** 새 패치가 나와도 저절로 갱신되지 않으므로
   // 어디까지의 자료인지 화면이 스스로 말해야 한다.
-  $('#asof').textContent = `${d.built} 까지의 자료 · `;
+  $('#asof').textContent = `u.gg 아카이브 · ${d.built} 패치까지의 자료 · `;
   $('#p').onchange = draw;
   $('#rev').onchange = draw;
   draw();
