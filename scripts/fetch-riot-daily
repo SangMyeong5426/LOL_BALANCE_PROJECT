@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""현재 패치의 직접 집계를 하루치 더 쌓는다 — 예약 작업이 매일 부른다.
+"""현재 패치의 직접 집계를 하루치 더 쌓는다 — 예약 작업이 매시간 확인하고 부른다.
 
-    ./scripts/fetch-riot-daily            # 플랫폼마다 300판 더
+    ./scripts/fetch-riot-daily            # 플랫폼마다 300판 더 (지금 바로)
     ./scripts/fetch-riot-daily --add 500
+    ./scripts/fetch-riot-daily --check    # 예약 실행이라면 지금 돌지 말한다 (요청 없음)
 
 **키가 필요하다**(ADR 0010). 현재 패치는 Data Dragon 의 가장 새 버전으로 정한다
 (`16.18.1` → `16_18`). 창은 지난 26시간 — 하루에 한 번 돌리므로 두 시간을 겹쳐
@@ -11,7 +12,10 @@
 패치가 바뀐 날에는 창 안에 앞 패치 경기가 섞인다. `gameVersion` 으로 걸러
 `.skip` 으로 가므로 섞이지 않는다.
 
-예약은 `./scripts/install-riot-daily` 가 건다.
+예약은 `./scripts/install-riot-daily` 가 건다. 예약 작업은 매시간 `--scheduled` 로
+부르고, 그때는 **마지막으로 경기를 받은 지 20시간이 지났고 맥이 제대로 깨어 있을
+때만** 돈다. 덮개를 닫은 맥은 밤새 몇 초씩만 깨므로(다크웨이크) 새벽에 시작하면
+몇 시간을 기어간다 — 2026-09-29 새벽이 그랬다. 손으로 부를 때는 확인 없이 바로 돈다.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,7 +45,15 @@ CATCH_UP_LIMIT_HOURS = 96
 # 한 실행이 며칠씩 걸리고, `launchd` 는 같은 작업이 돌고 있으면 새로 안 띄운다.
 # 그래서 하루가 늦는 것이 아니라 **그 뒤로 전부 건너뛴다** — 2026-09-22 실행이
 # 엿새를 붙들어 닷새치를 통째로 잃었다. 창이 26시간이라 놓친 날은 못 채운다.
+#
+# **다만 맥이 자는 시간은 세지 않는다.** 2026-09-29 실행은 벽시계로 3시간 45분을
+# 넘겼는데도 걸리지 않았다 — 거의 내내 자고 있었다. 그래서 예약 실행은 아예 맥이
+# 깨어 있을 때만 시작한다(`awake`).
 DEADLINE_MINUTES = 150
+# **예약 실행은 하루 한 번이다.** 매시간 확인하되, 마지막으로 경기를 받은 지 이만큼이
+# 안 됐으면 그냥 끝낸다. 24가 아니라 20인 것은 맥을 여는 시각이 날마다 달라서다 —
+# 어제 09:25 에 끝났는데 오늘 08:00 에 열었다고 하루를 거르지 않게 한다.
+MIN_GAP_HOURS = 20
 
 
 def code_line() -> str:
@@ -99,6 +112,49 @@ def window_start(patch: str) -> datetime:
     return max(seen, floor)
 
 
+def too_soon(now: datetime) -> float | None:
+    """마지막으로 경기를 받은 지 `MIN_GAP_HOURS` 가 안 됐으면 그 시간(시간 단위).
+
+    **받은 파일이 마지막으로 바뀐 때**를 본다. 따로 기록 파일을 두지 않는다 — 받은
+    것이 곧 기록이다. 그래서 손으로 더 받은 날도 「받았다」로 치고, 한 판도 못 받은
+    실행은 「안 받았다」로 쳐서 다음 확인 때 다시 돈다.
+    """
+    files = list((ROOT / "data" / "riot").glob("*/*.jsonl"))
+    if not files:
+        return None
+    newest = datetime.fromtimestamp(max(f.stat().st_mtime for f in files), UTC)
+    hours = (now - newest).total_seconds() / 3600
+    return hours if hours < MIN_GAP_HOURS else None
+
+
+def awake(
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> bool:
+    """**맥이 제대로 깨어 있나.** 다크웨이크에는 화면 기능이 없다.
+
+    `pmset -g systemstate` 는 깨어 있을 때 「CPU Graphics Audio Network」라고
+    답한다. `Graphics` 가 빠져 있으면 덮개를 닫은 맥이 몇 초만 깬 것이다 —
+    2026-09-29 새벽에는 15분마다 깨어 한 번에 2~45초였다. 그때 시작하면 몇 초
+    돌고 자기를 되풀이한다. 05:19 에 시작한 실행이 이용자 목록 조회를 07:21 에야
+    마쳤고, 경기는 맥을 연 08:59 뒤에야 제 속도로 받았다.
+
+    **판단할 수 없으면 깨어 있다고 본다** — 맥이 아니거나 답의 형식이 다르면
+    예전처럼 돈다. 여기서 잘못 막아 하루를 통째로 잃는 쪽이 더 나쁘다.
+    """
+    try:
+        done = run(
+            ["pmset", "-g", "systemstate"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    line = next((x for x in done.stdout.splitlines() if "Capabilities" in x), None)
+    return line is None or "Graphics" in line
+
+
 def current_patch() -> str:
     """Data Dragon 의 가장 새 버전 → 우리 패치 표기."""
     versions = json.loads(get_with_retry(VERSIONS, validate=json.loads).decode())
@@ -115,7 +171,43 @@ def main() -> int:
         default=DEADLINE_MINUTES,
         help=f"이 분을 넘기면 포기한다 (기본 {DEADLINE_MINUTES})",
     )
+    parser.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="예약 작업이 부른다 — 하루 한 번, 맥이 깨어 있을 때만 돈다",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="예약 실행이라면 지금 돌지만 말하고 끝낸다 (요청을 보내지 않는다)",
+    )
     args = parser.parse_args()
+
+    # **네트워크를 쓰기 전에 본다.** 건너뛸 때는 요청을 한 건도 보내지 않는다.
+    if args.scheduled or args.check:
+        now = datetime.now(UTC)
+        hours = too_soon(now)
+        if hours is not None:
+            # 하루에 스무 번 넘게 되풀이되므로 예약 실행에서는 적지 않는다
+            if args.check:
+                print(
+                    f"안 돈다 — 마지막으로 받은 지 {hours:.1f}시간이다"
+                    f" ({MIN_GAP_HOURS}시간이 지나야 돈다)"
+                )
+            return 0
+        if not awake():
+            # 적어 둔다 — 다크웨이크를 제대로 가려내는지 이 줄로 확인한다
+            print(
+                f"··· {now:%Y-%m-%d %H:%MZ} 건너뜀 — 맥이 화면 없이 잠깐 깬 상태다"
+                "(다크웨이크). 맥이 열리면 돈다",
+                flush=True,
+            )
+            return 0
+        if args.check:
+            print(
+                f"돈다 — 맥이 깨어 있고 마지막으로 받은 지 {MIN_GAP_HOURS}시간이 지났다"
+            )
+            return 0
 
     patch = current_patch()
     since = window_start(patch)
