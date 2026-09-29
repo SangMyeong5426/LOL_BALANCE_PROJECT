@@ -155,7 +155,7 @@ LLM 이 만든 것은 정답지 라벨 1,630종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 507개 · 검사 11개
+./scripts/check-all                 # 테스트 517개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -169,7 +169,7 @@ API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직
 ./scripts/fetch-riot 16_18 --since 2026-09-11 --per-region 1000   # 키 필요
 ./scripts/run-riot-check 16_18                                    # 키 불필요
 ./scripts/run-builds 16_17                                        # 챔피언별 주요 아이템 · 키 불필요
-./scripts/install-riot-daily                                      # 매일 05:10 에 현재 패치를 더 쌓는다
+./scripts/install-riot-daily                                      # 맥이 깨어 있을 때 하루 한 번 현재 패치를 더 쌓는다
 ```
 
 직접 집계는 경기마다 최종 아이템까지 남겨, 패치 단위였던 아이템 경고를 챔피언
@@ -193,7 +193,7 @@ src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전�
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
 ground_truth/      정답지. 실제 조정 결과 1,630건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             507개 · 커버리지 96%
+tests/             517개 · 커버리지 96%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
