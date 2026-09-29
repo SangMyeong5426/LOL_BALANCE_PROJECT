@@ -12,6 +12,8 @@
 
 **[브라우저에서 돌려 보기 →](https://sangmyeong5426.github.io/LOL_BALANCE_PROJECT/)**
 패치를 고르고 후보를 읽은 뒤, 실제 결과를 켜서 맞춰 볼 수 있다.
+u.gg 아카이브 구간(`16_13` 패치까지)만 싣는다 — 그 뒤 직접 집계는 개인 키 규정상 공개
+페이지에 올리지 않고 로컬 화면에서만 본다([ADR 0010](docs/adr/0010-riot-api-direct-aggregation.md#키는)).
 
 ![배포 페이지](docs/img/site.png)
 
