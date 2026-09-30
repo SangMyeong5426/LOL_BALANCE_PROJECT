@@ -20,6 +20,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult
 
 import lol_balance.agent.evaluate as ev
 import lol_balance.agent.judge as judge
+from lol_balance import spend
 from lol_balance.agent.data import Corpus, available, load
 from lol_balance.agent.judge import (
     MAX_OUTPUT,
@@ -164,6 +165,33 @@ def test_call_limit_stops_a_runaway_agent(
     assert line["abstain"] is True and line["nerf_prob"] is None
     assert line["model_calls"] <= 8
     assert len(line["tools"]) <= 12
+
+
+class OverBudget(_Fake):
+    """부르면 상한에 닿았다고 한다 — 장부가 상한을 넘은 유료 모델과 같다."""
+
+    @property
+    def _llm_type(self) -> str:
+        return "over-budget"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise spend.SpendCapReached("상한에 닿았다")
+
+
+def test_the_spend_cap_stops_the_run_instead_of_becoming_an_abstention(
+    tiny_corpus: Corpus, judged: list[ev.Case], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**상한에 닿으면 멈춘다.** 기권 줄로 바꿔 적으면 남은 건이 전부 기권으로
+    쌓이고, 다시 돌려도 끝난 건으로 보고 건너뛴다."""
+    monkeypatch.setattr(ev, "chat_model", lambda *a, **k: OverBudget())
+    with pytest.raises(spend.SpendCapReached):
+        ev.run_case(tiny_corpus, judged[0], "fake:x")
 
 
 def test_every_model_gets_an_output_cap(monkeypatch: pytest.MonkeyPatch) -> None:
