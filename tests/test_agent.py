@@ -50,6 +50,7 @@ from lol_balance.agent.judge import (
 from lol_balance.agent.schema import Evidence, Explanation, Judgment, StrictJudgment
 from lol_balance.agent.tools import make_tools
 from lol_balance.panel import PanelRow, patch_index
+from lol_balance.patchnotes import ChangeBlock
 from lol_balance.store import write_panel
 
 needs_data = pytest.mark.skipif(
@@ -199,6 +200,42 @@ def test_patch_notes_cannot_reach_the_future(tiny_corpus: Corpus) -> None:
     tools = {t.name: t for t in make_tools(tiny_corpus, "15_13")}
     out = tools["search_patch_notes"].invoke({"champion": "C3", "patch": "15_15"})
     assert "경계 밖" in out and "Cooldown" not in out, out
+
+
+def test_base_patch_notes_open_only_where_asked(tiny_corpus: Corpus) -> None:
+    """**화면은 기준 패치 노트를 연다** — 그 패치에 무엇이 바뀌었는지는 이미 공개됐다.
+
+    안 열면 16_19 화면에서 「경계 밖」이 23줄 나왔다(2026-09-28). 평가 도구는 닫은
+    채 둔다 — 기록한 229건을 재현해야 한다. **여는 쪽도 다음 패치는 못 본다.**
+    """
+    ask = {"champion": "C3", "patch": "15_15"}
+    closed = {t.name: t for t in make_tools(tiny_corpus, "15_15")}
+    opened = {t.name: t for t in make_tools(tiny_corpus, "15_15", base_notes=True)}
+    assert "경계 밖" in closed["search_patch_notes"].invoke(ask)
+    assert "Cooldown increased to 12" in opened["search_patch_notes"].invoke(ask)
+
+    early = {t.name: t for t in make_tools(tiny_corpus, "15_13", base_notes=True)}
+    out = early["search_patch_notes"].invoke(ask)
+    assert "경계 밖" in out and "Cooldown" not in out, out
+
+
+def test_missing_note_files_are_not_missing_sections(tiny_corpus: Corpus) -> None:
+    """노트 **파일**이 없는 것을 「해당 절 없음」이라고 하지 않는다. 화면이 `live/`
+    노트를 안 읽어 실제로 있는 절을 그렇게 16번 답했다(2026-09-28)."""
+    sparse = replace(tiny_corpus, blocks={"15_12": tiny_corpus.blocks["15_12"]})
+    notes = {t.name: t for t in make_tools(sparse, AT)}["search_patch_notes"]
+    told = []
+    for line in notes.invoke({"champion": "C3"}).splitlines():
+        found = re.match(r"\s*(\d{2}_\d{1,2}): 찾지 못함 \((.+)\)", line)
+        if found:
+            patch, why = found.groups()
+            told.append(why)
+            if patch_index(patch) < patch_index(AT):
+                expected = (
+                    "해당 절 없음" if patch in sparse.blocks else "노트 파일 없음"
+                )
+                assert why == expected, line
+    assert "노트 파일 없음" in told
 
 
 def test_patch_notes_read_the_right_patch_and_skip_skins(tiny_corpus: Corpus) -> None:
@@ -472,6 +509,30 @@ def test_load_reads_the_panel_and_marks_answered_patches(
     assert corpus.row("C3", AT) is not None and corpus.row("C3", "13_14") is None
     assert corpus.blocks == {} and corpus.rules == () and corpus.churn == {}
     assert lifetime_pro(corpus.rows, "C1") is None  # 20패치가 안 된다
+
+
+def test_notes_are_read_from_live_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**`live/` 의 최신 노트도 읽는다.** 화면이 안 읽어 16.16~16.19 노트에 있는 절을
+    「해당 절 없음」이라고 답했다. 같은 패치가 두 곳에 있으면 본 폴더 것을 쓰고,
+    순서를 모르는 패치(해가 바뀐 `17_1` 등)는 건너뛴다."""
+    notes = tmp_path / "patchnotes"
+    (notes / "live").mkdir(parents=True)
+    (notes / "15.10.1.html").write_bytes(b"main-15_10")
+    (notes / "live" / "15.10.1.html").write_bytes(b"live-15_10")
+    (notes / "live" / "15.11.1.html").write_bytes(b"live-15_11")
+    (notes / "live" / "17.1.1.html").write_bytes(b"live-17_1")
+    monkeypatch.setattr(data, "NOTES", notes)
+    monkeypatch.setattr(
+        data,
+        "champion_changes",
+        lambda raw: [ChangeBlock(raw.decode(), "S", None, ())],
+    )
+
+    got = {p: [b.champion for b in bs] for p, bs in data.note_blocks().items()}
+
+    assert got == {"15_10": ["main-15_10"], "15_11": ["live-15_11"]}
 
 
 def test_load_answers_the_patch_after_the_panel(

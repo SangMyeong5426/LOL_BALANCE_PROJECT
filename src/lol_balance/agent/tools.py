@@ -55,13 +55,6 @@ def _outcome(row: PanelRow) -> str:
     return outcome(row)
 
 
-def patch_index_safe(patch: str) -> int:
-    try:
-        return patch_index(patch)
-    except KeyError:
-        return 10**6
-
-
 def make_tools(
     corpus: Corpus,
     as_of: str,
@@ -72,6 +65,7 @@ def make_tools(
     stats: bool = True,
     stat_as_of: str | None = None,
     fixed_cases: int | None = None,
+    base_notes: bool = False,
 ) -> list[BaseTool]:
     """`as_of` 이전만 보는 도구. **경계는 여기서 한 번 박히고 끝이다.**
 
@@ -81,6 +75,8 @@ def make_tools(
     stats        R3 를 쥐여 줄지
     stat_as_of   R3 만의 경계. 평가에서 대상 패치로 준다 — 아래 참조
     fixed_cases  주면 R1 은 **조정된 사례 이 수만큼으로 고정**된다(B5 는 25)
+    base_notes   R2 가 **기준 패치의 노트**까지 본다. 화면이 켠다 — 그 패치에 무엇이
+                 바뀌었는지는 이미 공개됐다. 평가는 끈 채 둔다(기록을 재현한다)
 
     ## R3 의 경계를 따로 두는 이유
 
@@ -90,7 +86,7 @@ def make_tools(
     그 시점에 이미 공개된 결과다. 다만 B5·B6 이 못 본 정보이므로 **따로 적는다.**
     """
     stat = StatLookup(corpus.rows, stat_as_of or as_of)
-    search_notes = NoteSearch(corpus.blocks, as_of)
+    search_notes = NoteSearch(corpus.blocks, as_of, include_base=base_notes)
     pools = {
         # ① 대상 — 전체 행. 「비슷했던 챔피언 중 몇이 조정됐나」
         "all": CaseSearch(corpus.rows, as_of),
@@ -101,6 +97,7 @@ def make_tools(
     query_patch = target.patch if target is not None else as_of
     boundary = f"(경계: {as_of} 이전 기록만)"
     stat_boundary = f"(경계: {stat_as_of or as_of} 이전 기록만)"
+    note_boundary = f"(경계: {as_of} 노트까지)" if base_notes else boundary
 
     def resolve(champion: str) -> tuple[PanelRow | None, str, str]:
         """(행, 부를 이름, 실패 메시지). 대소문자·공백이 달라도 받는다."""
@@ -240,7 +237,7 @@ def make_tools(
             return f"{label} 은 과거에 조정된 기록이 없다 {boundary}"
 
         first = name.split()[0].lower()
-        out = [f"{label} 패치 노트 {boundary}"]
+        out = [f"{label} 패치 노트 {note_boundary}"]
         for p in wanted:
             if p not in corpus.blocks and patch.strip():
                 out.append(f"  {p}: 그 패치 노트가 없다")
@@ -254,12 +251,9 @@ def make_tools(
                 if hp == p and b.champion == name and first not in b.section.lower()
             ]
             if not hits:
-                reason = (
-                    "경계 밖"
-                    if patch_index_safe(p) >= patch_index(as_of)
-                    else "해당 절 없음"
-                )
-                out.append(f"  {p}: 찾지 못함 ({reason})")
+                # 「경계 밖 · 노트 파일 없음 · 해당 절 없음」을 가른다 — 파일이 없는
+                # 것을 절이 없다고 하면 **있는 절을 없다고** 말하게 된다
+                out.append(f"  {p}: 찾지 못함 ({search_notes.why_missing(p)})")
                 continue
             for hp, block in hits[:2]:
                 out.append(f"  [{hp}] {block.section}")

@@ -90,13 +90,27 @@ def lifetime_pro(rows: tuple[PanelRow, ...], champion: str) -> float | None:
     return sum(seen) / len(seen) if len(seen) >= 20 else None
 
 
-def _note_blocks() -> dict[str, list[ChangeBlock]]:
-    """`16.15.1.html` → `16_15`. 파일 이름이 곧 그 패치에 들어간 변경이다."""
-    blocks: dict[str, list[ChangeBlock]] = defaultdict(list)
-    for path in sorted(NOTES.glob("*.html")):
-        patch = path.stem.rsplit(".", 1)[0].replace(".", "_")
-        blocks[patch].extend(champion_changes(path.read_bytes()))
-    return dict(blocks)
+def note_blocks() -> dict[str, list[ChangeBlock]]:
+    """패치 → 그 패치에 들어간 변경. `16.15.1.html` → `16_15`. 화면과 `ask` 가 같이 쓴다.
+
+    **`live/` 도 읽는다** — 우리 구간 밖(16.16~)의 노트가 거기 있다. 안 읽으면 화면이
+    있는 절을 「해당 절 없음」이라고 답했다(2026-09-28, 16줄). 같은 패치가 두 곳에
+    있으면 본 폴더 것을 쓴다(`_note_dir` 와 같다). **순서를 모르는 패치**(해가 바뀐
+    `17_1` 등)는 건너뛴다 — 경계를 잴 수 없다.
+    """
+    blocks: dict[str, list[ChangeBlock]] = {}
+    for folder in (NOTES, NOTES / "live"):
+        here: dict[str, list[ChangeBlock]] = defaultdict(list)
+        for path in sorted(folder.glob("*.html")):
+            patch = path.stem.rsplit(".", 1)[0].replace(".", "_")
+            try:
+                patch_index(patch)
+            except KeyError:
+                continue
+            here[patch].extend(champion_changes(path.read_bytes()))
+        for patch, items in here.items():
+            blocks.setdefault(patch, items)
+    return blocks
 
 
 def available() -> bool:
@@ -215,7 +229,7 @@ def load() -> Corpus:
     return Corpus(
         rows=rows,
         direct=frozenset(direct),
-        blocks=_note_blocks(),
+        blocks=note_blocks(),
         rules=read_rules(RULES) if RULES.exists() else (),
         churn=churn_by_patch(ITEMS) if ITEMS.is_dir() else {},
         seed=load_settings().seed,
