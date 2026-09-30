@@ -255,6 +255,7 @@ ollama pull qwen3.5:9b && ollama serve
 | [`docs/investigations.md`](docs/investigations.md) | 미뤄 뒀다가 닫은 것들. 무엇을 확인하고 접었는가 |
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
 | [`docs/agent.md`](docs/agent.md) | 에이전트(`B8`) — 화면 · 해설 · 코드 대조 · 평가 |
-| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 15건 |
+| [`docs/extension.md`](docs/extension.md) | 확장 작업 규칙. 공개 범위 · 계산은 한 곳 · 들이지 않는 것 · 단계별 완료 기준 |
+| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 16건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어. 여기 있는 말만 쓴다 |
 | [`CLAUDE.md`](CLAUDE.md) | 작업 규칙. 무엇을 만들고 무엇을 안 하는가 |
