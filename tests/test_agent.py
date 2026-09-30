@@ -49,6 +49,7 @@ from lol_balance.agent.judge import (
 )
 from lol_balance.agent.schema import Evidence, Explanation, Judgment, StrictJudgment
 from lol_balance.agent.tools import make_tools
+from lol_balance.panel import PanelRow, patch_index
 from lol_balance.store import write_panel
 
 needs_data = pytest.mark.skipif(
@@ -471,3 +472,54 @@ def test_load_reads_the_panel_and_marks_answered_patches(
     assert corpus.row("C3", AT) is not None and corpus.row("C3", "13_14") is None
     assert corpus.blocks == {} and corpus.rules == () and corpus.churn == {}
     assert lifetime_pro(corpus.rows, "C1") is None  # 20패치가 안 된다
+
+
+def test_load_answers_the_patch_after_the_panel(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**패널 다음 패치도 다음 노트가 있으면 답을 붙인다.** 화면이 `16_15` 173종을
+    전부 「조정 안 됨」으로 두었는데 실제로는 40종이 `16_16` 에 조정됐다(2026-09-28)."""
+    panel = tmp_path / "panel.sqlite"
+    write_panel(panel, tiny_corpus.rows)
+    monkeypatch.setattr(data, "PANEL", panel)
+    for name in ("NOTES", "ORACLE", "ITEMS", "RULES", "RIOT"):
+        monkeypatch.setattr(data, name, tmp_path / "없음" / name)
+    ranking = tmp_path / "ranking"
+    ranking.mkdir()
+    (ranking / "15_17.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(data, "RANKING", ranking)
+
+    seen: dict[str, Any] = {}
+
+    def fake_forecast(
+        patch: str, known: Sequence[PanelRow], **kw: Any
+    ) -> tuple[PanelRow, ...]:
+        seen.update(kw, patch=patch)
+        last = max(known, key=lambda r: r.patch_index).patch
+        return tuple(
+            replace(
+                r,
+                patch=patch,
+                patch_index=patch_index(patch),
+                adjusted_next=r.champion in kw.get("adjusted", ()),
+            )
+            for r in known
+            if r.patch == last
+        )
+
+    monkeypatch.setattr(data, "forecast_rows", fake_forecast)
+    monkeypatch.setattr(
+        data, "_answers_for", lambda p: (frozenset({"C1"}), {"C1": ("nerf", "label")})
+    )
+    data.load.cache_clear()
+    try:
+        corpus = data.load()
+    finally:
+        data.load.cache_clear()
+
+    assert seen["patch"] == "15_17"
+    assert seen["adjusted"] == {"C1"}
+    assert seen["directions"] == {"C1": ("nerf", "label")}
+    assert "15_17" in corpus.labeled
+    row = corpus.row("C1", "15_17")
+    assert row is not None and row.adjusted_next

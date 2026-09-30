@@ -157,16 +157,27 @@ def load() -> Corpus:
     labeled = frozenset(r.patch for r in rows)
 
     # **패널의 마지막 패치 다음도 지표는 있다.** 라벨을 못 만들어 패널에서
-    # 빠진 것일 뿐이다 — `ask` 와 `predict` 가 같은 처리를 한다.
+    # 빠진 것일 뿐이다 — `ask` 와 `predict` 가 같은 처리를 한다. **다음 패치
+    # 노트가 나왔으면 답을 붙인다** — 안 붙이면 `16_15` 173종이 전부 「조정 안
+    # 됨」이 되는데, 실제로는 40종이 `16_16` 에 조정됐다(2026-09-28 점검).
     covered = {r.patch for r in rows}
     pro = read_pro(ORACLE) if ORACLE.is_dir() else None
     for path in sorted(RANKING.glob("*.json"), key=lambda p: patch_index(p.stem)):
         if path.stem not in covered and patch_index(path.stem) > max(
             patch_index(p) for p in covered
         ):
+            answered, toward = _answers_for(path.stem)
             rows = rows + forecast_rows(
-                path.stem, rows, ranking=RANKING, ddragon=DDRAGON, pro=pro
+                path.stem,
+                rows,
+                ranking=RANKING,
+                ddragon=DDRAGON,
+                pro=pro,
+                adjusted=answered,
+                directions=toward,
             )
+            if answered:
+                labeled = labeled | {path.stem}
 
     # **u.gg 가 끊긴 뒤는 우리가 모은 경기로 만든다.** 화면이 최신 패치를 못 보면
     # 이 저장소의 가장 최근 성과가 화면에 안 나온다(ADR 0010 · 0012).
