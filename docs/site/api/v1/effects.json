@@ -1,0 +1,1 @@
+{"method":"대조군(같은 패치에서 조정되지 않은 챔피언)의 평균 승률 변화를 뺀 변화. run-effect 와 같은 계산","pairs":42,"groups":[{"direction":"nerf","n":229,"intended":182,"closer":122},{"direction":"buff","n":350,"intended":257,"closer":221}],"control":{"closer":2899,"total":5746}}

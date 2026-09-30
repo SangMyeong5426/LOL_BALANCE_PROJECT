@@ -1,0 +1,168 @@
+{
+  "$defs": {
+    "Candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "rank": {
+          "title": "Rank",
+          "type": "integer"
+        },
+        "champion_id": {
+          "title": "Champion Id",
+          "type": "integer"
+        },
+        "champion": {
+          "title": "Champion",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "matches": {
+          "title": "Matches",
+          "type": "integer"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "actual": {
+          "title": "Actual",
+          "type": "string"
+        },
+        "hit": {
+          "title": "Hit",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "rank",
+        "champion_id",
+        "champion",
+        "score",
+        "matches",
+        "evidence",
+        "warnings",
+        "actual",
+        "hit"
+      ],
+      "title": "Candidate",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "enum": [
+            "R1",
+            "R2",
+            "R3",
+            "규칙",
+            "수치"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "text"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Hits": {
+      "additionalProperties": false,
+      "properties": {
+        "top5": {
+          "$ref": "#/$defs/Pair"
+        },
+        "top10": {
+          "$ref": "#/$defs/Pair"
+        }
+      },
+      "required": [
+        "top5",
+        "top10"
+      ],
+      "title": "Hits",
+      "type": "object"
+    },
+    "Pair": {
+      "additionalProperties": false,
+      "properties": {
+        "nerf": {
+          "title": "Nerf",
+          "type": "integer"
+        },
+        "buff": {
+          "title": "Buff",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "nerf",
+        "buff"
+      ],
+      "title": "Pair",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "next": {
+      "title": "Next",
+      "type": "string"
+    },
+    "candidates": {
+      "title": "Candidates",
+      "type": "integer"
+    },
+    "nerf": {
+      "items": {
+        "$ref": "#/$defs/Candidate"
+      },
+      "title": "Nerf",
+      "type": "array"
+    },
+    "buff": {
+      "items": {
+        "$ref": "#/$defs/Candidate"
+      },
+      "title": "Buff",
+      "type": "array"
+    },
+    "hits": {
+      "$ref": "#/$defs/Hits"
+    }
+  },
+  "required": [
+    "id",
+    "next",
+    "candidates",
+    "nerf",
+    "buff",
+    "hits"
+  ],
+  "title": "PatchView",
+  "type": "object"
+}
