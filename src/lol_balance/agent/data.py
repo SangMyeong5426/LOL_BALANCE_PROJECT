@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import datetime
 from functools import cache, lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from lol_balance.assemble import (
     adjusted_in,
@@ -33,7 +36,7 @@ from lol_balance.panel import (
     patch_index,
 )
 from lol_balance.patchnotes import ChangeBlock, champion_changes
-from lol_balance.riot import ranking, read_games
+from lol_balance.riot import Match, ranking, read_games
 from lol_balance.rules import Rule, read_rules
 from lol_balance.store import read_panel
 
@@ -48,6 +51,26 @@ RULES = PROJECT_ROOT / "rules" / "proposed.jsonl"
 RIOT = DATA / "riot"
 CDRAGON = DATA / "cdragon"
 LABELS = PROJECT_ROOT / "ground_truth" / "directions"
+KST = ZoneInfo("Asia/Seoul")
+
+
+@dataclass(frozen=True)
+class Collection:
+    """직접 집계 한 패치 — 몇 판을 언제부터 언제까지(KST) 모았나. 화면 머리말에 쓴다."""
+
+    games: int
+    first: datetime
+    last: datetime
+
+
+def collection(games: Sequence[Match]) -> Collection:
+    """경기 시작 시각으로 모은 기간을 잰다. **매일 늘어나므로** 화면이 스스로 말한다."""
+    starts = [g.start_ms for g in games]
+    return Collection(
+        games=len(games),
+        first=datetime.fromtimestamp(min(starts) / 1000, KST),
+        last=datetime.fromtimestamp(max(starts) / 1000, KST),
+    )
 
 
 @dataclass(frozen=True)
@@ -72,6 +95,8 @@ class Corpus:
     학습은 u.gg 구간이고 이 패치들만 직접 집계다 — **출처가 섞인다**([ADR 0012](
     ../../../docs/adr/0012-predicting-with-direct-aggregation.md)).
     """
+    collections: dict[str, Collection] = field(default_factory=dict)
+    """직접 집계 패치마다 몇 판을 언제 모았나."""
 
     @property
     def patches(self) -> list[str]:
@@ -203,6 +228,7 @@ def load() -> Corpus:
     # **u.gg 가 끊긴 뒤는 우리가 모은 경기로 만든다.** 화면이 최신 패치를 못 보면
     # 이 저장소의 가장 최근 성과가 화면에 안 나온다(ADR 0010 · 0012).
     direct: set[str] = set()
+    collections: dict[str, Collection] = {}
     if RIOT.is_dir():
         have = {r.patch for r in rows}
         newest = max(patch_index(p) for p in have)
@@ -229,6 +255,7 @@ def load() -> Corpus:
                 directions=directions,
             )
             direct.add(folder.name)
+            collections[folder.name] = collection(games)
             if adjusted:
                 labeled = labeled | {folder.name}
             newest = patch_index(folder.name)
@@ -237,6 +264,7 @@ def load() -> Corpus:
         rows=rows,
         panel=panel,
         direct=frozenset(direct),
+        collections=collections,
         blocks=note_blocks(),
         rules=read_rules(RULES) if RULES.exists() else (),
         churn=churn_by_patch(ITEMS) if ITEMS.is_dir() else {},

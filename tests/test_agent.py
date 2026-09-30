@@ -14,7 +14,9 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -195,6 +197,30 @@ def test_tools_never_show_the_as_of_patch(tiny_corpus: Corpus, tool: str) -> Non
     rows = patch_rows(out)
     assert rows, out
     assert not any(line.strip().startswith(AT) for line in rows), out
+
+
+def test_direct_rows_are_marked_in_the_stats_table(tiny_corpus: Corpus) -> None:
+    """R3 표가 u.gg 행과 직접 집계 행을 **출처 표시 없이** 섞었다(16_19 화면 169표).
+
+    직접 집계 줄에 출처를 적고, 섞이면 ADR 0012 경고를 한 줄 붙인다. 안 섞이면
+    붙이지 않는다.
+    """
+    at = tiny_corpus.patches[0]
+    mixed = replace(tiny_corpus, direct=frozenset({"15_15"}))
+    out = {t.name: t for t in make_tools(mixed, at)}["lookup_stats"].invoke(
+        {"champion": "C3"}
+    )
+    rows = patch_rows(out)
+    assert all(
+        ("직접 집계" in line) == line.strip().startswith("15_15") for line in rows
+    )
+    assert any(line.strip().startswith("15_15") for line in rows), out
+    assert "ADR 0012" in out
+
+    plain = {t.name: t for t in make_tools(tiny_corpus, at)}["lookup_stats"].invoke(
+        {"champion": "C3"}
+    )
+    assert "직접 집계" not in plain and "ADR 0012" not in plain
 
 
 def test_patch_notes_cannot_reach_the_future(tiny_corpus: Corpus) -> None:
@@ -477,6 +503,16 @@ def test_candidates_are_the_baseline_ranking(tiny_corpus: Corpus) -> None:
     assert {name for name, _ in top} <= set(tiny_corpus.champions(AT))
 
 
+def test_the_screen_never_calls_the_score_a_probability() -> None:
+    """**점수는 확률이 아니다.** 화면이 「손대지 않을 확률 {1 − 점수}」를 보였다 —
+    학습 구간에서 조정 점수 0.6~0.7 인 챔피언이 실제로 조정된 비율은 36% 였다."""
+    app = (Path(__file__).resolve().parents[1] / "scripts" / "app").read_text(
+        encoding="utf-8"
+    )
+    assert "손대지 않을 확률" not in app
+    assert "확률 아님" in app
+
+
 def test_scores_learn_from_the_ugg_panel_only(tiny_corpus: Corpus) -> None:
     """**화면 점수는 u.gg 패널로만 학습한다**(ADR 0012) — `run-live-predict` 와 같다.
 
@@ -544,6 +580,22 @@ def test_load_reads_the_panel_and_marks_answered_patches(
     assert corpus.row("C3", AT) is not None and corpus.row("C3", "13_14") is None
     assert corpus.blocks == {} and corpus.rules == () and corpus.churn == {}
     assert lifetime_pro(corpus.rows, "C1") is None  # 20패치가 안 된다
+
+
+def test_collection_says_how_many_games_and_when() -> None:
+    """직접 집계 패치의 머리말 — 몇 판을 **언제부터 언제까지**(KST) 모았나.
+
+    매일 늘어나서 내일은 목록이 달라질 수 있다. 화면이 그 사실을 스스로 말해야
+    한다(2026-09-28 점검).
+    """
+    at = [datetime(2026, 9, d, 3, 0, tzinfo=UTC) for d in (18, 16, 29)]
+    games = [SimpleNamespace(start_ms=int(t.timestamp() * 1000)) for t in at]
+
+    got = data.collection(games)  # type: ignore[arg-type]
+
+    assert got.games == 3
+    assert got.first.isoformat() == "2026-09-16T12:00:00+09:00"
+    assert got.last.isoformat() == "2026-09-29T12:00:00+09:00"
 
 
 def test_notes_are_read_from_live_too(

@@ -81,6 +81,9 @@ def missing_key(model: str) -> str | None:
     return key if key and not has_key(key) else None
 
 
+SCORE = "점수(줄 세우기용 · 확률 아님)"
+
+
 def _bar(p: float) -> str:
     return "█" * round(p * 20) + "░" * (20 - round(p * 20))
 
@@ -89,11 +92,21 @@ def _bar(p: float) -> str:
 
 
 def patch_info(at: str) -> str:
-    where = (
-        "**우리가 직접 모은 경기**로 만든 지표입니다"
-        if at in CORPUS.direct
-        else "u.gg 아카이브 지표입니다"
-    )
+    where = "u.gg 아카이브 지표입니다"
+    if at in CORPUS.direct:
+        # **매일 늘어나므로 스스로 말한다** — 몇 판을 언제 모았는지, 내일은 목록이
+        # 달라질 수 있다는 것, 전향 평가에 적어 둔 목록은 어디서 보는지(2026-09-28 점검)
+        got = CORPUS.collections.get(at)
+        span = (
+            f"({got.games:,}판 · {got.first:%m-%d} ~ {got.last:%m-%d %H:%M} KST)"
+            if got
+            else ""
+        )
+        where = (
+            f"**우리가 직접 모은 경기**로 만든 지표입니다{span}. 매일 조금씩 늘어나 "
+            "내일은 목록이 달라질 수 있습니다 — 전향 평가에 적어 둔 목록은 "
+            f"`./scripts/run-live-predict {at} --snapshot <묶음 이름>` 으로 다시 봅니다"
+        )
     if at in CORPUS.labeled:
         return (
             f"**{at}** — {where}. 다음 패치에 무엇이 바뀌었는지 **답이 있습니다.** "
@@ -140,16 +153,16 @@ def code_side(champion: str, at: str) -> tuple[str, str]:
     else:
         warn = "### 주의할 점 없음\n해당하는 조건이 있을 때만 표시됩니다."
 
+    # **점수는 확률이 아니다.** 한때 「1 − 조정 점수」를 조정 안 될 확률처럼 보였는데,
+    # 학습 구간에서 조정 점수 0.6~0.7 인 챔피언이 실제로 조정된 비율은 36% 였다
+    # (2026-09-28 점검). 패치 안에서 줄을 세우는 값이라 순위와 같이 본다.
     lines = [
         f"### 통계 모델의 점수 — {at} 다음 패치({ctx.nxt})에 조정될까",
-        "| 과제 | 점수 | 순위 |",
+        f"| 과제 | {SCORE} | 순위 |",
         "| --- | --- | --- |",
     ]
     for label, (score, place, total) in ctx.baseline.items():
         lines.append(f"| {label} | `{score:.2f}` {_bar(score)} | {place}위 / {total} |")
-    lines.append(
-        f"\n손대지 않을 확률 `{1 - ctx.baseline['조정'][0]:.2f}` — 위의 조정 점수를 1 에서 뺀 값입니다."
-    )
     lines.append("\n**근거**\n" + "\n".join(f"- {f}" for f in ctx.facts))
     return warn, "\n".join(lines)
 
@@ -357,7 +370,7 @@ with gr.Blocks(title="LOL 밸런스 판단 보조") as demo:
                 "### 통계 모델이 고른 후보 10종\n줄을 누르면 그 챔피언을 봅니다"
             )
             table = gr.Dataframe(
-                headers=["순위", "챔피언", "점수"],
+                headers=["순위", "챔피언", SCORE],
                 value=candidate_table(PATCHES[0], DEFAULT_WANT),
                 interactive=False,
             )

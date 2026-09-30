@@ -145,9 +145,19 @@ def make_tools(
                 if anon
                 else r.patch
             )
+            # **출처를 적는다.** 한때 u.gg 줄과 직접 집계 줄을 표시 없이 섞었다
+            # (16_19 화면 169표, 2026-09-28) — 판수가 수십 배 다른데 같은 줄로 읽혔다
+            source = "  · 직접 집계" if r.patch in corpus.direct else ""
             lines.append(
                 f"{when:10}{_pct(r.win_rate)}  {_pct(r.pick_rate)}  "
-                f"{_pct(r.ban_rate)}  {r.matches:>9,}  → {_outcome(r)}"
+                f"{_pct(r.ban_rate)}  {r.matches:>9,}  → {_outcome(r)}{source}"
+            )
+        mixed = {r.patch in corpus.direct for r in history}
+        if len(mixed) == 2:
+            lines.append(
+                "⚠ 출처가 섞였다 — 「직접 집계」 줄은 우리가 서버 셋에서 모은 경기다. "
+                "승률은 u.gg 와 표본 잡음 안에서 맞지만 픽률 · 밴율은 0.5~1.3%p "
+                "어긋난다. 두 출처 사이의 변화를 조정 효과로 읽지 않는다(ADR 0012)."
             )
         return "\n".join(lines)
 
