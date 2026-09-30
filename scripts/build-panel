@@ -28,7 +28,10 @@ from lol_balance.panel import (  # noqa: E402
     patch_rows,
 )
 from lol_balance.store import write_panel  # noqa: E402
-from lol_balance.ugg import parse_champion_ranking  # noqa: E402
+from lol_balance.ugg import (  # noqa: E402
+    check_kill_death_identity,
+    parse_champion_ranking,
+)
 
 RANKING = ROOT / "data" / "ugg" / "champion_ranking"
 DDRAGON = ROOT / "data" / "ddragon"
@@ -72,6 +75,9 @@ def main() -> int:
         ranking = parse_champion_ranking(
             json.loads((RANKING / f"{patch}.json").read_bytes())
         )
+        # 칸을 잘못 읽으면 여기서 멈춘다 — 데스와 어시스트가 뒤바뀐 채 패널이
+        # 만들어졌던 적이 있다(2026-09-30 고침)
+        check_kill_death_identity(ranking)
         names = champion_names(
             json.loads((DDRAGON / f"{version(patch)}.json").read_bytes())["data"]
         )
