@@ -1,0 +1,189 @@
+{
+  "$defs": {
+    "Effect": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "title": "Patch",
+          "type": "string"
+        },
+        "next": {
+          "title": "Next",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "nerf",
+            "buff"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "win_rate_before": {
+          "title": "Win Rate Before",
+          "type": "number"
+        },
+        "win_rate_after": {
+          "title": "Win Rate After",
+          "type": "number"
+        },
+        "control_shift": {
+          "title": "Control Shift",
+          "type": "number"
+        },
+        "effect": {
+          "title": "Effect",
+          "type": "number"
+        },
+        "intended": {
+          "title": "Intended",
+          "type": "boolean"
+        },
+        "closer": {
+          "title": "Closer",
+          "type": "boolean"
+        },
+        "pro_before": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pro Before"
+        },
+        "pro_after": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pro After"
+        }
+      },
+      "required": [
+        "patch",
+        "next",
+        "direction",
+        "win_rate_before",
+        "win_rate_after",
+        "control_shift",
+        "effect",
+        "intended",
+        "closer",
+        "pro_before",
+        "pro_after"
+      ],
+      "title": "Effect",
+      "type": "object"
+    },
+    "HistoryRow": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "title": "Patch",
+          "type": "string"
+        },
+        "win_rate": {
+          "title": "Win Rate",
+          "type": "number"
+        },
+        "pick_rate": {
+          "title": "Pick Rate",
+          "type": "number"
+        },
+        "ban_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ban Rate"
+        },
+        "matches": {
+          "title": "Matches",
+          "type": "integer"
+        },
+        "pro_presence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pro Presence"
+        },
+        "adjusted": {
+          "title": "Adjusted",
+          "type": "string"
+        }
+      },
+      "required": [
+        "patch",
+        "win_rate",
+        "pick_rate",
+        "ban_rate",
+        "matches",
+        "pro_presence",
+        "adjusted"
+      ],
+      "title": "HistoryRow",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "champion_id": {
+      "title": "Champion Id",
+      "type": "integer"
+    },
+    "champion": {
+      "title": "Champion",
+      "type": "string"
+    },
+    "ko": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Ko"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/$defs/HistoryRow"
+      },
+      "title": "History",
+      "type": "array"
+    },
+    "effects": {
+      "items": {
+        "$ref": "#/$defs/Effect"
+      },
+      "title": "Effects",
+      "type": "array"
+    }
+  },
+  "required": [
+    "champion_id",
+    "champion",
+    "ko",
+    "history",
+    "effects"
+  ],
+  "title": "ChampionFile",
+  "type": "object"
+}

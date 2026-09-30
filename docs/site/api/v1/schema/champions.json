@@ -1,0 +1,60 @@
+{
+  "$defs": {
+    "ChampionEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "champion_id": {
+          "title": "Champion Id",
+          "type": "integer"
+        },
+        "champion": {
+          "title": "Champion",
+          "type": "string"
+        },
+        "ko": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ko"
+        },
+        "patches": {
+          "title": "Patches",
+          "type": "integer"
+        },
+        "adjustments": {
+          "title": "Adjustments",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "champion_id",
+        "champion",
+        "ko",
+        "patches",
+        "adjustments"
+      ],
+      "title": "ChampionEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "champions": {
+      "items": {
+        "$ref": "#/$defs/ChampionEntry"
+      },
+      "title": "Champions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "champions"
+  ],
+  "title": "ChampionList",
+  "type": "object"
+}
