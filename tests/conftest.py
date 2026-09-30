@@ -120,4 +120,5 @@ def tiny_corpus(make_row: PanelRowFactory) -> Corpus:
         churn={},
         seed=20260824,
         labeled=frozenset(TINY_PATCHES[:-1]),
+        panel=frozenset(TINY_PATCHES),
     )

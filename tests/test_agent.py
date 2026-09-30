@@ -49,6 +49,7 @@ from lol_balance.agent.judge import (
 )
 from lol_balance.agent.schema import Evidence, Explanation, Judgment, StrictJudgment
 from lol_balance.agent.tools import make_tools
+from lol_balance.arms import rank_candidates
 from lol_balance.panel import PanelRow, patch_index
 from lol_balance.patchnotes import ChangeBlock
 from lol_balance.store import write_panel
@@ -476,6 +477,39 @@ def test_candidates_are_the_baseline_ranking(tiny_corpus: Corpus) -> None:
     assert {name for name, _ in top} <= set(tiny_corpus.champions(AT))
 
 
+def test_scores_learn_from_the_ugg_panel_only(tiny_corpus: Corpus) -> None:
+    """**화면 점수는 u.gg 패널로만 학습한다**(ADR 0012) — `run-live-predict` 와 같다.
+
+    직접 집계 행(챔피언당 수백 판)과 예보 행이 학습에 섞여, 같은 경기로 본 16_19
+    화면 상위 10 이 전향 평가 목록과 너프 4/10 · 버프 3/10 만 겹쳤다(2026-09-28).
+    """
+    at = tiny_corpus.patches[0]
+    mixed = replace(
+        tiny_corpus,
+        panel=tiny_corpus.panel - {"15_15"},
+        direct=frozenset({"15_15"}),
+    )
+    train = judge.train_rows(mixed, at)
+    assert train and not any(r.patch == "15_15" for r in train)
+    assert all(r.patch in mixed.panel for r in train)
+    assert all(r.patch_index < patch_index(at) for r in train)
+
+    here = tuple(r for r in mixed.rows if r.patch == at)
+    for want in (None, "nerf", "buff"):
+        score = rank_candidates(train, here, want=want, seed=mixed.seed)
+        order = sorted(range(len(here)), key=lambda i: -score[i])[:10]
+        expected = [(here[i].champion, float(score[i])) for i in order]
+        assert candidates(mixed, at, want=want) == expected
+
+    # 한 챔피언을 볼 때의 점수(build_context)도 같은 학습 행에서 나온다
+    row = mixed.row("C3", at)
+    assert row is not None
+    nerf = rank_candidates(train, here, want="nerf", seed=mixed.seed)
+    assert build_context(mixed, "C3", at).baseline["너프"][0] == float(
+        nerf[here.index(row)]
+    )
+
+
 def test_saved_lines_are_appended(
     tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -506,6 +540,7 @@ def test_load_reads_the_panel_and_marks_answered_patches(
         data.load.cache_clear()  # 실제 패널을 쓰는 테스트가 이 결과를 받지 않게
     assert len(corpus.rows) == len(tiny_corpus.rows)
     assert corpus.patches[0] == "15_16" and corpus.labeled == set(corpus.patches)
+    assert corpus.panel == set(corpus.patches)  # 학습에 쓰는 u.gg 패널 패치
     assert corpus.row("C3", AT) is not None and corpus.row("C3", "13_14") is None
     assert corpus.blocks == {} and corpus.rules == () and corpus.churn == {}
     assert lifetime_pro(corpus.rows, "C1") is None  # 20패치가 안 된다
@@ -584,3 +619,6 @@ def test_load_answers_the_patch_after_the_panel(
     assert "15_17" in corpus.labeled
     row = corpus.row("C1", "15_17")
     assert row is not None and row.adjusted_next
+    # 답이 붙어도 패널 밖이다 — 학습에는 안 쓴다(ADR 0012)
+    assert "15_17" not in corpus.panel
+    assert corpus.panel == frozenset(r.patch for r in tiny_corpus.rows)

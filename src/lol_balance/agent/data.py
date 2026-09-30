@@ -59,6 +59,13 @@ class Corpus:
     seed: int
     labeled: frozenset[str]
     """답(다음 패치의 조정 여부)이 있는 패치. 없는 것은 예측만 된다."""
+    panel: frozenset[str]
+    """**u.gg 패널(`panel.sqlite`)의 패치 — 학습은 이것만 쓴다**([ADR 0012](
+    ../../../docs/adr/0012-predicting-with-direct-aggregation.md)).
+
+    패널 다음의 u.gg 예보 패치(`16_15`)와 직접 집계 패치는 `rows` 에 있어도 여기
+    없다. 기본값을 두지 않는다 — 빠뜨리면 학습 행이 조용히 비거나 섞인다.
+    """
     direct: frozenset[str] = frozenset()
     """**우리가 직접 모은 경기로 만든** 패치. u.gg 가 끊긴 `16_15` 뒤가 여기 온다.
 
@@ -168,7 +175,7 @@ def _names_for(patch: str) -> dict[int, str]:
 @lru_cache(maxsize=1)
 def load() -> Corpus:
     rows = read_panel(PANEL)
-    labeled = frozenset(r.patch for r in rows)
+    labeled = panel = frozenset(r.patch for r in rows)
 
     # **패널의 마지막 패치 다음도 지표는 있다.** 라벨을 못 만들어 패널에서
     # 빠진 것일 뿐이다 — `ask` 와 `predict` 가 같은 처리를 한다. **다음 패치
@@ -228,6 +235,7 @@ def load() -> Corpus:
 
     return Corpus(
         rows=rows,
+        panel=panel,
         direct=frozenset(direct),
         blocks=note_blocks(),
         rules=read_rules(RULES) if RULES.exists() else (),
