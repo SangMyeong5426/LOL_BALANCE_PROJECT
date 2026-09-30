@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -177,6 +178,19 @@ def test_the_16_13_list_is_what_the_page_published() -> None:
     assert (view["next"], view["candidates"]) == ("16_14", 173)
     assert [c["champion"] for c in view["nerf"]] == PUBLISHED_NERF
     assert [c["champion"] for c in view["buff"]] == PUBLISHED_BUFF
+
+
+def test_the_page_reads_only_the_api() -> None:
+    """**배포 페이지는 `api/v1` 만 읽는다.** 옛 `data.json` 으로 돌아가면 걸린다.
+
+    점수를 「확률」로 적지 않는다 — 「확률이 아닙니다」라고 말할 때만 쓴다.
+    """
+    page = (ROOT / "docs" / "site" / "index.html").read_text(encoding="utf-8")
+    assert "const API = 'api/v1/'" in page
+    assert "data.json" not in page
+    assert not (ROOT / "docs" / "site" / "data.json").exists()
+    assert "prob" not in page
+    assert re.findall(r"확률(?!이 아닙니다)", page) == []
 
 
 def test_the_api_fits_the_size_budget() -> None:
