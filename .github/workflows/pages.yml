@@ -1,7 +1,7 @@
-# 배포 페이지. **정적 파일 둘만 올린다** — 서버도 런타임 의존도 없다.
+# 배포 페이지. **정적 파일만 올린다** — 서버도 런타임 의존도 없다.
 #
-# `docs/site/data.json` 은 로컬에서 `./scripts/make-site` 로 만들어 커밋한다.
-# CI 에는 `data/` 가 없어 여기서 다시 만들 수 없다.
+# 페이지가 읽는 정적 API `docs/site/api/v1/` 는 로컬에서 `./scripts/make-site` 로
+# 만들어 커밋한다. CI 에는 `data/` 가 없어 여기서 다시 만들 수 없다.
 name: pages
 
 on:
@@ -32,6 +32,17 @@ jobs:
       - uses: actions/configure-pages@v5
         with:
           enablement: true
+      # **계약 테스트가 통과해야 올린다**(docs/extension.md 2절 4항). main 은 보호
+      # 규칙이 없고 이 흐름은 ci 와 따로 돌므로, 공개 범위를 넘는 자료가 커밋돼도
+      # 여기서 멈추게 한다. 커밋된 파일을 보는 테스트라 `data/` 가 없어도 돈다.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: 계약 테스트
+        run: pytest -q tests/test_site_api.py
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/site
