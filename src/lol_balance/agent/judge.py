@@ -292,7 +292,7 @@ def build_agent(
     """`model_kwargs` 는 모델 생성자로 간다 — 예: 로컬 모델의 `reasoning=False`."""
     return create_agent(
         model=chat_model(model, **model_kwargs),
-        tools=make_tools(corpus, ctx.at),
+        tools=make_tools(corpus, ctx.at, base_notes=True),
         system_prompt=SYSTEM.format(
             at=ctx.at, nxt=ctx.nxt, champion=ctx.champion, base=BASE_ADJUST
         ),
@@ -500,7 +500,7 @@ def build_explainer(
     """에이전트 방식 — 무엇을 조회할지 모델이 고른다."""
     return create_agent(
         model=chat_model(model, **model_kwargs),
-        tools=make_tools(corpus, ctx.at),
+        tools=make_tools(corpus, ctx.at, base_notes=True),
         system_prompt=EXPLAIN.format(at=ctx.at, nxt=ctx.nxt, champion=ctx.champion),
         response_format=ToolStrategy(Explanation),
         middleware=guards(),
@@ -532,7 +532,7 @@ LOOKUPS: dict[str, tuple[str, dict[str, Any]]] = {
 
 def evidence(corpus: Corpus, ctx: Context) -> RunnableParallel[dict[str, Any]]:
     """교재 4장 RunnableParallel — 조회 넷을 **동시에** 한다. 경계는 도구가 지킨다."""
-    tools = {t.name: t for t in make_tools(corpus, ctx.at)}
+    tools = {t.name: t for t in make_tools(corpus, ctx.at, base_notes=True)}
 
     def lookup(name: str, args: dict[str, Any]) -> RunnableLambda[Any, str]:
         return RunnableLambda(

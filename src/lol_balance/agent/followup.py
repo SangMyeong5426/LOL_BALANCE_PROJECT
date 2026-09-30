@@ -80,7 +80,7 @@ def build_followup(
 ) -> Graph:
     return create_agent(
         model=chat_model(model, **model_kwargs),
-        tools=make_tools(corpus, ctx.at),
+        tools=make_tools(corpus, ctx.at, base_notes=True),
         system_prompt=SYSTEM.format(champion=ctx.champion, at=ctx.at, nxt=ctx.nxt),
         checkpointer=saver,
         middleware=guards(),

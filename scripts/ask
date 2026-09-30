@@ -24,12 +24,12 @@
 from __future__ import annotations
 
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance.agent.data import note_blocks  # noqa: E402
 from lol_balance.arms import rank_candidates  # noqa: E402
 from lol_balance.assemble import forecast_rows  # noqa: E402
 from lol_balance.baseline import direction_rows  # noqa: E402
@@ -44,7 +44,6 @@ from lol_balance.panel import (  # noqa: E402
     next_patch,
     patch_index,
 )
-from lol_balance.patchnotes import champion_changes  # noqa: E402
 from lol_balance.retrieval import CaseSearch, NoteSearch, StatLookup  # noqa: E402
 from lol_balance.riotnotes import rationale_by_patch  # noqa: E402
 from lol_balance.rules import read_rules  # noqa: E402
@@ -165,14 +164,12 @@ def main() -> int:
         )
 
     if NOTES.is_dir():
-        blocks: dict[str, list] = defaultdict(list)
-        for path in sorted(NOTES.glob("*.html")):
-            patch = path.stem.rsplit(".", 1)[0].replace(".", "_")
-            blocks[patch].extend(champion_changes(path.read_bytes()))
+        # 화면과 같은 노트를 읽는다 — `live/`(16.16~)까지(`note_blocks`).
         # **이름만으로 질의하면 스킨 버그 수정이 최상위로 올라온다.** 그래서
         # 실제로 조정된 패치로 좁혀 묻는다 — 토크나이저가 패치 번호를 살리므로
         # 「이름 + 패치」가 통한다(Recall@10 56.3% → 99.2%).
-        search = NoteSearch(blocks, at)
+        # **기준 패치의 노트도 연다** — 그 패치가 나올 때 이미 공개됐다.
+        search = NoteSearch(note_blocks(), at, include_base=True)
         adjusted = [
             n
             for r in stat.champion(champion)
@@ -189,9 +186,9 @@ def main() -> int:
             # **검색 결과의 패치와 챔피언을 확인한다.** 원하던 패치의 블록이 색인에
             # 없으면 BM25 가 다른 패치의 블록을 1위로 올린다. 한때 확인하지 않아
             # 「Senna 16_13」 줄에 14_19 의 버그 수정이 16_13 이름표를 달고 찍혔다
-            # — 실제 16_13 은 치명타 피해 계수 90% → 85% 였다. 기준 패치의 노트는
-            # `NoteSearch` 가 경계 밖으로 빼므로 마지막 줄에서 흔히 걸린다
-            # (`docs/followups.md` 20).
+            # — 실제 16_13 은 치명타 피해 계수 90% → 85% 였다. 한때 기준 패치의
+            # 노트를 경계 밖으로 빼서 마지막 줄에서 흔히 걸렸다(`docs/followups.md`
+            # 20) — 지금은 연다.
             hits = [
                 block
                 for found, block, _ in search.search(f"{champion} {patch}", k=6)
@@ -200,12 +197,8 @@ def main() -> int:
                 and champion.split()[0].lower() not in block.section.lower()
             ]
             if not hits:
-                why = (
-                    "경계 밖"
-                    if patch_index(patch) >= patch_index(at)
-                    else "해당 절 없음"
-                )
-                print(f"  {patch:8}노트를 못 찾음 — {why}")
+                # 「경계 밖 · 노트 파일 없음 · 해당 절 없음」을 가른다
+                print(f"  {patch:8}노트를 못 찾음 — {search.why_missing(patch)}")
             for block in hits[:1]:
                 print(f"  {patch:8}{block.section[:18]:20}{block.lines[0][:66]}")
 

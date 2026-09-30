@@ -67,6 +67,40 @@ def test_note_search_cannot_reach_past_the_boundary() -> None:
     assert {patch for patch, _, _ in search.search("damage", k=10)} == {"13_14"}
 
 
+def test_note_search_can_open_the_base_patch() -> None:
+    """**기준 패치 노트는 그 패치가 나올 때 이미 공개됐다.** 화면과 `ask` 는 연다.
+
+    평가(`ragjudge` · `score-retrieval`)는 기본값(닫음)으로 둔다 — 기록한 판단을
+    재현해야 한다. 여는 쪽도 **다음 패치는 못 본다**(누출).
+    """
+    blocks = {
+        p: (ChangeBlock("Ahri", "Q", "Q", (f"changed in {p}",)),)
+        for p in ("15_1", "15_2", "15_3")
+    }
+    closed = NoteSearch(blocks, as_of="15_2")
+    opened = NoteSearch(blocks, as_of="15_2", include_base=True)
+
+    assert {p for p, _, _ in closed.search("ahri", k=10)} == {"15_1"}
+    assert {p for p, _, _ in opened.search("ahri", k=10)} == {"15_1", "15_2"}
+    assert not closed.reaches("15_2") and opened.reaches("15_2")
+    assert not opened.reaches("15_3")
+
+
+def test_note_search_says_why_a_patch_came_back_empty() -> None:
+    """「경계 밖 · 노트 파일 없음 · 해당 절 없음」을 가른다. 화면이 노트 파일을 안
+    읽고도 「해당 절 없음」이라고 답해 **있는 절을 없다고** 말했다(2026-09-28)."""
+    blocks = {
+        "15_1": (ChangeBlock("Ahri", "Q", "Q", ("x",)),),
+        "15_3": (ChangeBlock("Ahri", "Q", "Q", ("x",)),),
+    }
+    search = NoteSearch(blocks, as_of="15_2", include_base=True)
+
+    assert search.why_missing("15_3") == "경계 밖"
+    assert search.why_missing("15_2") == "노트 파일 없음"
+    assert search.why_missing("15_1") == "해당 절 없음"
+    assert NoteSearch(blocks, as_of="15_2").why_missing("15_2") == "경계 밖"
+
+
 def test_the_boundary_is_fixed_at_construction(rows: tuple[PanelRow, ...]) -> None:
     """부르는 쪽이 경계를 넘기지 않는다 — 도구가 태어날 때 박힌다."""
     search = CaseSearch(rows, as_of="13_15")
