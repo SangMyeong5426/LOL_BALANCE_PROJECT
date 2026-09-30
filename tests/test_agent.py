@@ -657,7 +657,7 @@ def test_load_answers_the_patch_after_the_panel(
 
     monkeypatch.setattr(data, "forecast_rows", fake_forecast)
     monkeypatch.setattr(
-        data, "_answers_for", lambda p: (frozenset({"C1"}), {"C1": ("nerf", "label")})
+        data, "answers_for", lambda p: (frozenset({"C1"}), {"C1": ("nerf", "label")})
     )
     data.load.cache_clear()
     try:
