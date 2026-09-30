@@ -68,3 +68,16 @@ def test_usage_is_read_from_the_provider_not_estimated():
 
     assert spend.usage_of(Reported()) == (12, 3)
     assert spend.usage_of(object()) == (0, 0)
+
+
+def test_a_paid_model_without_a_price_is_refused(tmp_path):
+    """**단가를 모르는 유료 모델은 부르기 전에 거절한다.** 세지 못하면 상한도 못 지킨다.
+
+    화면의 모델 칸은 아무 이름이나 받는다. 표에 없는 `openai:gpt-4.1` 을 적으면
+    전에는 장부도 상한도 붙지 않고 그대로 나갔다.
+    """
+    book = spend.ledger(tmp_path)
+    with pytest.raises(spend.UnknownPrice, match="단가"):
+        book.check("openai:gpt-9-unheard-of")
+    assert issubclass(spend.UnknownPrice, spend.SpendCapReached)  # 멈추는 쪽은 같다
+    book.check("ollama:qwen3.5:9b", limit=0.0)  # 로컬은 그대로 통과

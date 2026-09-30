@@ -9,6 +9,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
+from lol_balance import spend
 from lol_balance.agent import output_comparison as oc
 
 
@@ -165,3 +166,17 @@ def test_main_missing_key_and_resume(
     monkeypatch.setattr(oc, "prepare", lambda *args: {"rows": []})
     assert oc.main([]) == 1
     assert len(calls) == 4
+
+
+def test_the_spend_cap_is_not_written_as_an_error_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """상한에 닿으면 멈춘다 — 오류 줄로 적고 다음 건으로 넘어가지 않는다."""
+
+    def over(*args: Any) -> Any:
+        raise spend.SpendCapReached("상한에 닿았다")
+
+    monkeypatch.setattr(oc, "invoke", over)
+    budget = oc.Budget(tmp_path / "budget.json")
+    with pytest.raises(spend.SpendCapReached):
+        oc.run_one({"key": "k", "input": "facts"}, "openai", "numeric", budget, "id")

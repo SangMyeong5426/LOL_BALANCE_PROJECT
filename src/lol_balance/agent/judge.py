@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -222,6 +223,11 @@ class SpendGuard(BaseCallbackHandler):
     로컬 모델에는 아무 일도 하지 않는다.
     """
 
+    # **이것이 없으면 막지 못한다.** LangChain 은 콜백 안의 예외를 기본으로 경고만
+    # 남기고 삼킨다. 그래서 상한을 넘어도 `check` 만 예외를 던지고 호출은 그대로
+    # 나갔다(2026-09-28, 가짜 모델로 확인).
+    raise_error = True
+
     def __init__(self, model: str) -> None:
         self.model = model
         self.book = spend.ledger(PROJECT_ROOT)
@@ -241,8 +247,16 @@ class SpendGuard(BaseCallbackHandler):
                 if message is None:
                     continue
                 tin, tout = spend.usage_of(message)
-                if tin or tout:
+                if not (tin or tout):
+                    continue
+                try:
                     self.book.add(self.model, tin, tout, why="agent")
+                except OSError as exc:
+                    # **이미 돈을 낸 답은 잃지 않는다.** 예외로 끝내면 답이 버려진다.
+                    print(
+                        f"⚠ 장부에 적지 못했다({self.book.path}): {exc}",
+                        file=sys.stderr,
+                    )
 
 
 def chat_model(model: str, **kwargs: Any) -> BaseChatModel:
@@ -259,9 +273,13 @@ def chat_model(model: str, **kwargs: Any) -> BaseChatModel:
         else {"max_tokens": MAX_OUTPUT}
     )
     extra: dict[str, Any] = {}
-    if spend.price(model) is not None:
-        # **유료면 장부를 붙인다.** 상한에 닿으면 호출 전에 멈춘다.
+    if not spend.is_local(model):
+        # **유료면 장부를 붙인다 — 단가를 몰라도 붙인다.** 상한에 닿았거나 단가를
+        # 모르면 호출 전에 멈춘다. 전에는 단가표에 있는 모델에만 붙여서, 표에 없는
+        # 모델은 장부도 상한도 없이 나갔다.
         extra["callbacks"] = [SpendGuard(model), *kwargs.pop("callbacks", [])]
+        # 재시도는 한 번까지 — 반 전체가 나눠 쓰는 크레딧이다
+        extra["max_retries"] = 1
     llm: BaseChatModel = init_chat_model(
         model, temperature=0, **{**cap, **extra, **kwargs}
     )
