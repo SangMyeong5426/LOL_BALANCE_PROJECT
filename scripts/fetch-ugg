@@ -29,6 +29,7 @@ from lol_balance.fetch import (  # noqa: E402
 )
 from lol_balance.ugg import (  # noqa: E402
     check_games_identity,
+    check_kill_death_identity,
     check_win_rate_identity,
     parse_champion_ranking,
 )
@@ -67,6 +68,7 @@ def main() -> int:
             ranking = parse_champion_ranking(json.loads(body))
             check_win_rate_identity(ranking)
             check_games_identity(ranking)
+            check_kill_death_identity(ranking)
             save(path, body)
             done += 1
             print(
