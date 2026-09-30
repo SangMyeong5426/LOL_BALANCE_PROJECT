@@ -1,0 +1,85 @@
+{
+  "$defs": {
+    "ControlGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "closer": {
+          "title": "Closer",
+          "type": "integer"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "closer",
+        "total"
+      ],
+      "title": "ControlGroup",
+      "type": "object"
+    },
+    "EffectGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "enum": [
+            "nerf",
+            "buff"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "n": {
+          "title": "N",
+          "type": "integer"
+        },
+        "intended": {
+          "title": "Intended",
+          "type": "integer"
+        },
+        "closer": {
+          "title": "Closer",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "direction",
+        "n",
+        "intended",
+        "closer"
+      ],
+      "title": "EffectGroup",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "method": {
+      "title": "Method",
+      "type": "string"
+    },
+    "pairs": {
+      "title": "Pairs",
+      "type": "integer"
+    },
+    "groups": {
+      "items": {
+        "$ref": "#/$defs/EffectGroup"
+      },
+      "title": "Groups",
+      "type": "array"
+    },
+    "control": {
+      "$ref": "#/$defs/ControlGroup"
+    }
+  },
+  "required": [
+    "method",
+    "pairs",
+    "groups",
+    "control"
+  ],
+  "title": "EffectSummary",
+  "type": "object"
+}
