@@ -12,7 +12,9 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
+      # Riot 제품 확인 파일은 코드 말고 아무것도 없어야 한다 — 줄바꿈도 붙이지 않는다
       - id: end-of-file-fixer
+        exclude: '^docs/site/riot\.txt$'
       - id: check-yaml
       - id: check-json
       - id: check-merge-conflict
