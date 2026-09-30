@@ -193,6 +193,17 @@ def test_the_page_reads_only_the_api() -> None:
     assert re.findall(r"확률(?!이 아닙니다)", page) == []
 
 
+def test_the_page_carries_the_riot_legal_notice() -> None:
+    """Riot 일반 정책은 제품 화면에 법적 고지를 **보이게** 싣도록 한다.
+
+    Production 키를 신청하려면 먼저 있어야 하고, 받은 뒤에도 빠지면 안 된다.
+    문구는 Riot 이 준 그대로다 — 우리 말로 바꾸지 않는다.
+    """
+    page = (ROOT / "docs" / "site" / "index.html").read_text(encoding="utf-8")
+    assert "LOL Balance Project isn't endorsed by Riot Games" in page
+    assert "registered trademarks of Riot Games, Inc." in page
+
+
 def test_the_api_fits_the_size_budget() -> None:
     sizes = [p.stat().st_size for p in API.rglob("*.json")]
     assert sum(sizes) <= 5 * 1024 * 1024
