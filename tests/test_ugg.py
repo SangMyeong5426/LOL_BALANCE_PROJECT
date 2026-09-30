@@ -12,7 +12,10 @@ from typing import Any
 import pytest
 
 from lol_balance.ugg import (
+    ChampionRanking,
+    ChampionRow,
     check_games_identity,
+    check_kill_death_identity,
     check_win_rate_identity,
     parse_champion_ranking,
 )
@@ -22,8 +25,8 @@ GAMES = 100
 
 
 def _entry(champion_id: int, wins: int, matches: int) -> list[Any]:
-    """[챔피언ID, 매치업, 승, 판, 딜, 골드, 킬, 데스, 어시, CS]"""
-    return [str(champion_id), [[999, 0, 1]], wins, matches, 20000, 11000, 5, 5, 6, 200]
+    """[챔피언ID, 매치업, 승, 판, 딜, 골드, 킬, 어시, 데스, CS] — **7번이 어시, 8번이 데스다**"""
+    return [str(champion_id), [[999, 0, 1]], wins, matches, 20000, 11000, 5, 8, 5, 200]
 
 
 def make_payload() -> list[Any]:
@@ -107,3 +110,65 @@ def test_games_identity_catches_a_missing_role() -> None:
 def test_short_payload_is_rejected() -> None:
     with pytest.raises(ValueError, match="짧다"):
         parse_champion_ranking([{}, {}])
+
+
+def test_seventh_is_assists_and_eighth_is_deaths() -> None:
+    """**7번은 어시스트, 8번은 데스다.** 2026-09-30 까지 거꾸로 읽었다.
+
+    한 패치 전체의 킬 합과 데스 합은 같아야 한다. 옛 해석의 「데스」 칸은 모든
+    패치에서 킬 합의 1.33~1.46배였고, 「어시」 칸이 1.003배였다.
+    """
+    row = parse_champion_ranking(make_payload()).rows[0]
+
+    assert (row.kills, row.assists, row.deaths) == (5, 8, 5)
+
+
+def test_kill_death_identity_holds_for_a_whole_patch() -> None:
+    check_kill_death_identity(parse_champion_ranking(make_payload()))
+
+
+def test_a_swapped_death_column_is_caught() -> None:
+    """데스 자리에 어시스트가 들어오면 데스 합이 킬 합보다 훨씬 커진다."""
+    payload = make_payload()
+    for entries in payload[0].values():
+        for e in entries:
+            e[7], e[8] = e[8], e[7]
+
+    with pytest.raises(ValueError, match="킬 합"):
+        check_kill_death_identity(parse_champion_ranking(payload))
+
+
+def _totals(kills: int, deaths: int) -> ChampionRanking:
+    row = ChampionRow(
+        champion_id=1,
+        role="mid",
+        wins=1,
+        matches=2,
+        damage=0,
+        gold=0,
+        kills=kills,
+        deaths=deaths,
+        assists=0,
+        cs=0,
+    )
+    return ChampionRanking(
+        rows=(row,), bans={}, ban_denominator=1, games=1, updated_at="t"
+    )
+
+
+@pytest.mark.parametrize("deaths", [1000, 1003, 1010])
+def test_deaths_a_little_above_kills_pass(deaths: int) -> None:
+    """포탑이나 미니언에 죽은 것은 데스만 늘린다 — 조금 많은 것은 통과한다."""
+    check_kill_death_identity(_totals(1000, deaths))
+
+
+@pytest.mark.parametrize("deaths", [700, 1330, 1460])
+def test_deaths_far_from_kills_fail(deaths: int) -> None:
+    """1.33~1.46 은 데스 칸에 어시스트가 들어왔을 때의 값이다."""
+    with pytest.raises(ValueError, match="킬 합"):
+        check_kill_death_identity(_totals(1000, deaths))
+
+
+def test_no_kills_is_an_error() -> None:
+    with pytest.raises(ValueError, match="킬 합계가 0"):
+        check_kill_death_identity(_totals(0, 0))
