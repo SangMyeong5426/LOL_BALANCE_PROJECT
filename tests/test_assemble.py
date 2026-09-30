@@ -259,6 +259,32 @@ def test_forecast_rows_need_no_next_patch_note(tmp_path: Path) -> None:
     assert all(r.direction_next is None for r in got)
 
 
+def test_forecast_rows_carry_answers_when_given(tmp_path: Path) -> None:
+    """**다음 패치 노트가 있으면 답을 붙인다.** 화면이 `16_15` 173종을 전부 「조정 안
+    됨」으로 두었는데 실제로는 40종이 `16_16` 에 조정됐다(2026-09-28 점검)."""
+    from lol_balance.assemble import forecast_rows
+
+    dd, ranking = tmp_path / "dd", tmp_path / "ranking"
+    dd.mkdir()
+    ranking.mkdir()
+    ddragon(dd, "13_15", 600)
+    ranking_file(ranking, "13_15")
+    name = forecast_rows("13_15", (), ranking=ranking, ddragon=dd)[0].champion
+
+    got = forecast_rows(
+        "13_15",
+        (),
+        ranking=ranking,
+        ddragon=dd,
+        adjusted=frozenset({name}),
+        directions={name: ("nerf", "label")},
+    )
+
+    row = next(r for r in got if r.champion == name)
+    assert row.adjusted_next and row.direction_next == "nerf"
+    assert not any(r.adjusted_next for r in got if r.champion != name)
+
+
 def test_patch_index_continues_past_the_range() -> None:
     """직접 집계가 `16_15` 뒤를 본다 — 순서는 이어져야 한다(ADR 0010)."""
     last = PATCH_SEQUENCE[-1]
