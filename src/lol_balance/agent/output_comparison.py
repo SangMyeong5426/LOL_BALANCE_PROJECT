@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import BaseModel, ConfigDict, Field
 
+from lol_balance import spend
 from lol_balance.agent.data import Corpus, available, load
 from lol_balance.agent.evaluate import dev_cases, score, task, variant_tools
 from lol_balance.agent.judge import chat_model
@@ -222,6 +223,8 @@ def run_one(
         if provider == "openai":
             budget.settle(call_id, usage)
         result["usage"] = usage
+    except spend.SpendCapReached:
+        raise  # 상한에 닿으면 멈춘다 — 오류 줄로 적고 넘어가지 않는다
     except Exception as exc:
         # SDK 예외는 키 일부나 요청 내용을 포함할 수 있어 종류만 남긴다.
         result = {
