@@ -155,7 +155,7 @@ def _note_dir(patch: str) -> Path:
     return NOTES if (NOTES / f"{version(patch)}.html").exists() else NOTES / "live"
 
 
-def _answers_for(patch: str) -> tuple[frozenset[str], dict[str, tuple[Direction, str]]]:
+def answers_for(patch: str) -> tuple[frozenset[str], dict[str, tuple[Direction, str]]]:
     """**다음 패치 노트에서 그 패치의 답을 읽는다.**
 
     안 읽으면 전 챔피언이 조용히 「조정 안 됨」이 되고, 화면은 「답이 없다」고
@@ -212,7 +212,7 @@ def load() -> Corpus:
         if path.stem not in covered and patch_index(path.stem) > max(
             patch_index(p) for p in covered
         ):
-            answered, toward = _answers_for(path.stem)
+            answered, toward = answers_for(path.stem)
             rows = rows + forecast_rows(
                 path.stem,
                 rows,
@@ -242,7 +242,7 @@ def load() -> Corpus:
             games = read_games(folder)
             if not games:
                 continue
-            adjusted, directions = _answers_for(folder.name)
+            adjusted, directions = answers_for(folder.name)
             rows = rows + rows_from_ranking(
                 folder.name,
                 ranking(games),
