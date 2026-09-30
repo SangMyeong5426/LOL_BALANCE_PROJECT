@@ -17,7 +17,11 @@ _ROLES, _BANS, _UPDATED_AT, _GAMES = 0, 1, 2, 3
 
 # 챔피언 항목 배열의 자리
 _CHAMP_ID, _MATCHUPS, _WINS, _MATCHES = 0, 1, 2, 3
-_DAMAGE, _GOLD, _KILLS, _DEATHS, _ASSISTS, _CS = 4, 5, 6, 7, 8, 9
+# **7번이 어시스트, 8번이 데스다.** 2026-09-30 까지 거꾸로 읽었다 — 한 패치의 킬 합과
+# 데스 합은 같아야 하는데, 옛 「데스」 칸은 킬 합의 1.33~1.46배, 옛 「어시」 칸이
+# 1.003~1.004배였다. u.gg 안에서는 학습과 예측에 똑같이 뒤바뀌어 티가 안 났고,
+# 직접 집계(진짜 데스)로 예측할 때만 거꾸로 들어갔다. `check_kill_death_identity` 가 막는다.
+_DAMAGE, _GOLD, _KILLS, _ASSISTS, _DEATHS, _CS = 4, 5, 6, 7, 8, 9
 
 _BAN_TOTAL_KEY = "total_matches"
 _BAN_EMPTY_KEY = "-1"  # 밴을 하지 않은 슬롯
@@ -142,4 +146,28 @@ def check_games_identity(ranking: ChampionRanking) -> None:
     if matches != ranking.games * 10:
         raise ValueError(
             f"판수 합계가 게임 수의 10배가 아니다: {matches} vs {ranking.games * 10}"
+        )
+
+
+def check_kill_death_identity(
+    ranking: ChampionRanking, low: float = 0.99, high: float = 1.02
+) -> None:
+    """킬 합과 데스 합이 같은지 확인한다.
+
+    챔피언이 죽으면 대개 다른 챔피언이 킬을 얻는다. 그래서 한 패치 전체의 킬 합과
+    데스 합은 같아야 하고, 포탑이나 미니언에 죽은 것만큼 데스가 조금 많다.
+
+    **데스 칸과 어시스트 칸을 뒤바꿔 읽으면 1.33~1.46 이 된다.** 실제로 그렇게
+    읽고 있었는데 승률 · 판수 항등식도, 테스트도, 백테스트도 못 잡았다 — 두 칸이
+    학습과 예측에 똑같이 뒤바뀌었기 때문이다. 수집하고 패널을 만들 때마다 돌린다.
+    """
+    kills = sum(r.kills for r in ranking.rows)
+    deaths = sum(r.deaths for r in ranking.rows)
+    if kills == 0:
+        raise ValueError("킬 합계가 0이다")
+    ratio = deaths / kills
+    if not low <= ratio <= high:
+        raise ValueError(
+            f"데스 합이 킬 합과 다르다: {ratio:.3f}배 (킬 {kills}, 데스 {deaths})"
+            " — 칸을 잘못 읽었을 수 있다. 킬 합과 데스 합은 같아야 한다"
         )
