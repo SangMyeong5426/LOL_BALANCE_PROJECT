@@ -262,7 +262,7 @@ function card(c, kind, reveal) {
     <div class="top"><span class="rank">${c.rank}</span>
       <span class="name">${esc(ko(c.champion))}</span>
       <span class="en">${esc(c.champion)}</span>
-      <span class="pts" title="${SCORE_TIP}">점수 ${c.score.toFixed(2)}</span></div>
+      <span class="pts" title="${SCORE_TIP}">점수 ${two(c.score)}</span></div>
     <div class="mrow"><div class="meter"><i style="width:${c.score * 100}%"></i></div>
       <span class="games">솔랭 ${games(c.matches)}판</span></div>
     ${ev}${wn}<div class="fill"></div>${ans}</div>`;
@@ -341,6 +341,9 @@ const ko = n => KO[n] || n;
 // 값이 없으면(밴 자료가 빠진 패치, 프로 경기가 없는 챔피언) 0 이 아니라 「—」로 적는다.
 const pc = x => x == null ? '—' : (x * 100).toFixed(1) + '%';
 const pp = x => (x < 0 ? '−' : '+') + Math.abs(x * 100).toFixed(1) + '%p';
+// 점수는 API 에 소수 넷째 자리까지 있다. `toFixed(2)` 만 쓰면 0.7450 이 이진수로
+// 0.74499… 라 0.74 로 내려간다(16_2 케인 — 실제 값은 0.74502). 반올림을 한 번 해 둔다.
+const two = x => (Math.round(x * 100) / 100).toFixed(2);
 const num = x => x.toLocaleString('ko-KR');
 const games = n => n >= 10000 ? (n / 10000).toFixed(1) + '만 ' : num(n);
 const yes = b => b ? '예' : '아니오';
