@@ -39,6 +39,18 @@ class SpendCapReached(RuntimeError):
     """상한에 닿았다. **더 부르지 않는다.**"""
 
 
+class UnknownPrice(SpendCapReached):
+    """단가를 모르는 유료 모델이다. **세지 못하면 상한도 못 지키므로 부르지 않는다.**
+
+    상한에 닿은 것과 같은 쪽으로 멈추게 `SpendCapReached` 를 잇는다.
+    """
+
+
+def is_local(model: str) -> bool:
+    """이 기계에서 도는 모델(`ollama:`) — 공짜라 세지도 막지도 않는다."""
+    return model.startswith("ollama:")
+
+
 def cap() -> float:
     raw = os.environ.get("LOL_BALANCE_SPEND_CAP", "").strip()
     if not raw:
@@ -106,8 +118,13 @@ class Ledger:
         한 건의 값을 미리 모르므로 **이미 쓴 것**으로만 판단한다. 마지막 한 건이
         상한을 조금 넘길 수 있다 — 그 정도는 받아들이고, 다음 건에서 막힌다.
         """
-        if price(model) is None:
+        if is_local(model):
             return
+        if price(model) is None:
+            raise UnknownPrice(
+                f"{model} 의 단가를 모른다 — 세지 못하면 상한도 지킬 수 없어 부르지 않는다. "
+                "쓰려면 먼저 spend.PRICES 에 제공자 문서의 단가를 적는다."
+            )
         ceiling = cap() if limit is None else limit
         used = self.spent()
         if used >= ceiling:

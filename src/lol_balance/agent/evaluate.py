@@ -48,6 +48,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from numpy.typing import ArrayLike
 
+from lol_balance import spend
 from lol_balance.agent.data import Corpus
 from lol_balance.agent.judge import TOOL_SOURCE, Run, _steps, chat_model, guards
 from lol_balance.agent.schema import Judgment, StrictJudgment
@@ -384,6 +385,10 @@ def run_case(
         )
         run.steps = _steps(state.get("messages", []))
         run.judgment = state.get("structured_response")
+    except spend.SpendCapReached:
+        # **상한에 닿으면 멈춘다.** 기권 줄로 적으면 남은 건이 전부 기권으로 쌓이고,
+        # 다시 돌려도 끝난 건으로 보고 건너뛴다.
+        raise
     except Exception as exc:
         run.error = f"{type(exc).__name__}: {exc}"
 
