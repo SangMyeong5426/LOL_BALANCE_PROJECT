@@ -1,0 +1,54 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "v1",
+      "title": "Version",
+      "type": "string"
+    },
+    "first": {
+      "title": "First",
+      "type": "string"
+    },
+    "last": {
+      "title": "Last",
+      "type": "string"
+    },
+    "split": {
+      "title": "Split",
+      "type": "string"
+    },
+    "sources": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Sources",
+      "type": "object"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Paths",
+      "type": "array"
+    }
+  },
+  "required": [
+    "version",
+    "first",
+    "last",
+    "split",
+    "sources",
+    "notes",
+    "paths"
+  ],
+  "title": "Index",
+  "type": "object"
+}

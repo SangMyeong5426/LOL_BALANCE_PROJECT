@@ -1,0 +1,48 @@
+{
+  "$defs": {
+    "PatchSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "next": {
+          "title": "Next",
+          "type": "string"
+        },
+        "candidates": {
+          "title": "Candidates",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "next",
+        "candidates"
+      ],
+      "title": "PatchSummary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "split": {
+      "title": "Split",
+      "type": "string"
+    },
+    "patches": {
+      "items": {
+        "$ref": "#/$defs/PatchSummary"
+      },
+      "title": "Patches",
+      "type": "array"
+    }
+  },
+  "required": [
+    "split",
+    "patches"
+  ],
+  "title": "PatchList",
+  "type": "object"
+}
