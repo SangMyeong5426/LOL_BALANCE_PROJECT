@@ -14,7 +14,9 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -49,6 +51,9 @@ from lol_balance.agent.judge import (
 )
 from lol_balance.agent.schema import Evidence, Explanation, Judgment, StrictJudgment
 from lol_balance.agent.tools import make_tools
+from lol_balance.arms import rank_candidates
+from lol_balance.panel import PanelRow, patch_index
+from lol_balance.patchnotes import ChangeBlock
 from lol_balance.store import write_panel
 
 needs_data = pytest.mark.skipif(
@@ -194,10 +199,70 @@ def test_tools_never_show_the_as_of_patch(tiny_corpus: Corpus, tool: str) -> Non
     assert not any(line.strip().startswith(AT) for line in rows), out
 
 
+def test_direct_rows_are_marked_in_the_stats_table(tiny_corpus: Corpus) -> None:
+    """R3 표가 u.gg 행과 직접 집계 행을 **출처 표시 없이** 섞었다(16_19 화면 169표).
+
+    직접 집계 줄에 출처를 적고, 섞이면 ADR 0012 경고를 한 줄 붙인다. 안 섞이면
+    붙이지 않는다.
+    """
+    at = tiny_corpus.patches[0]
+    mixed = replace(tiny_corpus, direct=frozenset({"15_15"}))
+    out = {t.name: t for t in make_tools(mixed, at)}["lookup_stats"].invoke(
+        {"champion": "C3"}
+    )
+    rows = patch_rows(out)
+    assert all(
+        ("직접 집계" in line) == line.strip().startswith("15_15") for line in rows
+    )
+    assert any(line.strip().startswith("15_15") for line in rows), out
+    assert "ADR 0012" in out
+
+    plain = {t.name: t for t in make_tools(tiny_corpus, at)}["lookup_stats"].invoke(
+        {"champion": "C3"}
+    )
+    assert "직접 집계" not in plain and "ADR 0012" not in plain
+
+
 def test_patch_notes_cannot_reach_the_future(tiny_corpus: Corpus) -> None:
     tools = {t.name: t for t in make_tools(tiny_corpus, "15_13")}
     out = tools["search_patch_notes"].invoke({"champion": "C3", "patch": "15_15"})
     assert "경계 밖" in out and "Cooldown" not in out, out
+
+
+def test_base_patch_notes_open_only_where_asked(tiny_corpus: Corpus) -> None:
+    """**화면은 기준 패치 노트를 연다** — 그 패치에 무엇이 바뀌었는지는 이미 공개됐다.
+
+    안 열면 16_19 화면에서 「경계 밖」이 23줄 나왔다(2026-09-28). 평가 도구는 닫은
+    채 둔다 — 기록한 229건을 재현해야 한다. **여는 쪽도 다음 패치는 못 본다.**
+    """
+    ask = {"champion": "C3", "patch": "15_15"}
+    closed = {t.name: t for t in make_tools(tiny_corpus, "15_15")}
+    opened = {t.name: t for t in make_tools(tiny_corpus, "15_15", base_notes=True)}
+    assert "경계 밖" in closed["search_patch_notes"].invoke(ask)
+    assert "Cooldown increased to 12" in opened["search_patch_notes"].invoke(ask)
+
+    early = {t.name: t for t in make_tools(tiny_corpus, "15_13", base_notes=True)}
+    out = early["search_patch_notes"].invoke(ask)
+    assert "경계 밖" in out and "Cooldown" not in out, out
+
+
+def test_missing_note_files_are_not_missing_sections(tiny_corpus: Corpus) -> None:
+    """노트 **파일**이 없는 것을 「해당 절 없음」이라고 하지 않는다. 화면이 `live/`
+    노트를 안 읽어 실제로 있는 절을 그렇게 16번 답했다(2026-09-28)."""
+    sparse = replace(tiny_corpus, blocks={"15_12": tiny_corpus.blocks["15_12"]})
+    notes = {t.name: t for t in make_tools(sparse, AT)}["search_patch_notes"]
+    told = []
+    for line in notes.invoke({"champion": "C3"}).splitlines():
+        found = re.match(r"\s*(\d{2}_\d{1,2}): 찾지 못함 \((.+)\)", line)
+        if found:
+            patch, why = found.groups()
+            told.append(why)
+            if patch_index(patch) < patch_index(AT):
+                expected = (
+                    "해당 절 없음" if patch in sparse.blocks else "노트 파일 없음"
+                )
+                assert why == expected, line
+    assert "노트 파일 없음" in told
 
 
 def test_patch_notes_read_the_right_patch_and_skip_skins(tiny_corpus: Corpus) -> None:
@@ -438,6 +503,49 @@ def test_candidates_are_the_baseline_ranking(tiny_corpus: Corpus) -> None:
     assert {name for name, _ in top} <= set(tiny_corpus.champions(AT))
 
 
+def test_the_screen_never_calls_the_score_a_probability() -> None:
+    """**점수는 확률이 아니다.** 화면이 「손대지 않을 확률 {1 − 점수}」를 보였다 —
+    학습 구간에서 조정 점수 0.6~0.7 인 챔피언이 실제로 조정된 비율은 36% 였다."""
+    app = (Path(__file__).resolve().parents[1] / "scripts" / "app").read_text(
+        encoding="utf-8"
+    )
+    assert "손대지 않을 확률" not in app
+    assert "확률 아님" in app
+
+
+def test_scores_learn_from_the_ugg_panel_only(tiny_corpus: Corpus) -> None:
+    """**화면 점수는 u.gg 패널로만 학습한다**(ADR 0012) — `run-live-predict` 와 같다.
+
+    직접 집계 행(챔피언당 수백 판)과 예보 행이 학습에 섞여, 같은 경기로 본 16_19
+    화면 상위 10 이 전향 평가 목록과 너프 4/10 · 버프 3/10 만 겹쳤다(2026-09-28).
+    """
+    at = tiny_corpus.patches[0]
+    mixed = replace(
+        tiny_corpus,
+        panel=tiny_corpus.panel - {"15_15"},
+        direct=frozenset({"15_15"}),
+    )
+    train = judge.train_rows(mixed, at)
+    assert train and not any(r.patch == "15_15" for r in train)
+    assert all(r.patch in mixed.panel for r in train)
+    assert all(r.patch_index < patch_index(at) for r in train)
+
+    here = tuple(r for r in mixed.rows if r.patch == at)
+    for want in (None, "nerf", "buff"):
+        score = rank_candidates(train, here, want=want, seed=mixed.seed)
+        order = sorted(range(len(here)), key=lambda i: -score[i])[:10]
+        expected = [(here[i].champion, float(score[i])) for i in order]
+        assert candidates(mixed, at, want=want) == expected
+
+    # 한 챔피언을 볼 때의 점수(build_context)도 같은 학습 행에서 나온다
+    row = mixed.row("C3", at)
+    assert row is not None
+    nerf = rank_candidates(train, here, want="nerf", seed=mixed.seed)
+    assert build_context(mixed, "C3", at).baseline["너프"][0] == float(
+        nerf[here.index(row)]
+    )
+
+
 def test_saved_lines_are_appended(
     tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -468,6 +576,101 @@ def test_load_reads_the_panel_and_marks_answered_patches(
         data.load.cache_clear()  # 실제 패널을 쓰는 테스트가 이 결과를 받지 않게
     assert len(corpus.rows) == len(tiny_corpus.rows)
     assert corpus.patches[0] == "15_16" and corpus.labeled == set(corpus.patches)
+    assert corpus.panel == set(corpus.patches)  # 학습에 쓰는 u.gg 패널 패치
     assert corpus.row("C3", AT) is not None and corpus.row("C3", "13_14") is None
     assert corpus.blocks == {} and corpus.rules == () and corpus.churn == {}
     assert lifetime_pro(corpus.rows, "C1") is None  # 20패치가 안 된다
+
+
+def test_collection_says_how_many_games_and_when() -> None:
+    """직접 집계 패치의 머리말 — 몇 판을 **언제부터 언제까지**(KST) 모았나.
+
+    매일 늘어나서 내일은 목록이 달라질 수 있다. 화면이 그 사실을 스스로 말해야
+    한다(2026-09-28 점검).
+    """
+    at = [datetime(2026, 9, d, 3, 0, tzinfo=UTC) for d in (18, 16, 29)]
+    games = [SimpleNamespace(start_ms=int(t.timestamp() * 1000)) for t in at]
+
+    got = data.collection(games)  # type: ignore[arg-type]
+
+    assert got.games == 3
+    assert got.first.isoformat() == "2026-09-16T12:00:00+09:00"
+    assert got.last.isoformat() == "2026-09-29T12:00:00+09:00"
+
+
+def test_notes_are_read_from_live_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**`live/` 의 최신 노트도 읽는다.** 화면이 안 읽어 16.16~16.19 노트에 있는 절을
+    「해당 절 없음」이라고 답했다. 같은 패치가 두 곳에 있으면 본 폴더 것을 쓰고,
+    순서를 모르는 패치(해가 바뀐 `17_1` 등)는 건너뛴다."""
+    notes = tmp_path / "patchnotes"
+    (notes / "live").mkdir(parents=True)
+    (notes / "15.10.1.html").write_bytes(b"main-15_10")
+    (notes / "live" / "15.10.1.html").write_bytes(b"live-15_10")
+    (notes / "live" / "15.11.1.html").write_bytes(b"live-15_11")
+    (notes / "live" / "17.1.1.html").write_bytes(b"live-17_1")
+    monkeypatch.setattr(data, "NOTES", notes)
+    monkeypatch.setattr(
+        data,
+        "champion_changes",
+        lambda raw: [ChangeBlock(raw.decode(), "S", None, ())],
+    )
+
+    got = {p: [b.champion for b in bs] for p, bs in data.note_blocks().items()}
+
+    assert got == {"15_10": ["main-15_10"], "15_11": ["live-15_11"]}
+
+
+def test_load_answers_the_patch_after_the_panel(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**패널 다음 패치도 다음 노트가 있으면 답을 붙인다.** 화면이 `16_15` 173종을
+    전부 「조정 안 됨」으로 두었는데 실제로는 40종이 `16_16` 에 조정됐다(2026-09-28)."""
+    panel = tmp_path / "panel.sqlite"
+    write_panel(panel, tiny_corpus.rows)
+    monkeypatch.setattr(data, "PANEL", panel)
+    for name in ("NOTES", "ORACLE", "ITEMS", "RULES", "RIOT"):
+        monkeypatch.setattr(data, name, tmp_path / "없음" / name)
+    ranking = tmp_path / "ranking"
+    ranking.mkdir()
+    (ranking / "15_17.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(data, "RANKING", ranking)
+
+    seen: dict[str, Any] = {}
+
+    def fake_forecast(
+        patch: str, known: Sequence[PanelRow], **kw: Any
+    ) -> tuple[PanelRow, ...]:
+        seen.update(kw, patch=patch)
+        last = max(known, key=lambda r: r.patch_index).patch
+        return tuple(
+            replace(
+                r,
+                patch=patch,
+                patch_index=patch_index(patch),
+                adjusted_next=r.champion in kw.get("adjusted", ()),
+            )
+            for r in known
+            if r.patch == last
+        )
+
+    monkeypatch.setattr(data, "forecast_rows", fake_forecast)
+    monkeypatch.setattr(
+        data, "answers_for", lambda p: (frozenset({"C1"}), {"C1": ("nerf", "label")})
+    )
+    data.load.cache_clear()
+    try:
+        corpus = data.load()
+    finally:
+        data.load.cache_clear()
+
+    assert seen["patch"] == "15_17"
+    assert seen["adjusted"] == {"C1"}
+    assert seen["directions"] == {"C1": ("nerf", "label")}
+    assert "15_17" in corpus.labeled
+    row = corpus.row("C1", "15_17")
+    assert row is not None and row.adjusted_next
+    # 답이 붙어도 패널 밖이다 — 학습에는 안 쓴다(ADR 0012)
+    assert "15_17" not in corpus.panel
+    assert corpus.panel == frozenset(r.patch for r in tiny_corpus.rows)

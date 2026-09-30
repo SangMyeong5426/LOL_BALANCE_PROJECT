@@ -302,12 +302,24 @@ class NoteSearch:
     # 블록이 낱말 수만으로 이긴다.
     B = 0.5
 
-    def __init__(self, blocks: Mapping[str, Sequence[ChangeBlock]], as_of: str) -> None:
-        limit = patch_index(as_of)
+    def __init__(
+        self,
+        blocks: Mapping[str, Sequence[ChangeBlock]],
+        as_of: str,
+        *,
+        include_base: bool = False,
+    ) -> None:
         self.as_of = as_of
+        self._limit = patch_index(as_of)  # 모르는 경계면 여기서 멈춘다
+        # **기준 패치의 노트는 그 패치가 나올 때 이미 공개됐다.** 화면과 `ask` 는
+        # 연다 — 안 열면 16_19 화면에서 「경계 밖」이 23줄 나왔다(2026-09-28).
+        # 평가(`ragjudge` · `score-retrieval`)는 닫은 채 두어 기록을 재현한다.
+        self.include_base = include_base
+        # 노트 파일이 있는 패치. 경계와 상관없이 적어 둔다 — 못 찾은 이유를 가른다
+        self.known = frozenset(blocks)
         self.docs: list[tuple[str, ChangeBlock, list[str]]] = []
         for patch, items in blocks.items():
-            if patch_index(patch) >= limit:
+            if not self.reaches(patch):
                 continue
             for block in items:
                 # **패치를 색인에 넣는다.** 같은 챔피언이 여러 패치에 나오므로
@@ -321,6 +333,26 @@ class NoteSearch:
             self.frequency.update(set(tokens))
         lengths = [len(t) for _, _, t in self.docs]
         self.average = sum(lengths) / len(lengths) if lengths else 1.0
+
+    def reaches(self, patch: str) -> bool:
+        """그 패치 노트가 경계 안인가. 순서를 모르는 패치는 밖이다."""
+        try:
+            where = patch_index(patch)
+        except KeyError:
+            return False
+        return where <= self._limit if self.include_base else where < self._limit
+
+    def why_missing(self, patch: str) -> str:
+        """그 패치에서 못 찾은 이유 — **「경계 밖 · 노트 파일 없음 · 해당 절 없음」.**
+
+        화면이 `live/` 노트를 안 읽고도 「해당 절 없음」이라고 답해, **있는 절을
+        없다고** 말했다(2026-09-28, 16줄). 파일이 없는 것과 절이 없는 것은 다르다.
+        """
+        if not self.reaches(patch):
+            return "경계 밖"
+        if patch not in self.known:
+            return "노트 파일 없음"
+        return "해당 절 없음"
 
     def _idf(self, term: str) -> float:
         n = len(self.docs)

@@ -81,6 +81,20 @@ class Context:
     answer: str | None  # 답이 있는 패치만
 
 
+def train_rows(corpus: Corpus, at: str) -> tuple[PanelRow, ...]:
+    """점수를 학습하는 행 — **u.gg 패널이면서 `at` 앞인 행만**(ADR 0012).
+
+    `run-live-predict` 와 같다. 한때 `at` 앞의 행을 전부 썼는데, 그러면 라벨 없는
+    예보 행(`16_15`)과 직접 집계 행(챔피언당 수백 판)이 학습에 섞였다 — 같은 경기로
+    본 16_19 화면 상위 10 이 전향 평가 목록과 너프 4/10 · 버프 3/10 만 겹쳤다
+    (2026-09-28 점검). 대상 행은 어느 출처든 그대로 줄 세운다.
+    """
+    cut = patch_index(at)
+    return tuple(
+        r for r in corpus.rows if r.patch in corpus.panel and r.patch_index < cut
+    )
+
+
 def build_context(corpus: Corpus, champion: str, at: str) -> Context:
     """`scripts/ask` 와 같은 입력으로 같은 근거·같은 점수를 낸다."""
     row = corpus.row(champion, at)
@@ -100,7 +114,7 @@ def build_context(corpus: Corpus, champion: str, at: str) -> Context:
     # 아이템이 크게 바뀐 패치면 승률 변화를 챔피언 조정으로만 읽으면 안 된다.
     warnings += [n.text for n in patch_notes(corpus.churn.get(nxt))]
 
-    train = tuple(r for r in corpus.rows if r.patch_index < patch_index(at))
+    train = train_rows(corpus, at)
     spot = here.index(row)
     baseline = {}
     for label, want in (("조정", None), ("너프", "nerf"), ("버프", "buff")):
@@ -128,8 +142,7 @@ def candidates(
 ) -> list[tuple[str, float]]:
     """베이스라인이 고른 후보. `predict` 가 하는 줄 세우기다."""
     here = tuple(r for r in corpus.rows if r.patch == at)
-    train = tuple(r for r in corpus.rows if r.patch_index < patch_index(at))
-    score = rank_candidates(train, here, want=want, seed=corpus.seed)
+    score = rank_candidates(train_rows(corpus, at), here, want=want, seed=corpus.seed)
     order = sorted(range(len(here)), key=lambda i: -score[i])[:n]
     return [(here[i].champion, float(score[i])) for i in order]
 
@@ -292,7 +305,7 @@ def build_agent(
     """`model_kwargs` 는 모델 생성자로 간다 — 예: 로컬 모델의 `reasoning=False`."""
     return create_agent(
         model=chat_model(model, **model_kwargs),
-        tools=make_tools(corpus, ctx.at),
+        tools=make_tools(corpus, ctx.at, base_notes=True),
         system_prompt=SYSTEM.format(
             at=ctx.at, nxt=ctx.nxt, champion=ctx.champion, base=BASE_ADJUST
         ),
@@ -500,7 +513,7 @@ def build_explainer(
     """에이전트 방식 — 무엇을 조회할지 모델이 고른다."""
     return create_agent(
         model=chat_model(model, **model_kwargs),
-        tools=make_tools(corpus, ctx.at),
+        tools=make_tools(corpus, ctx.at, base_notes=True),
         system_prompt=EXPLAIN.format(at=ctx.at, nxt=ctx.nxt, champion=ctx.champion),
         response_format=ToolStrategy(Explanation),
         middleware=guards(),
@@ -532,7 +545,7 @@ LOOKUPS: dict[str, tuple[str, dict[str, Any]]] = {
 
 def evidence(corpus: Corpus, ctx: Context) -> RunnableParallel[dict[str, Any]]:
     """교재 4장 RunnableParallel — 조회 넷을 **동시에** 한다. 경계는 도구가 지킨다."""
-    tools = {t.name: t for t in make_tools(corpus, ctx.at)}
+    tools = {t.name: t for t in make_tools(corpus, ctx.at, base_notes=True)}
 
     def lookup(name: str, args: dict[str, Any]) -> RunnableLambda[Any, str]:
         return RunnableLambda(
