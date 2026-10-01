@@ -464,13 +464,12 @@ def test_a_denial_in_the_present_tense_is_still_a_denial() -> None:
     assert said.mark == "⚪"
 
 
-def test_the_answer_form_shows_no_real_section_name() -> None:
-    """답 형식의 설명에 **진짜 절 이름**을 예로 적어 두었더니 모델이 그것을 그대로 인용했다
-    (고정 질문 q15 — Illaoi 의 노트를 Senna 의 `Q - Piercing Darkness` 로 인용). Senna 를
-    물었다면 베낀 인용이 대조를 통과했을 것이다. **예시는 어떤 도구도 주지 않을 말로 둔다.**
+def test_the_answer_form_gives_no_section_name_to_copy() -> None:
+    """답 형식의 **절 이름 칸에는 예시를 두지 않는다.** 설명은 모델에게 그대로 간다.
 
-    예시를 아예 빼지는 않는다 — 빼면 모델이 그 칸에 무엇을 적는지 몰라 다른 도구의 줄이나
-    `[패치]` 같은 빈말을 적는다(27건 중 6건)."""
-    form = json.dumps(Answer.model_json_schema(), ensure_ascii=False)
-    assert "Piercing Darkness" not in form
-    assert "스킬 이름" in form  # 가짜임이 분명한 예시 — 노트의 절 이름은 영어다
+    진짜 절 이름(`Q - Piercing Darkness`)을 예로 들었더니 다른 챔피언의 노트를 그 이름으로
+    인용했고(고정 질문 dev-v1 q15), 가짜 예시(`Q - 스킬 이름`)로 바꿨더니 도구가 준 절 이름
+    앞에 `Q - ` 를 붙였다 — 처음 보는 질문(dev-v2)의 노트 인용 5건이 전부 그랬다."""
+    section = Cited.model_json_schema()["properties"]["section"]["description"]
+    assert "예:" not in section and "Q - " not in section
+    assert "Piercing Darkness" not in json.dumps(Answer.model_json_schema())
