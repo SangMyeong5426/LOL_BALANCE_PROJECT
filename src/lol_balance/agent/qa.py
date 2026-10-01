@@ -1,10 +1,18 @@
 """후속 질문의 답을 **코드가 대조한다** — [extension 3절](../../../docs/extension.md).
 
-    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했다
+    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했거나,
+       **도구가 낸 주의를 답에서 뺐다**
     ⚪  대조할 수 없다 — 숫자도 인용도 없거나 형식이 맞지 않는다
     ✅  대조를 통과했다. **실제로 확인한 것만 말한다**
 
 모델에게 「맞게 썼나」를 묻지 않는다. 답에 나온 숫자와 인용을 도구 출력과 맞춰 본다.
+
+## 도구가 낸 주의는 답이 옮겨야 한다
+
+도구는 표본이 얇거나, 출처가 섞였거나, 기준 패치 뒤라 볼 수 없으면 그렇게 말한다.
+**답이 그 말을 빼면 ⚠ 다** — 3,183판으로 잰 변화를 효과처럼 읽게 되고, 「볼 수 없다」가
+「없었다」로 바뀐다(로컬 모델이 실제로 그렇게 답했다, 2026-10-01). 화면은 모델이 뭐라고
+쓰든 그 주의를 답 아래에 **코드로 붙인다**(`cautions`).
 
 ## 무엇을 출처로 치나
 
@@ -120,6 +128,39 @@ def _squeeze(text: str) -> str:
 
 
 @dataclass(frozen=True)
+class Caution:
+    """도구가 붙인 주의 하나. `text` 는 도구가 쓴 문장 그대로다."""
+
+    kind: str  # "표본" · "경계" · "출처"
+    text: str
+
+
+# (종류, 도구 출력에서 찾는 말, 답에 이 중 하나는 있어야 한다, 빠졌을 때 적는 말)
+_CARRY: tuple[tuple[str, str, tuple[str, ...], str], ...] = (
+    ("표본", "표본이 얇다", ("표본",), "표본이 얇다"),
+    (
+        "경계",
+        "경계 밖",
+        ("경계 밖", "볼 수 없", "알 수 없", "확인할 수 없"),
+        "기준 패치 뒤라 볼 수 없다",
+    ),
+    ("출처", "출처가", ("출처", "직접 집계"), "출처가 다르다"),
+)
+
+
+def cautions(steps: Sequence[Step]) -> list[Caution]:
+    """도구 출력에서 주의 문장을 **그대로** 꺼낸다. 같은 문장은 한 번만."""
+    out: list[Caution] = []
+    for step in steps:
+        for line in step.output.splitlines():
+            kind = next((k for k, needle, _, _ in _CARRY if needle in line), None)
+            text = line.strip().removeprefix("⚠").strip()
+            if kind and all(c.text != text for c in out):
+                out.append(Caution(kind, text))
+    return out
+
+
+@dataclass(frozen=True)
 class Check:
     """대조 결과. `numbers` · `notes` 는 **실제로 확인한 개수**다."""
 
@@ -147,15 +188,22 @@ def check(
     *,
     context: str,
     questions: Sequence[str],
+    asked: Sequence[Step] | None = None,
+    text: str = "",
 ) -> Check:
     """답 하나를 출처와 맞춰 본다. **모델을 부르지 않는다.**
 
-    steps      이 대화에서 지금까지 부른 도구와 그 출력
+    steps      이 대화에서 지금까지 부른 도구와 그 출력 — 숫자와 인용의 출처다
     context    코드가 만든 맥락(기준 패치 지표 · 통계 모델 점수 · 경고)
     questions  사람이 한 질문들
+    asked      **이번 질문에서** 부른 도구. 답이 옮겨야 할 주의는 여기서만 본다 —
+               앞 질문의 주의를 뒤 질문의 답에 요구하지 않는다. 안 주면 `steps` 전부
+    text       구조화된 답이 없을 때(`answer` 가 None) 모델이 글로 쓴 답. **글도
+               훑는다** — 없는 숫자나 빠뜨린 주의가 있으면 ⚪ 가 아니라 ⚠ 다
     """
-    if answer is None:
-        return Check("⚪", why="형식이 맞지 않는다 — 구조화된 답이 없다")
+    prose = answer.answer if answer is not None else text
+    fields = answer.numbers if answer is not None else []
+    notes = answer.notes if answer is not None else []
 
     sources = [context, *questions, *(s.output for s in steps)]
     allowed = [n for text in sources for n in numbers_in(text)]
@@ -167,12 +215,10 @@ def check(
         # `14.7` 은 패치 `14_7` 을 점으로 쓴 것이다 — 측정값이 아니다
         return not n.unit and not n.sign and n.core in patches
 
-    declared = [numbers_in(entry) for entry in answer.numbers]
-    malformed = [
-        e for e, found in zip(answer.numbers, declared, strict=True) if not found
-    ]
+    declared = [numbers_in(entry) for entry in fields]
+    malformed = [e for e, found in zip(fields, declared, strict=True) if not found]
     used = [n for found in declared for n in found]
-    used += [n for n in numbers_in(answer.answer) if n.measured]
+    used += [n for n in numbers_in(prose) if n.measured]
 
     checked: dict[tuple[str, Decimal, str], Number] = {}
     for n in used:
@@ -180,12 +226,22 @@ def check(
     missing = [n.raw for n in checked.values() if not grounded(n)]
 
     returned = blocks_in(steps)
-    cited = {
-        (c.patch.strip().replace(".", "_"), _squeeze(c.section)): c
-        for c in answer.notes
-    }
+    cited = {(c.patch.strip().replace(".", "_"), _squeeze(c.section)): c for c in notes}
     absent = [
         f"[{c.patch}] {c.section}" for key, c in cited.items() if key not in returned
+    ]
+
+    # 도구가 낸 주의를 답이 옮겼나. 띄어쓰기는 안 본다(「볼수없다」도 옮긴 것이다)
+    said = _squeeze(prose)
+    raised = {c.kind for c in cautions(steps if asked is None else asked)}
+    if not checked:
+        # 표본 · 출처 주의는 숫자를 쓴 답에만 요구한다. 「경계 밖」은 늘 요구한다 —
+        # 못 본 것을 없었다고 말하는 것은 숫자가 없어도 틀린 답이다
+        raised &= {"경계"}
+    dropped = [
+        label
+        for kind, _, words, label in _CARRY
+        if kind in raised and not any(_squeeze(w) in said for w in words)
     ]
 
     problems = []
@@ -193,8 +249,12 @@ def check(
         problems.append("도구 결과에 없는 숫자: " + ", ".join(missing))
     if absent:
         problems.append("도구가 준 적 없는 노트 블록: " + ", ".join(absent))
+    if dropped:
+        problems.append("도구가 낸 주의를 답에서 뺐다: " + ", ".join(dropped))
     if problems:
         return Check("⚠", tuple(problems))
+    if answer is None:
+        return Check("⚪", why="형식이 맞지 않는다 — 구조화된 답이 없다")
     if malformed:
         return Check(
             "⚪",

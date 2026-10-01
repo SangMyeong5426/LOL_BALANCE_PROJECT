@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from lol_balance.agent.judge import Step
-from lol_balance.agent.qa import blocks_in, check, numbers_in
+from lol_balance.agent.qa import Check, blocks_in, cautions, check, numbers_in
 from lol_balance.agent.schema import Answer, Cited
 
 EFFECT = """Senna — 14_7 에 적용된 조정의 전후 (경계: 16_19 까지의 지표)
@@ -188,3 +188,105 @@ def test_a_number_field_without_a_number_cannot_be_checked() -> None:
         questions=["?"],
     )
     assert got.mark == "⚪"
+
+
+# ── 도구가 낸 주의 — 답이 옮겨야 한다 ────────────────────────────────────
+
+THIN = EFFECT + (
+    "\n⚠ 표본이 얇다 — 14_6 3,183판(기준 20,000판). 승률이 요동칠 수 있어 이 변화를"
+    " 조정 효과라고 단정하지 않는다"
+)
+BEYOND = "Senna 패치 노트 (경계: 16_13 노트까지)\n  16_14: 찾지 못함 (경계 밖)"
+
+
+def carried(answer: str, output: str, tool: str = "effect_of") -> Check:
+    return check(
+        Answer(answer=answer),
+        [Step(tool, {}, output)],
+        context="",
+        questions=["?"],
+        asked=[Step(tool, {}, output)],
+    )
+
+
+def test_cautions_are_read_from_what_the_tools_said() -> None:
+    """도구가 붙인 주의를 **그 문장 그대로** 꺼낸다 — 화면이 답 아래에 붙인다. 모델이
+    빼먹어도 사람은 본다."""
+    found = cautions(
+        [Step("effect_of", {}, THIN), Step("search_patch_notes", {}, BEYOND)]
+    )
+    assert [c.kind for c in found] == ["표본", "경계"]
+    assert found[0].text.startswith("표본이 얇다 — 14_6 3,183판")
+    assert "16_14" in found[1].text
+    assert cautions([Step("effect_of", {}, EFFECT)]) == []
+
+
+def test_a_thin_sample_must_be_said_in_the_answer() -> None:
+    """**표본이 작으면 답에 그 사실을 적는다**(extension 3절 7항). 도구가 얇다고 했는데
+    답이 그 말을 빼면 ⚠ 다 — 3,183판으로 잰 변화를 효과처럼 읽게 된다."""
+    kept = carried("효과는 +3.4%p 다. 다만 표본이 얇아 단정하기 어렵다.", THIN)
+    assert kept.mark == "✅"
+    dropped = carried("효과는 +3.4%p 다.", THIN)
+    assert dropped.mark == "⚠" and "표본이 얇다" in dropped.line()
+    assert carried("효과는 +3.4%p 다.", EFFECT).mark == "✅"  # 도구가 주의를 안 냈다
+
+
+def test_beyond_the_boundary_is_not_nothing_happened() -> None:
+    """**「경계 밖」은 「없었다」가 아니다.** 로컬 모델이 기준 패치 뒤의 노트를 못 본
+    것을 「조정되지 않았습니다」로 바꿔 답했다(2026-10-01) — 실제로는 너프됐다."""
+    wrong = carried("16_14 에는 조정되지 않았습니다.", BEYOND, "search_patch_notes")
+    assert wrong.mark == "⚠" and "볼 수 없다" in wrong.line()
+    right = carried(
+        "16_14 는 기준 패치 뒤라 볼 수 없습니다.", BEYOND, "search_patch_notes"
+    )
+    assert right.mark == "⚪"  # 주의는 옮겼고, 대조할 숫자나 인용은 없다
+
+
+def test_only_this_questions_tools_set_what_must_be_said() -> None:
+    """앞 질문에서 나온 주의를 뒤 질문의 답에 요구하지 않는다. 숫자의 출처는 쌓이지만
+    주의는 **이번에 부른 도구**의 것만 본다."""
+    earlier = [Step("effect_of", {}, THIN)]
+    got = check(
+        Answer(answer="승률은 49.4% 였다."),
+        earlier,
+        context="",
+        questions=["아까", "그래서 승률은?"],
+        asked=[],
+    )
+    assert got.mark == "✅"
+
+
+def test_a_plain_text_answer_is_still_scanned() -> None:
+    """구조화된 답이 없어도 **글은 훑는다.** 도구 결과에 없는 숫자나 빠뜨린 주의가 있으면
+    ⚪ 가 아니라 ⚠ 다 — 로컬 모델이 칸을 안 채우고 글로만 「조정되지 않았으며」라고
+    답했는데 ⚪ 로 지나갔다(2026-10-01). 문제를 못 찾았을 때만 「대조할 수 없다」다."""
+    beyond = [Step("search_patch_notes", {}, BEYOND)]
+    wrong = check(
+        None,
+        beyond,
+        context="",
+        questions=["?"],
+        asked=beyond,
+        text="16_14 에는 조정되지 않았습니다.",
+    )
+    assert wrong.mark == "⚠" and "볼 수 없다" in wrong.line()
+
+    made_up = check(
+        None, STEPS, context="", questions=["?"], text="승률이 87.6% 로 올랐다."
+    )
+    assert made_up.mark == "⚠" and "87.6%" in made_up.line()
+
+    fine = check(
+        None, STEPS, context="", questions=["?"], text="승률이 49.4% 로 올랐다."
+    )
+    assert fine.mark == "⚪" and "형식" in fine.line()
+
+
+def test_a_thin_sample_only_matters_when_numbers_are_used() -> None:
+    """표본 · 출처 주의는 **숫자를 쓴 답**에만 요구한다. 숫자 없이 「볼 수 없다」고 답한
+    데까지 요구하면 경고가 흔해져 아무도 안 본다 — 로컬 모델이 쓸데없이 부른 지표 도구의
+    주의 때문에 멀쩡한 답에 ⚠ 가 붙었다(2026-10-01). 화면은 어느 쪽이든 그 주의를 답
+    아래에 붙인다. **「경계 밖」은 숫자와 상관없이 요구한다** — 없었다고 말하는 것을 막는다."""
+    assert carried("그 패치는 자료가 없습니다.", THIN).mark == "⚪"
+    assert carried("효과는 +3.4%p 다.", THIN).mark == "⚠"
+    assert carried("조정되지 않았습니다.", BEYOND, "search_patch_notes").mark == "⚠"

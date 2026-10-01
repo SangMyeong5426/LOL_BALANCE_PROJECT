@@ -455,6 +455,26 @@ def test_effect_of_marks_sources_and_thin_samples(tiny_corpus: Corpus) -> None:
     assert "표본이 얇다" not in effect_tool(thick, AT).invoke(ask)
 
 
+def test_stats_table_says_when_samples_are_thin(tiny_corpus: Corpus) -> None:
+    """R3 표도 표본이 얇으면 **도구가 먼저 말한다** — 후속 질문에서만 켠다. 평가 도구의
+    출력은 그대로다(기록한 판단을 재현한다)."""
+    plain = {t.name: t for t in make_tools(tiny_corpus, AT)}["lookup_stats"]
+    assert "표본이 얇다" not in plain.invoke({"champion": "C3"})
+
+    asked = {t.name: t for t in make_tools(tiny_corpus, AT, cautions=True)}
+    out = asked["lookup_stats"].invoke({"champion": "C3"})
+    row = tiny_corpus.row("C3", "15_13")
+    assert row is not None
+    assert "⚠ 표본이 얇다" in out and f"{row.matches:,}판" in out
+
+    thick = replace(
+        tiny_corpus,
+        rows=tuple(replace(r, matches=50_000) for r in tiny_corpus.rows),
+    )
+    tools = {t.name: t for t in make_tools(thick, AT, cautions=True)}
+    assert "표본이 얇다" not in tools["lookup_stats"].invoke({"champion": "C3"})
+
+
 def test_fixed_cases_give_the_same_evidence_as_b5(tiny_corpus: Corpus) -> None:
     """고정형 R1 은 인자가 대상 하나뿐이다 — 증거의 양을 모델이 못 정한다."""
     tools = make_tools(tiny_corpus, AT, stats=False, notes=False, fixed_cases=25)

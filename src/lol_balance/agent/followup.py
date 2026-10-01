@@ -38,7 +38,6 @@ from lol_balance.agent import qa
 from lol_balance.agent.data import Corpus
 from lol_balance.agent.judge import (
     MODEL,
-    RULES,
     Context,
     Graph,
     Step,
@@ -50,8 +49,11 @@ from lol_balance.agent.judge import (
 from lol_balance.agent.schema import Answer
 from lol_balance.agent.tools import make_tools
 
-SYSTEM = (
-    """당신은 리그 오브 레전드 밸런스 조정 판단을 돕는 해설자입니다.
+# **해설의 규칙 묶음(`judge.RULES`)을 그대로 붙이지 않는다.** 거기에는 답 형식에 없는
+# 칸(`tension` · `tension_quote`)이 나온다. 그것을 붙이고 「답하는 방법」을 중간에 뒀더니
+# 로컬 모델(qwen3.5:9b)이 `Answer` 를 부르지 않고 글로만 답했다(3건 중 3건, 2026-10-01).
+# 규칙을 짧게 다시 쓰고 **답하는 방법을 맨 끝에** 둔다.
+SYSTEM = """당신은 리그 오브 레전드 밸런스 조정 판단을 돕는 해설자입니다.
 앞에서 {champion} ({at} → {nxt})에 대한 해설을 했고, 사람이 그 해설에 대해 더 묻습니다.
 최종 판단은 사람이 합니다.
 
@@ -59,26 +61,28 @@ SYSTEM = (
 - find_similar_cases  R1 비슷했던 과거 사례
 - lookup_stats        R3 이 챔피언의 과거 지표
 - search_patch_notes  R2 과거에 무엇을 얼마나 바꿨나
-- effect_of           R3 조정 전후 — 그 조정 뒤 승률·픽률·밴율·판수가 어떻게 달라졌나
+- effect_of           R3 조정 전후 — 승률·픽률·밴율·판수의 전후와 대조군을 뺀 효과.
+                      **「조정(너프·버프) 뒤에 뭐가 바뀌었나」는 반드시 이것으로 확인합니다**
 
-필요하면 도구로 확인하고, 짧게 한국어로 답합니다. 근거에는 출처(R1·R2·R3·베이스라인)를
-괄호로 붙입니다.
-
-**숫자는 도구가 준 것만 씁니다.** 직접 빼거나 더해 새 숫자를 만들지 않습니다. 조정의
-효과를 「먹혔다 · 안 먹혔다」로 단정하지 않고 전후 변화와 판수를 같이 말합니다. 도구가
-표본이 얇다고 하면 답에도 그렇게 적습니다.
+## 규칙
+1. 도구가 준 것과 주어진 내용만 근거로 씁니다. 기억으로 말하지 않습니다.
+2. **숫자는 도구가 준 것만 씁니다.** 직접 빼거나 더해 새 숫자를 만들지 않습니다.
+3. 도구가 낸 주의는 답에 옮깁니다 — 「표본이 얇다」면 표본이 얇다고, 「출처가 다르다」면
+   출처가 다르다고 적습니다.
+4. 도구가 「경계 밖」이라고 하면 {at} 뒤라 **볼 수 없다**고 답합니다. 「조정되지 않았다」 ·
+   「없었다」고 말하지 않습니다 — 못 본 것이지 없었던 것이 아닙니다.
+5. 조정의 효과를 「먹혔다 · 안 먹혔다」로 단정하지 않습니다. 전후 변화와 판수를 같이 말합니다.
+6. 「어떻게 조정해야 한다」는 쓰지 않습니다. 통계 모델의 수치는 순위를 매기는 점수이고
+   확률이 아닙니다.
 
 ## 답하는 방법
-조사가 끝나면 **반드시 Answer 도구를 호출해** 답합니다. 글로 답하지 않습니다.
-- answer   질문에 대한 답. 짧게
+필요한 도구를 부른 뒤, **마지막에는 반드시 Answer 도구를 호출해** 답합니다. 글로만 답하면
+안 됩니다.
+- answer   질문에 대한 답. 두세 문장으로 짧게 한국어로
 - numbers  answer 에 쓴 숫자를 **도구가 준 표기 그대로** 하나씩 옮깁니다 (예: "+3.4%p", "49.4%")
-- notes    근거로 쓴 패치 노트 블록 — search_patch_notes 가 `[패치] 절` 로 준 것만
-코드가 numbers 와 notes 를 도구 결과와 대조합니다. 도구 결과에 없는 숫자는 쓰지 않고,
-모르면 모른다고 답합니다.
-
+- notes    근거로 쓴 패치 노트 블록 — search_patch_notes 가 `[패치] 절` 로 준 것만. 안 썼으면 비웁니다
+코드가 numbers 와 notes 를 도구 결과와 대조합니다.
 """
-    + RULES
-)
 
 
 def checkpointer(path: Path) -> SqliteSaver:
@@ -110,7 +114,7 @@ def build_followup(
     return create_agent(
         model=chat_model(model, **model_kwargs),
         # 조정 전후 도구는 **여기서만** 쥐여 준다 — 평가 도구 묶음은 그대로 둔다
-        tools=make_tools(corpus, ctx.at, base_notes=True, effects=True),
+        tools=make_tools(corpus, ctx.at, base_notes=True, effects=True, cautions=True),
         system_prompt=SYSTEM.format(champion=ctx.champion, at=ctx.at, nxt=ctx.nxt),
         # 답을 칸으로 받는다 — 숫자와 인용을 옮겨 적게 하고 코드가 대조한다
         response_format=ToolStrategy(Answer),
@@ -135,6 +139,7 @@ class Reply:
     answer: Answer | None  # 구조화된 답. 글로만 답했으면 None
     steps: list[Step]  # 이 질문에서 부른 도구
     check: qa.Check
+    cautions: list[qa.Caution]  # 이 질문에서 도구가 낸 주의 — 화면이 답 아래에 붙인다
 
 
 @dataclass(frozen=True)
@@ -182,8 +187,16 @@ def turns(messages: Sequence[BaseMessage]) -> list[Turn]:
         steps = _steps(chunk)
         seen.extend(steps)
         answer, text = _final(chunk)
-        found = qa.check(answer, seen, context=context, questions=questions)
-        out.append(Turn(questions[-1], Reply(text, answer, steps, found)))
+        found = qa.check(
+            answer,
+            seen,
+            context=context,
+            questions=questions,
+            asked=steps,
+            text=text,
+        )
+        raised = qa.cautions(steps)
+        out.append(Turn(questions[-1], Reply(text, answer, steps, found, raised)))
 
     for m in messages[2:]:
         if isinstance(m, HumanMessage):
@@ -230,8 +243,14 @@ def _shown(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:
     for turn in turns(messages):
         out.append({"role": "user", "content": turn.question})
         text = turn.reply.text or "(답이 없다)"
+        notes = [turn.reply.check.line()]
+        # **주의는 코드가 붙인다** — 모델이 답에서 빼도 사람은 본다
+        notes += [f"도구가 낸 주의 — {c.text}" for c in turn.reply.cautions]
         out.append(
-            {"role": "assistant", "content": f"{text}\n\n> {turn.reply.check.line()}"}
+            {
+                "role": "assistant",
+                "content": text + "\n\n" + "  \n".join(f"> {n}" for n in notes),
+            }
         )
     return out
 
