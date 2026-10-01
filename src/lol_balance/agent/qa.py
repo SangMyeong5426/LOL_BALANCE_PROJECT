@@ -1,11 +1,21 @@
 """후속 질문의 답을 **코드가 대조한다** — [extension 3절](../../../docs/extension.md).
 
-    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했거나,
-       **도구가 낸 주의를 답에서 뺐거나, 볼 수 없는 것을 없었다고 말했다**
-    ⚪  대조할 수 없다 — 숫자도 인용도 없거나 형식이 맞지 않는다
+    ⚠  도구 결과에 없는 숫자를 썼거나, **도구가 낸 주의를 답에서 뺐거나, 볼 수 없는 것을
+       없었다고 말했다**
+    ⚪  대조할 수 없다 — 답에 숫자가 없거나 형식이 맞지 않는다
     ✅  대조를 통과했다. **실제로 확인한 것만 말한다**
 
-모델에게 「맞게 썼나」를 묻지 않는다. 답에 나온 숫자와 인용을 도구 출력과 맞춰 본다.
+모델에게 「맞게 썼나」를 묻지 않는다. 답에 나온 숫자를 도구 출력과 맞춰 본다.
+
+## 노트 블록은 코드가 붙인다 (ADR 0017)
+
+근거로 본 노트 블록은 모델이 적지 않는다. **이번 질문에서 노트 도구가 돌려준 블록**을 코드가
+꺼내(`note_blocks`) 화면이 답 아래에 붙인다 — 그래서 없는 블록이 나올 수 없고, 대조할 것도
+없다. 노트 질문에 숫자 없이 답하면 확인한 것이 없으니 ✅ 가 아니라 ⚪ 다.
+
+한때는 모델이 인용을 적었고 코드가 그것을 도구가 준 블록과 맞춰 봤다. 그때 받아 커밋한
+답은 **그때의 규칙으로 다시 채점한다** — 그 인용을 `check(cited=…)` 로 넘기면 「도구가 준 적
+없는 노트 블록」을 전처럼 잡는다. 문서에 적은 수치가 계속 재현돼야 해서 남겨 둔다.
 
 ## 도구가 낸 주의는 답이 옮겨야 한다
 
@@ -33,8 +43,8 @@
 
 ADR 0007 은 「글에서 값을 뽑는 파서」를 기각했다 — 뽑은 값을 **쓰려는** 것이었다.
 여기서는 값을 쓰지 않는다. 답의 숫자가 **출처에 있는지 없는지만** 본다. 주된 길은
-모델이 옮겨 적은 칸(`numbers` · `notes`)이고, 글을 훑는 것은 칸을 비워 두고
-빠져나가는 것을 막는 보조다.
+모델이 옮겨 적은 칸(`numbers`)이고, 글을 훑는 것은 칸을 비워 두고 빠져나가는 것을
+막는 보조다.
 
 ## 걸지 않는 것
 
@@ -43,18 +53,20 @@ ADR 0007 은 「글에서 값을 뽑는 파서」를 기각했다 — 뽑은 값
     「50%」            승률의 균형선이다 — 기준으로 쓰는 말이지 잰 값이 아니다(「50% 선 근처」).
                       `50.0%` 처럼 소수까지 적으면 잰다
     패치 이름          `14.7` 은 패치 `14_7` 을 점으로 쓴 것이다. 확인한 숫자로 세지도 않는다
-    패치의 대괄호      인용의 패치를 `[14_7]` 로 적어도 같은 패치다
-    도구가 준 줄       모델이 `effect_of` 의 머리 줄이나 거절한 말을 노트 블록 칸에 적는다.
-                      지어낸 것이 아니라 근거로 본 줄을 가리킨 것이고, 그 줄은 도구가 실제로
-                      줬다. 노트 블록으로 세지 않을 뿐이다(`misfiled` 에 적어 따로 센다).
+    패치의 대괄호      (옛 형식) 인용의 패치를 `[14_7]` 로 적어도 같은 패치다
+    도구가 준 줄       (옛 형식) 모델이 `effect_of` 의 머리 줄이나 거절한 말을 노트 블록 칸에
+                      적었다. 지어낸 것이 아니라 근거로 본 줄을 가리킨 것이고, 그 줄은 도구가
+                      실제로 줬다. 노트 블록으로 세지 않을 뿐이다(`misfiled` 에 적어 따로 센다).
                       **어느 도구도 준 적 없는 것만 「없는 노트 블록」이다**
 
 ## 못 잡는 것
 
 숫자는 맞는데 **뜻을 틀리게 쓴 것**은 못 잡는다 — 승률을 픽률이라고 부르거나, 부호
 없이 「4.4%p 올랐다」고 쓴 것(실제로는 내렸다). 부호를 적었으면 부호까지 본다.
-그래서 ✅ 는 「맞는 답」이 아니라 「숫자와 인용이 출처에 있다」는 뜻이다.
+그래서 ✅ 는 「맞는 답」이 아니라 「숫자가 출처에 있다」는 뜻이다.
 
+- **글에서 노트 내용을 지어낸 것** — 숫자면 잡고 숫자가 아니면 못 잡는다. 인용을 모델이 적던
+  때에도 인용 목록만 봤지 글의 주장을 블록과 맞춰 보지는 않았다
 - 잰 값이 아닌데 「승률이 50% 였다」고 쓴 것 — 균형선과 구별하지 못한다
 - 표의 줄을 잘못 읽은 것 — `lookup_stats` 의 「→ 다음 패치」 열을 그 패치의 조정으로 읽었다
 - 「없었다」는 말은 **적어 둔 표현만** 잡는다(`_DENIAL`). 다르게 돌려 말하면 지나간다.
@@ -70,7 +82,7 @@ from decimal import Decimal
 from typing import Literal
 
 from lol_balance.agent.judge import Step
-from lol_balance.agent.schema import Answer
+from lol_balance.agent.schema import Answer, Cited
 
 Mark = Literal["✅", "⚪", "⚠"]
 
@@ -166,6 +178,23 @@ def blocks_in(steps: Sequence[Step]) -> set[tuple[str, str]]:
     }
 
 
+def note_blocks(steps: Sequence[Step]) -> list[str]:
+    """**근거로 본 노트 블록** — 노트 도구가 돌려준 머리 줄을 준 그대로, 준 순서로.
+
+    화면이 답 아래에 붙인다(ADR 0017). 모델이 적는 것이 아니라 도구 출력에서 꺼내므로
+    없는 블록이 나올 수 없다. 같은 블록은 한 번만 낸다.
+    """
+    out: list[str] = []
+    for step in steps:
+        if step.tool != "search_patch_notes":
+            continue
+        for patch, section in _BLOCK.findall(step.output):
+            block = f"[{patch}] {section}"
+            if block not in out:
+                out.append(block)
+    return out
+
+
 def _squeeze(text: str) -> str:
     return re.sub(r"\s+", "", text).lower()
 
@@ -255,9 +284,10 @@ def _denied(prose: str, beyond: set[str], known: set[str]) -> list[str]:
 
 @dataclass(frozen=True)
 class Check:
-    """대조 결과. `numbers` · `notes` 는 **실제로 확인한 개수**다.
+    """대조 결과. `numbers` 는 **실제로 확인한 개수**다.
 
-    형식이 어긋나 ⚪ 인 것도 `numbers` · `notes` 는 채운다 — 거기까지는 확인했다.
+    형식이 어긋나 ⚪ 인 것도 `numbers` 는 채운다 — 거기까지는 확인했다. `notes` · `absent` ·
+    `misfiled` 는 **옛 형식의 기록**(모델이 인용을 적던 때)을 다시 채점할 때만 찬다.
     """
 
     mark: Mark
@@ -297,6 +327,7 @@ def check(
     questions: Sequence[str],
     asked: Sequence[Step] | None = None,
     text: str = "",
+    cited: Sequence[Cited] = (),
 ) -> Check:
     """답 하나를 출처와 맞춰 본다. **모델을 부르지 않는다.**
 
@@ -307,10 +338,11 @@ def check(
                앞 질문의 주의를 뒤 질문의 답에 요구하지 않는다. 안 주면 `steps` 전부
     text       구조화된 답이 없을 때(`answer` 가 None) 모델이 글로 쓴 답. **글도
                훑는다** — 없는 숫자나 빠뜨린 주의가 있으면 ⚪ 가 아니라 ⚠ 다
+    cited      **옛 형식의 기록에서만** — 모델이 적은 노트 인용. 도구가 준 블록인지 본다.
+               지금은 모델이 인용을 적지 않아 화면은 이것을 넘기지 않는다(ADR 0017)
     """
     prose = answer.answer if answer is not None else text
     fields = answer.numbers if answer is not None else []
-    notes = answer.notes if answer is not None else []
 
     sources = [context, *questions, *(s.output for s in steps)]
     allowed = [n for text in sources for n in numbers_in(text)]
@@ -332,15 +364,16 @@ def check(
         checked.setdefault((n.sign, n.value, n.unit), n)
     missing = [n.raw for n in checked.values() if not any(n.same(a) for a in allowed)]
 
+    # ── 옛 형식의 인용 — 지금은 `cited` 가 비어 있어 아래가 전부 빈다(ADR 0017) ──
     returned = blocks_in(steps)
     # 패치는 `14.7` · `[14_7]` 로 적어도 같은 패치다 — 표기는 봐주고 내용은 그대로 본다
-    cited = {
+    pointed = {
         (c.patch.strip().strip("[]").replace(".", "_"), _squeeze(c.section)): c
-        for c in notes
+        for c in cited
     }
     # 블록이 아닌데 **도구가 준 줄**이면 걸지 않는다(세지도 않는다). 어디에도 없으면 지어냈다
     told = _lines_in(steps)
-    unknown = {key: c for key, c in cited.items() if key not in returned}
+    unknown = {key: c for key, c in pointed.items() if key not in returned}
     shown = {key: f"[{key[0]}] {c.section}" for key, c in unknown.items()}
     misfiled = [shown[key] for key in unknown if key[1] in told]
     absent = [shown[key] for key in unknown if key[1] not in told]
@@ -380,7 +413,7 @@ def check(
             dropped=tuple(dropped),
             denied=tuple(denied),
         )
-    verified = len(cited) - len(unknown)
+    verified = len(pointed) - len(unknown)
     if answer is None:
         return Check(
             "⚪", why="형식이 맞지 않는다 — 구조화된 답이 없다", numbers=len(checked)
@@ -396,8 +429,6 @@ def check(
         )
     if not checked and not verified:
         return Check(
-            "⚪",
-            why="대조할 것이 없다 — 답에 숫자도 노트 인용도 없다",
-            misfiled=tuple(misfiled),
+            "⚪", why="대조할 것이 없다 — 답에 숫자가 없다", misfiled=tuple(misfiled)
         )
     return Check("✅", numbers=len(checked), notes=verified, misfiled=tuple(misfiled))

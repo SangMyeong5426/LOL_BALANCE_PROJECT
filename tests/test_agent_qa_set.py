@@ -149,6 +149,39 @@ def test_a_record_keeps_everything_needed_to_score_again(
     assert again.mark == "✅" and again.numbers == record["check"]["numbers"]
 
 
+def test_a_record_keeps_the_blocks_the_code_attached(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """기록에는 **코드가 붙인 노트 블록**이 남는다(ADR 0017). 모델이 적은 인용은 없다 —
+    그래서 「없는 노트 블록」은 셀 것이 없고, 요약이 그렇게 말한다."""
+    record = one_record(tiny_corpus, tmp_path, monkeypatch)
+
+    assert record["blocks"] == []  # 이 질문은 노트 도구를 부르지 않았다
+    assert set(record["answer"]) == {"answer", "numbers"}
+    total = qa_set.summarize([record])
+    assert total["cited_by"] == "코드" and total["absent_notes"] == 0
+    assert "노트 블록은 코드가 붙인다" in "\n".join(qa_set.report(total))
+
+
+def test_old_records_are_still_scored_by_the_old_rule(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**옛 형식의 기록은 그때의 규칙으로 다시 채점한다.** 모델이 인용을 적던 때 받은 답에는
+    `notes` 칸이 있다 — 그 인용이 도구가 준 블록인지를 계속 본다. 그래야 문서에 적은 수치가
+    재현된다."""
+    old = json.loads(
+        json.dumps(one_record(tiny_corpus, tmp_path, monkeypatch), ensure_ascii=False)
+    )
+    old["answer"]["notes"] = [{"patch": "15_13", "section": "없는 절"}]
+
+    again = qa_set.rescore(old)
+    total = qa_set.summarize([old])
+
+    assert again.mark == "⚠" and again.absent == ("[15_13] 없는 절",)
+    assert total["cited_by"] == "모델" and total["absent_notes"] == 1
+    assert "도구가 준 적 없는 노트 블록 1개" in "\n".join(qa_set.report(total))
+
+
 def test_rescoring_catches_what_the_record_hides(
     tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -291,7 +324,7 @@ def test_the_committed_set_is_fixed_and_in_the_training_range() -> None:
 
 SAVED = ROOT / "ground_truth" / "qa"
 # 지금 실린 지시(프롬프트 · 답 형식 · 도구 설명)로 받은 답
-SHIPPED = SAVED / "answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl"
+SHIPPED = SAVED / "answers-dev-v1-ollama-qwen3.5-9b-r4.jsonl"
 # docs/agent.md 의 표와 같다 —
 # (파일, ✅ · ⚪ · ⚠, 없는 숫자, 없는 노트 블록, 주의를 뺀 답, 없었다고 한 답, 글로만 답한 것)
 MEASURED = [
@@ -300,6 +333,8 @@ MEASURED = [
     ("answers-dev-v1-ollama-qwen3.5-9b-r3.jsonl", (12, 9, 6), 0, 2, 2, 2, 6),
     ("answers-dev-v2-ollama-qwen3.5-9b.jsonl", (8, 9, 10), 2, 5, 3, 3, 8),
     ("answers-dev-v3-ollama-qwen3.5-9b.jsonl", (16, 8, 3), 0, 2, 1, 1, 5),
+    # ── 여기부터 노트 블록을 코드가 붙인다(ADR 0017) — 없는 블록은 나올 수 없다 ──
+    ("answers-dev-v1-ollama-qwen3.5-9b-r4.jsonl", (5, 19, 3), 0, 0, 2, 1, 16),
 ]
 
 

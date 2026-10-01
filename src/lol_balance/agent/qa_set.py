@@ -45,7 +45,7 @@ from lol_balance import spend
 from lol_balance.agent import followup, qa
 from lol_balance.agent.data import Corpus
 from lol_balance.agent.judge import Step, build_context, explain_task
-from lol_balance.agent.schema import Answer
+from lol_balance.agent.schema import Answer, Cited
 from lol_balance.explain import THIN_MATCHES
 from lol_balance.panel import PanelRow, next_patch, patch_index, previous_patch
 
@@ -219,6 +219,8 @@ def ask(
         ],
         "answer": reply.answer.model_dump() if reply.answer else None,
         "text": reply.text,
+        # 코드가 붙인 노트 블록 — 모델이 적은 것이 아니다(ADR 0017)
+        "blocks": list(reply.blocks),
         "check": {
             "mark": reply.check.mark,
             "problems": list(reply.check.problems),
@@ -233,9 +235,16 @@ def ask(
 
 
 def rescore(record: dict[str, Any]) -> qa.Check:
-    """기록에서 **다시 대조한다.** 기록에 적힌 표시는 믿지 않는다."""
+    """기록에서 **다시 대조한다.** 기록에 적힌 표시는 믿지 않는다.
+
+    **옛 형식의 기록은 그때의 규칙으로 채점한다.** 모델이 인용을 적던 때(ADR 0017 전) 받은
+    답에는 `notes` 칸이 있다 — 그 인용이 도구가 준 블록인지를 계속 본다. 그래야 문서에 적은
+    수치(없는 노트 블록 1 · 3 · 2 · 5 · 2)가 재현된다.
+    """
     steps = [Step(s["tool"], dict(s["args"]), s["output"]) for s in record["steps"]]
-    answer = Answer.model_validate(record["answer"]) if record["answer"] else None
+    raw = record["answer"]
+    answer = Answer.model_validate(raw) if raw else None
+    cited = [Cited.model_validate(n) for n in (raw or {}).get("notes", [])]
     return qa.check(
         answer,
         steps,
@@ -243,6 +252,7 @@ def rescore(record: dict[str, Any]) -> qa.Check:
         questions=[record["question"]],
         asked=steps,
         text=record["text"],
+        cited=cited,
     )
 
 
@@ -267,6 +277,10 @@ def summarize(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "answers_that_denied_the_unseen": sum(bool(c.denied) for c in checks),
         "prompts": sorted({str(r.get("prompt", "")) for r in records}),
         "unstructured": sum(r["answer"] is None for r in records),
+        # 노트 인용을 누가 적었나 — 답에 `notes` 칸이 있으면 모델이 적던 때의 기록이다
+        "cited_by": (
+            "모델" if any("notes" in (r["answer"] or {}) for r in records) else "코드"
+        ),
         "by_kind": by_kind,
         "usd": round(sum(float(r.get("usd", 0.0)) for r in records), 6),
         "median_seconds": statistics.median(seconds) if seconds else 0.0,
@@ -277,17 +291,31 @@ def report(total: dict[str, Any]) -> list[str]:
     """요약을 사람이 읽을 줄로 — `run-qa` 와 `score-qa` 가 같은 줄을 낸다."""
     marks = total["marks"]
     told = " · ".join(p or "없음" for p in total["prompts"])
+    numbers = (
+        f"도구 결과에 없는 숫자 {total['missing_numbers']}개"
+        f"(답 {total['answers_with_missing_numbers']}건)"
+    )
+    plain = f"형식 — 구조화된 답이 없는 것 {total['unstructured']}건"
+    if total["cited_by"] == "모델":
+        # 옛 형식 — 모델이 인용을 적던 때의 기록이다
+        numbers += (
+            f" · 도구가 준 적 없는 노트 블록 {total['absent_notes']}개"
+            f"(답 {total['answers_with_absent_notes']}건)"
+        )
+        plain += (
+            " · 인용 칸에 노트 블록이 아닌 도구 줄을 적은 것 "
+            f"{total['answers_that_misfiled_a_citation']}건(걸지 않는다)"
+        )
+    else:
+        numbers += (
+            " · 노트 블록은 코드가 붙인다 — 모델이 적지 않아 없는 블록이 나올 수 없다"
+        )
     return [
         f"질문 {total['questions']}개 · ✅ {marks['✅']} · ⚪ {marks['⚪']} · ⚠ {marks['⚠']}",
-        f"도구 결과에 없는 숫자 {total['missing_numbers']}개"
-        f"(답 {total['answers_with_missing_numbers']}건) · "
-        f"도구가 준 적 없는 노트 블록 {total['absent_notes']}개"
-        f"(답 {total['answers_with_absent_notes']}건)",
+        numbers,
         f"주의를 뺀 답 {total['answers_that_dropped_a_caution']}건 · "
         f"볼 수 없는 것을 없었다고 한 답 {total['answers_that_denied_the_unseen']}건",
-        f"형식 — 구조화된 답이 없는 것 {total['unstructured']}건 · "
-        f"인용 칸에 노트 블록이 아닌 도구 줄을 적은 것 "
-        f"{total['answers_that_misfiled_a_citation']}건(걸지 않는다)",
+        plain,
         f"비용 ${total['usd']:.4f} · 한 건 중앙값 {total['median_seconds']:.1f}초 · "
         f"지시 지문 {told}",
     ]
