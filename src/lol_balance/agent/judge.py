@@ -47,7 +47,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from lol_balance import spend
 from lol_balance.agent.data import Corpus, lifetime_pro
-from lol_balance.agent.schema import Explanation, Judgment
+from lol_balance.agent.schema import Answer, Explanation, Judgment
 from lol_balance.agent.tools import make_tools
 from lol_balance.arms import rank_candidates
 from lol_balance.baseline import direction_rows
@@ -341,7 +341,11 @@ def _steps(messages: Sequence[BaseMessage]) -> list[Step]:
         if isinstance(msg, AIMessage):
             for call in msg.tool_calls or []:
                 # 구조화 출력이 도구 호출로 오는 경우는 호출 기록에 넣지 않는다.
-                if call["name"] in (Judgment.__name__, Explanation.__name__):
+                if call["name"] in (
+                    Judgment.__name__,
+                    Explanation.__name__,
+                    Answer.__name__,
+                ):
                     continue
                 step = Step(call["name"], dict(call.get("args") or {}))
                 steps.append(step)
