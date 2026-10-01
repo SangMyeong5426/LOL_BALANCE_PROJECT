@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""후속 질문(Q&A)의 **고정 질문 세트**를 만든다 — 학습 구간에 서서 묻는 27개.
+
+    ./scripts/make-qa-questions dev-v1              → ground_truth/qa/questions-dev-v1.jsonl
+    ./scripts/make-qa-questions dev-v2 --seed-offset 1    다른 질문 27개 — 처음 보는 질문으로 다시 잰다
+
+[extension 2단계](../docs/extension.md)의 완료 기준을 이 질문들로 잰다. 기준 패치는
+학습 구간의 끝(`15_13`)이고, 씨앗은 설정의 `seed` 다 — 다시 만들어도 같은 질문이 나온다.
+
+**프롬프트와 대조 규칙은 질문을 보면서 고친다.** 그러니 고친 뒤의 수치는 그 질문들에 맞춘
+것이다. `--seed-offset` 으로 씨앗을 옮겨 **본 적 없는 질문**을 새 이름으로 만들고, 고친 것을
+굳힌 뒤 한 번 잰다. 이것도 학습 구간 안이다.
+
+**있는 이름은 덮어쓰지 않는다.** 질문을 바꾸면 그 전에 받은 답과 견줄 수 없다. 고치려면
+새 이름으로 만든다(extension 5절 1항).
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import Counter
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.agent import qa_set  # noqa: E402
+from lol_balance.agent.data import PANEL, available, load  # noqa: E402
+
+OUT = ROOT / "ground_truth" / "qa"
+
+
+def main() -> int:
+    if len(sys.argv) < 2 or sys.argv[1].startswith("-"):
+        print(__doc__)
+        return 0 if {"-h", "--help"} & set(sys.argv) else 2
+    offset = (
+        int(sys.argv[sys.argv.index("--seed-offset") + 1])
+        if "--seed-offset" in sys.argv
+        else 0
+    )
+    if not available():
+        print(
+            f"{PANEL.relative_to(ROOT)} 가 없다 — 수집부터 한다(README 「시작하기」)."
+        )
+        return 1
+    out = OUT / f"questions-{sys.argv[1]}.jsonl"
+    if out.exists():
+        print(
+            f"{out.relative_to(ROOT)} 가 이미 있다 — 덮어쓰지 않는다. 새 이름으로 만든다."
+        )
+        return 2
+
+    corpus = load()
+    seed = corpus.seed + offset
+    questions = qa_set.make_questions(corpus, qa_set.SPLIT, seed=seed)
+    for q in questions:
+        qa_set.append(out, q)
+    kinds = Counter(q["kind"] for q in questions)
+    print(
+        f"{out.relative_to(ROOT)}  질문 {len(questions)}개 · 기준 패치 {qa_set.SPLIT}"
+        f" · 씨앗 {seed}"
+    )
+    print("  " + " · ".join(f"{k} {n}" for k, n in kinds.items()))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
