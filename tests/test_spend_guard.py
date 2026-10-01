@@ -7,6 +7,7 @@ LangChain 은 콜백 안의 예외를 기본으로 삼킨다(`raise_error=False`
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -143,3 +144,31 @@ def test_paid_models_retry_at_most_once(monkeypatch: pytest.MonkeyPatch) -> None
 
     judge.chat_model(PAID)
     assert seen["max_retries"] == 1
+
+
+# ── 후속 질문(Q&A)의 비용 — 장부에 따로 남는다 ──────────────────────────
+
+
+def test_the_ledger_says_what_the_money_was_for(book: spend.Ledger) -> None:
+    """**쓴 비용이 장부에 남는다**(extension 2단계). 무엇에 썼는지도 남긴다 — 전에는
+    전부 `agent` 한 가지라 후속 질문에 쓴 돈을 따로 볼 수 없었다."""
+    judge.SpendGuard(PAID, why="qa").on_llm_end(reply_with_usage())
+    judge.SpendGuard(PAID).on_llm_end(reply_with_usage())
+
+    lines = [json.loads(x) for x in book.path.read_text().splitlines()]
+    assert [x["why"] for x in lines] == ["qa", "agent"]
+    assert book.spent("qa") == pytest.approx(spend.cost(PAID, 1000, 100))
+    assert book.spent() == pytest.approx(2 * spend.cost(PAID, 1000, 100))
+
+
+def test_chat_model_passes_the_purpose_to_the_guard(
+    book: spend.Ledger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(judge, "init_chat_model", lambda model, **kw: seen.update(kw))
+
+    judge.chat_model(PAID, why="qa")
+
+    guard = next(c for c in seen["callbacks"] if isinstance(c, judge.SpendGuard))
+    assert guard.why == "qa"
+    assert "why" not in seen  # 모델 생성자로 새지 않는다
