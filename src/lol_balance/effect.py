@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from lol_balance.panel import PanelRow
@@ -88,6 +89,37 @@ class Outcome:
         return self.pro_after / self.pro_before - 1
 
 
+Pair = tuple[PanelRow, PanelRow]
+
+
+def _pairs(current: Sequence[PanelRow], following: Sequence[PanelRow]) -> list[Pair]:
+    """양쪽 패치에 다 있는 챔피언만. 한쪽이 없으면 변화를 정의할 수 없다."""
+    after = {r.champion_id: r for r in following}
+    return [(r, after[r.champion_id]) for r in current if r.champion_id in after]
+
+
+def _baseline(paired: Sequence[Pair]) -> tuple[float, int] | None:
+    """대조군(그 패치에 조정되지 않은 챔피언)의 평균 승률 변화와 그 수. 없으면 None."""
+    control = [b.win_rate - a.win_rate for a, b in paired if not a.adjusted_next]
+    if not control:
+        return None
+    return sum(control) / len(control), len(control)
+
+
+def _outcome(a: PanelRow, b: PanelRow, baseline: float) -> Outcome:
+    return Outcome(
+        patch=a.patch,
+        champion=a.champion,
+        direction=a.direction_next or "",
+        source=a.direction_source or "",
+        before=a.win_rate,
+        after=b.win_rate,
+        baseline_shift=baseline,
+        pro_before=a.pro_presence,
+        pro_after=b.pro_presence,
+    )
+
+
 def outcomes(
     current: tuple[PanelRow, ...], following: tuple[PanelRow, ...]
 ) -> tuple[Outcome, ...]:
@@ -96,30 +128,64 @@ def outcomes(
     `current` 는 조정 **직전** 패치, `following` 은 조정이 적용된 패치다.
     양쪽에 다 있는 챔피언만 본다 — 한쪽이 없으면 변화를 정의할 수 없다.
     """
-    after = {r.champion_id: r for r in following}
-    paired = [(r, after[r.champion_id]) for r in current if r.champion_id in after]
-    if not paired:
+    paired = _pairs(current, following)
+    control = _baseline(paired)
+    if control is None:
         return ()
-
-    control = [b.win_rate - a.win_rate for a, b in paired if not a.adjusted_next]
-    if not control:
-        return ()
-    baseline = sum(control) / len(control)
-
     return tuple(
-        Outcome(
-            patch=a.patch,
-            champion=a.champion,
-            direction=a.direction_next,
-            source=a.direction_source or "",
-            before=a.win_rate,
-            after=b.win_rate,
-            baseline_shift=baseline,
-            pro_before=a.pro_presence,
-            pro_after=b.pro_presence,
-        )
-        for a, b in paired
-        if a.direction_next in _INTENDED
+        _outcome(a, b, control[0]) for a, b in paired if a.direction_next in _INTENDED
+    )
+
+
+@dataclass(frozen=True)
+class Change:
+    """한 챔피언의 한 조정 **전후** — Q&A 도구(`effect_of`)가 그대로 보인다.
+
+    `outcomes` 와 같은 대조군 · 같은 식이다(계산은 한 곳). 다른 점은 둘이다.
+
+    - 승률만이 아니라 **픽률 · 밴율 · 판수**를 같이 둔다(`before` · `after` 행).
+      표본 수 없이 변화만 보이면 잡음을 효과로 읽는다
+    - 방향이 갈린 조정(`mixed` · `adjust`)도 잰다. 그때는 「의도대로」를 말할 수
+      없으므로 `outcome` 이 `None` 이다
+    """
+
+    before: PanelRow
+    after: PanelRow
+    baseline_shift: float
+    controls: int
+    outcome: Outcome | None
+
+    @property
+    def raw_shift(self) -> float:
+        """승률이 실제로 얼마나 움직였나."""
+        return self.after.win_rate - self.before.win_rate
+
+    @property
+    def adjusted_shift(self) -> float:
+        """대조군의 공통 변화를 뺀 뒤의 움직임 — `Outcome.adjusted_shift` 와 같은 식."""
+        return self.raw_shift - self.baseline_shift
+
+
+def change_of(
+    champion_id: int, current: Sequence[PanelRow], following: Sequence[PanelRow]
+) -> Change | None:
+    """한 챔피언의 조정 전후. **잴 수 없으면 `None`** — 지어내지 않는다.
+
+    `current` 는 조정 직전 패치, `following` 은 조정이 적용된 패치다. 그 챔피언이
+    양쪽에 다 있어야 하고 대조군이 있어야 한다.
+    """
+    paired = _pairs(current, following)
+    control = _baseline(paired)
+    mine = next((p for p in paired if p[0].champion_id == champion_id), None)
+    if control is None or mine is None:
+        return None
+    a, b = mine
+    return Change(
+        before=a,
+        after=b,
+        baseline_shift=control[0],
+        controls=control[1],
+        outcome=_outcome(a, b, control[0]) if a.direction_next in _INTENDED else None,
     )
 
 
