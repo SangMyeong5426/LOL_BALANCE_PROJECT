@@ -33,16 +33,25 @@ from langchain_core.tools import BaseTool, tool
 
 from lol_balance.agent.data import Corpus
 from lol_balance.baseline import direction_rows
-from lol_balance.explain import outcome
-from lol_balance.panel import PanelRow, next_patch, patch_index
+from lol_balance.effect import change_of
+from lol_balance.explain import THIN_MATCHES, outcome
+from lol_balance.panel import PanelRow, next_patch, patch_index, previous_patch
 from lol_balance.retrieval import CaseSearch, NoteSearch, StatLookup
 
 # 한 번에 너무 많이 주면 모델이 표를 못 읽는다. `reasons` 와 B5 가 25 를 쓴다.
 MAX_CASES = 25
 
+# 조정이 어느 쪽으로 가려던 것인가 — `effect_of` 가 「의도한 방향」을 풀어 적는다
+INTENT = {"nerf": "승률을 내리려는 조정", "buff": "승률을 올리려는 조정"}
+
 
 def _pct(value: float | None) -> str:
     return "  —  " if value is None else f"{value:5.1%}"
+
+
+def _pp(value: float | None) -> str:
+    """변화량. **%p 로 적는다** — 승률 52% 가 50% 가 된 것은 −2%p 이지 −2% 가 아니다."""
+    return "—" if value is None else f"{value * 100:+.1f}%p"
 
 
 def _outcome(row: PanelRow) -> str:
@@ -66,6 +75,7 @@ def make_tools(
     stat_as_of: str | None = None,
     fixed_cases: int | None = None,
     base_notes: bool = False,
+    effects: bool = False,
 ) -> list[BaseTool]:
     """`as_of` 이전만 보는 도구. **경계는 여기서 한 번 박히고 끝이다.**
 
@@ -77,6 +87,8 @@ def make_tools(
     fixed_cases  주면 R1 은 **조정된 사례 이 수만큼으로 고정**된다(B5 는 25)
     base_notes   R2 가 **기준 패치의 노트**까지 본다. 화면이 켠다 — 그 패치에 무엇이
                  바뀌었는지는 이미 공개됐다. 평가는 끈 채 둔다(기록을 재현한다)
+    effects      조정 전후 도구(`effect_of`)를 쥐여 줄지. 화면의 Q&A 가 켠다. 평가는
+                 끈 채 두고, **익명 조건에서는 켜도 안 준다** — 패치 이름이 드러난다
 
     ## R3 의 경계를 따로 두는 이유
 
@@ -270,9 +282,112 @@ def make_tools(
                 out.extend(f"      {line}" for line in block.lines[:6])
         return "\n".join(out)
 
+    @tool
+    def effect_of(champion: str, patch: str) -> str:
+        """조정 전후 비교. 이 챔피언이 patch 에서 조정됐을 때 그 직전 패치와 견줘
+        승률 · 픽률 · 밴율 · 판수가 어떻게 달라졌는지, 그리고 같은 패치에서 조정되지
+        않은 챔피언들(대조군)의 평균 변화를 뺀 효과를 준다.
+        patch 는 조정이 **적용된** 패치다 (예: "16_10").
+        「이 챔피언 너프 후에 뭐가 바뀌었나」를 볼 때 쓴다. 숫자는 여기 나온 것만 쓴다."""
+        row, label, fail = resolve(champion)
+        if row is None:
+            return fail
+        applied = patch.strip().replace(".", "_")
+        try:
+            where = patch_index(applied)
+        except KeyError:
+            return f"{applied or '(빈칸)'} 은 모르는 패치다. 예: 16_10"
+        # **기준 패치까지만 본다.** 기준 패치에 적용된 조정은 잰다 — 쓰는 것은 직전
+        # 패치의 라벨(이미 공개된 결과)과 기준 패치의 지표뿐이다. 기준 패치 행의
+        # 라벨(다음에 무슨 일이 일어나나)은 읽지 않는다.
+        if where > patch_index(as_of):
+            return f"{applied}: 경계 밖 — {as_of} 뒤의 자료는 보지 않는다"
+        prior = previous_patch(applied)
+        current = tuple(r for r in corpus.rows if r.patch == prior) if prior else ()
+        following = tuple(r for r in corpus.rows if r.patch == applied)
+        if not following:
+            return f"{applied} 지표가 없다 — 전후를 잴 수 없다"
+        if not current:
+            return f"직전 패치 {prior} 지표가 없다 — {applied} 의 전후를 잴 수 없다"
+        mine = next((r for r in current if r.champion_id == row.champion_id), None)
+        if mine is None:
+            return f"{label} 은 {prior} 에 지표가 없다 — 전후를 잴 수 없다"
+        if prior not in corpus.labeled:
+            return f"{applied} 패치 노트가 없어 {label} 이 조정됐는지 모른다"
+        if not mine.adjusted_next:
+            return (
+                f"{label} 은 {applied} 에 조정되지 않았다 — 조정 전후가 아니다. "
+                "지표의 흐름은 lookup_stats 로 본다"
+            )
+        if not any(r.champion_id == row.champion_id for r in following):
+            # 직접 집계는 판수가 적은 챔피언을 뺀다 — 16_16 은 51종뿐이다
+            why = (
+                " 직접 집계는 판수가 적은 챔피언을 뺀다"
+                if applied in corpus.direct
+                else ""
+            )
+            return f"{label} 은 {applied} 에 지표가 없다 — 전후를 잴 수 없다.{why}"
+        change = change_of(row.champion_id, current, following)
+        if change is None:
+            return f"{label} 의 {applied} 전후를 잴 수 없다 — 대조군(조정되지 않은 챔피언)이 없다"
+
+        a, b = change.before, change.after
+
+        def side(r: PanelRow) -> str:
+            return f"{r.patch} · 직접 집계" if r.patch in corpus.direct else r.patch
+
+        ban = (
+            None
+            if a.ban_rate is None or b.ban_rate is None
+            else b.ban_rate - a.ban_rate
+        )
+        lines = [
+            f"{label} — {applied} 에 적용된 조정의 전후 (경계: {as_of} 까지의 지표)",
+            f"조정: {_outcome(a)} ({a.patch} → {applied})",
+            f"        조정 전({side(a)})  조정 후({side(b)})  변화",
+            f"승률    {_pct(a.win_rate)}  {_pct(b.win_rate)}  {_pp(change.raw_shift)}",
+            f"픽률    {_pct(a.pick_rate)}  {_pct(b.pick_rate)}  {_pp(b.pick_rate - a.pick_rate)}",
+            f"밴율    {_pct(a.ban_rate)}  {_pct(b.ban_rate)}  {_pp(ban)}",
+            f"판수    {a.matches:,}  {b.matches:,}",
+            f"대조군 — 같은 패치에서 조정되지 않은 {change.controls}종의 평균 승률 변화 "
+            f"{_pp(change.baseline_shift)}",
+            f"효과 — 승률 변화에서 대조군 변화를 뺀 값 {_pp(change.adjusted_shift)}",
+        ]
+        if change.outcome is not None:
+            lines.append(
+                f"의도한 방향({INTENT[change.outcome.direction]})으로 움직였나: "
+                f"{'예' if change.outcome.worked else '아니오'} · "
+                f"승률이 50% 에 가까워졌나(균형 접근): "
+                f"{'예' if change.outcome.closer else '아니오'}"
+            )
+        else:
+            lines.append("방향이 갈린 조정이라 「의도한 방향」은 말할 수 없다")
+        if a.pro_presence is not None and b.pro_presence is not None:
+            lines.append(f"프로 픽·밴율 {a.pro_presence:.1%} → {b.pro_presence:.1%}")
+        thin = [r for r in (a, b) if r.matches < THIN_MATCHES]
+        if thin:
+            lines.append(
+                f"⚠ 표본이 얇다 — {' · '.join(f'{r.patch} {r.matches:,}판' for r in thin)}"
+                f"(기준 {THIN_MATCHES:,}판). 승률이 요동칠 수 있어 이 변화를 조정 "
+                "효과라고 단정하지 않는다"
+            )
+        if (a.patch in corpus.direct) != (b.patch in corpus.direct):
+            lines.append(
+                "⚠ 전후의 출처가 다르다 — 「직접 집계」는 우리가 서버 셋에서 모은 경기다. "
+                "픽률 · 밴율은 u.gg 와 0.5~1.3%p 어긋나므로 그 변화를 조정 효과로 읽지 "
+                "않는다(ADR 0012)."
+            )
+        lines.append(
+            "측정이지 판정이 아니다 — 같은 패치에 아이템 · 룬도 바뀐다. 전후 변화와 "
+            "표본 수로만 말한다."
+        )
+        return "\n".join(lines)
+
     tools: list[BaseTool] = [find_similar_cases]
     if stats:
         tools.insert(0, lookup_stats)
     if notes:
         tools.append(search_patch_notes)
+    if effects and not anon:
+        tools.append(effect_of)
     return tools

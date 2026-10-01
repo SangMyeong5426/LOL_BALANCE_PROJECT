@@ -98,3 +98,51 @@ def test_saved_history_reads_without_building_an_agent(setup: Setup) -> None:
     fu.ask(agent, thread, "읽히나?", corpus, ctx, "해설")
     assert fu.saved_history(fu.checkpointer(path), thread) == fu.history(agent, thread)
     assert fu.saved_history(fu.checkpointer(path), "없는:스레드") == []
+
+
+def test_followup_can_measure_an_adjustment(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """후속 질문 에이전트가 **조정 전후 도구**를 쥔다. 「이 챔피언 너프 후에 뭐가
+    바뀌었나」에 모델이 숫자를 지어내지 않고 도구가 계산한 값을 받는다
+    (extension 3절 1항). 모델만 가짜고 도구와 루프는 진짜다."""
+    ctx = build_context(tiny_corpus, "C3", "15_14")
+    row = next(
+        r
+        for r in tiny_corpus.rows
+        if r.patch == "15_12" and r.direction_next in ("nerf", "buff")
+    )
+    model = Scripted(
+        responses=[
+            AIMessage(
+                "",
+                tool_calls=[
+                    {
+                        "name": "effect_of",
+                        "args": {"champion": row.champion, "patch": "15_13"},
+                        "id": "call_1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage("도구가 준 전후를 봤다"),
+        ]
+    )
+    monkeypatch.setattr(fu, "chat_model", lambda *a, **k: model)
+    agent = fu.build_followup(
+        tiny_corpus, ctx, fu.checkpointer(tmp_path / "followup.sqlite")
+    )
+
+    answer, steps = fu.ask(
+        agent,
+        fu.thread_id("s1", ctx.at, ctx.champion),
+        "조정 후에 뭐가 바뀌었나?",
+        tiny_corpus,
+        ctx,
+        "해설",
+    )
+
+    assert answer == "도구가 준 전후를 봤다"
+    assert [s.tool for s in steps] == ["effect_of"]
+    assert "%p" in steps[0].output and "판수" in steps[0].output
+    assert "effect_of" in fu.SYSTEM
