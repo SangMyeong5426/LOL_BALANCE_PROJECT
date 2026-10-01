@@ -52,7 +52,8 @@ from lol_balance.agent.judge import (
 from lol_balance.agent.schema import Evidence, Explanation, Judgment, StrictJudgment
 from lol_balance.agent.tools import make_tools
 from lol_balance.arms import rank_candidates
-from lol_balance.panel import PanelRow, patch_index
+from lol_balance.effect import change_of
+from lol_balance.panel import PanelRow, patch_index, previous_patch
 from lol_balance.patchnotes import ChangeBlock
 from lol_balance.store import write_panel
 
@@ -304,6 +305,154 @@ def test_anonymous_tools_hide_the_target(tiny_corpus: Corpus) -> None:
     body = cases.replace("(경계: 15_13 이전 기록만)", "")
     assert "C3" not in body and not re.search(r"\b1[3-6]_\d{1,2}\b", body)
     assert "익명 조건" in tools["lookup_stats"].invoke({"champion": "C5"})
+
+
+# ── 조정 전후 도구 — 숫자는 도구가 계산한다 ─────────────────────────────
+
+
+def effect_tool(corpus: Corpus, at: str) -> Any:
+    return {t.name: t for t in make_tools(corpus, at, effects=True)}["effect_of"]
+
+
+def adjusted_into(corpus: Corpus, patch: str) -> PanelRow:
+    """`patch` 에서 너프 · 버프된 챔피언의 **직전 패치** 행."""
+    before = previous_patch(patch)
+    return next(
+        r
+        for r in corpus.rows
+        if r.patch == before and r.direction_next in ("nerf", "buff")
+    )
+
+
+def test_effect_of_shows_before_and_after_with_sample_sizes(
+    tiny_corpus: Corpus,
+) -> None:
+    """**숫자는 도구가 계산한다**(extension 3절 1항). 조정 전후의 승률 · 픽률 · 밴율과
+    판수, 대조군을 뺀 효과가 `effect.change_of`(= `run-effect`)의 값 그대로 나온다."""
+    row = adjusted_into(tiny_corpus, "15_13")
+    change = change_of(
+        row.champion_id,
+        tuple(r for r in tiny_corpus.rows if r.patch == "15_12"),
+        tuple(r for r in tiny_corpus.rows if r.patch == "15_13"),
+    )
+    assert change is not None and change.outcome is not None
+
+    out = effect_tool(tiny_corpus, AT).invoke(
+        {"champion": row.champion, "patch": "15_13"}
+    )
+
+    assert "15_12" in out and "15_13" in out
+    for side in (change.before, change.after):
+        assert f"{side.win_rate:.1%}" in out and f"{side.pick_rate:.1%}" in out
+        assert f"{side.ban_rate:.1%}" in out and f"{side.matches:,}" in out
+    assert f"{change.raw_shift * 100:+.1f}%p" in out
+    assert f"{change.baseline_shift * 100:+.1f}%p" in out
+    assert f"{change.adjusted_shift * 100:+.1f}%p" in out
+    assert f"{change.controls}종" in out
+    # 측정이지 판정이 아니다 — 「먹혔다 · 안 먹혔다」로 단정하지 않는다(3절 8항)
+    assert "먹혔" not in out and "판정이 아니다" in out
+
+
+def test_effect_of_cannot_reach_past_the_boundary(tiny_corpus: Corpus) -> None:
+    """**기준 패치 뒤의 자료는 보지 않는다**(extension 3절 5항)."""
+    row = adjusted_into(tiny_corpus, "15_14")
+    out = effect_tool(tiny_corpus, "15_13").invoke(
+        {"champion": row.champion, "patch": "15_14"}
+    )
+    assert "경계 밖" in out and "%" not in out, out
+
+
+def test_effect_of_ignores_what_happens_after_the_base_patch(
+    tiny_corpus: Corpus,
+) -> None:
+    """기준 패치에 **적용된** 조정은 잰다 — 직전 패치의 라벨과 기준 패치의 지표만 쓴다.
+
+    기준 패치 행의 라벨(다음 패치에 무슨 일이 일어나나 = 정답)을 전부 뒤집어도 출력이
+    같아야 한다. 다르면 정답이 새는 것이다.
+    """
+    at = "15_14"
+    row = adjusted_into(tiny_corpus, at)
+    flipped = replace(
+        tiny_corpus,
+        rows=tuple(
+            replace(
+                r,
+                adjusted_next=not r.adjusted_next,
+                direction_next=None if r.adjusted_next else "nerf",
+            )
+            if r.patch == at
+            else r
+            for r in tiny_corpus.rows
+        ),
+    )
+    ask = {"champion": row.champion, "patch": at}
+
+    out = effect_tool(tiny_corpus, at).invoke(ask)
+
+    assert "%p" in out  # 실제로 잰 출력이다
+    assert effect_tool(flipped, at).invoke(ask) == out
+
+
+def test_effect_of_says_why_it_cannot_measure(tiny_corpus: Corpus) -> None:
+    """잴 수 없으면 **숫자를 지어내지 않고** 이유를 말한다."""
+    tool = effect_tool(tiny_corpus, AT)
+    quiet = next(
+        r for r in tiny_corpus.rows if r.patch == "15_12" and not r.adjusted_next
+    )
+    said = {
+        "조정되지 않았다": tool.invoke({"champion": quiet.champion, "patch": "15_13"}),
+        # 직전 패치(15_9)가 자료에 없다 — 작은 패널은 14_15 다음이 15_10 이다
+        "15_9": tool.invoke({"champion": "C3", "patch": "15_10"}),
+        "모르는 패치": tool.invoke({"champion": "C3", "patch": "99_1"}),
+        "없다": tool.invoke({"champion": "C99", "patch": "15_13"}),
+    }
+    for expected, out in said.items():
+        assert expected in out and "%" not in out, out
+
+    # 조정은 됐는데 **적용된 패치에 그 챔피언 지표가 없다** — 직접 집계는 판수가
+    # 적은 챔피언을 뺀다(16_16 은 51종뿐이다). 왜 못 재는지 말한다.
+    row = adjusted_into(tiny_corpus, "15_13")
+    sparse = replace(
+        tiny_corpus,
+        rows=tuple(
+            r
+            for r in tiny_corpus.rows
+            if not (r.patch == "15_13" and r.champion == row.champion)
+        ),
+        direct=frozenset({"15_13"}),
+    )
+    out = effect_tool(sparse, AT).invoke({"champion": row.champion, "patch": "15_13"})
+    assert "15_13 에 지표가 없다" in out and "직접 집계" in out and "%" not in out
+
+
+def test_effect_of_is_only_given_where_asked(tiny_corpus: Corpus) -> None:
+    """평가 도구 묶음은 그대로다 — 기록한 판단을 재현한다. **익명 조건에서는 켜도 안
+    준다** — 패치 이름이 대상의 정체를 드러낸다."""
+    assert "effect_of" not in {t.name for t in make_tools(tiny_corpus, AT)}
+    row = next(r for r in tiny_corpus.rows if r.patch == AT and r.champion == "C3")
+    anon = make_tools(tiny_corpus, "15_13", target=row, alias="abc123", effects=True)
+    assert "effect_of" not in {t.name for t in anon}
+
+
+def test_effect_of_marks_sources_and_thin_samples(tiny_corpus: Corpus) -> None:
+    """출처가 섞이면 적고(ADR 0012), 표본이 얇으면 도구가 먼저 말한다 — 모델이 변화를
+    조정 효과로 단정하지 않게. 직접 집계는 챔피언당 수백 판이다(extension 3절 7항)."""
+    row = adjusted_into(tiny_corpus, "15_13")
+    ask = {"champion": row.champion, "patch": "15_13"}
+
+    plain = effect_tool(tiny_corpus, AT).invoke(ask)
+    assert "직접 집계" not in plain and "ADR 0012" not in plain
+    assert "표본이 얇다" in plain  # 작은 패널은 챔피언당 수천 판이다
+
+    mixed = replace(tiny_corpus, direct=frozenset({"15_13"}))
+    out = effect_tool(mixed, AT).invoke(ask)
+    assert "직접 집계" in out and "ADR 0012" in out
+
+    thick = replace(
+        tiny_corpus,
+        rows=tuple(replace(r, matches=50_000) for r in tiny_corpus.rows),
+    )
+    assert "표본이 얇다" not in effect_tool(thick, AT).invoke(ask)
 
 
 def test_fixed_cases_give_the_same_evidence_as_b5(tiny_corpus: Corpus) -> None:
