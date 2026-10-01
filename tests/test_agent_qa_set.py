@@ -292,25 +292,35 @@ def test_the_committed_set_is_fixed_and_in_the_training_range() -> None:
 SAVED = ROOT / "ground_truth" / "qa"
 # 지금 실린 지시(프롬프트 · 답 형식 · 도구 설명)로 받은 답
 SHIPPED = SAVED / "answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl"
-# (파일, ✅ · ⚪ · ⚠, 없는 숫자, 없는 노트 블록) — docs/agent.md 의 표와 같다
+# docs/agent.md 의 표와 같다 —
+# (파일, ✅ · ⚪ · ⚠, 없는 숫자, 없는 노트 블록, 주의를 뺀 답, 없었다고 한 답, 글로만 답한 것)
 MEASURED = [
-    ("answers-dev-v1-ollama-qwen3.5-9b.jsonl", (13, 9, 5), 0, 1),
-    ("answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl", (15, 8, 4), 0, 3),
-    ("answers-dev-v1-ollama-qwen3.5-9b-r3.jsonl", (12, 9, 6), 0, 2),
-    ("answers-dev-v2-ollama-qwen3.5-9b.jsonl", (8, 9, 10), 2, 5),
+    ("answers-dev-v1-ollama-qwen3.5-9b.jsonl", (13, 9, 5), 0, 1, 3, 1, 6),
+    ("answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl", (15, 8, 4), 0, 3, 3, 0, 6),
+    ("answers-dev-v1-ollama-qwen3.5-9b-r3.jsonl", (12, 9, 6), 0, 2, 2, 2, 6),
+    ("answers-dev-v2-ollama-qwen3.5-9b.jsonl", (8, 9, 10), 2, 5, 3, 3, 8),
+    ("answers-dev-v3-ollama-qwen3.5-9b.jsonl", (16, 8, 3), 0, 2, 1, 1, 5),
 ]
 
 
-@pytest.mark.parametrize(("name", "marks", "missing", "absent"), MEASURED)
+@pytest.mark.parametrize(
+    ("name", "marks", "missing", "absent", "dropped", "denied", "plain"), MEASURED
+)
 def test_the_committed_answers_score_as_the_docs_say(
-    name: str, marks: tuple[int, int, int], missing: int, absent: int
+    name: str,
+    marks: tuple[int, int, int],
+    missing: int,
+    absent: int,
+    dropped: int,
+    denied: int,
+    plain: int,
 ) -> None:
     """**문서에 적은 수치는 커밋된 답을 다시 대조한 값이다.** 대조 규칙을 고치면 여기가
     깨진다 — 그때 문서의 표(`docs/agent.md` · `ground_truth/qa/README.md`)를 같이 고친다.
 
     고칠 때 본 질문(`dev-v1`)에서는 세 벌 모두 **도구에 없는 숫자가 0개**다. 처음 보는
-    질문(`dev-v2`)에서는 2개가 나왔다 — 본 질문의 수치는 좋게 나온다. 없는 노트 블록은 어느
-    쪽에서도 0 이 아니다. **완료 기준은 아직 안 찼다.**"""
+    질문에서는 `dev-v2` 2개 · `dev-v3` 0개다 — 본 질문의 수치는 좋게 나온다. 없는 노트
+    블록은 어느 쪽에서도 0 이 아니다. **완료 기준은 아직 안 찼다.**"""
     records = qa_set.read(SAVED / name)
     asked = SAVED / f"questions-{name.split('-')[1]}-{name.split('-')[2]}.jsonl"
     questions = [json.loads(x) for x in asked.read_text(encoding="utf-8").splitlines()]
@@ -322,6 +332,9 @@ def test_the_committed_answers_score_as_the_docs_say(
     assert tuple(total["marks"][m] for m in ("✅", "⚪", "⚠")) == marks
     assert total["missing_numbers"] == missing
     assert total["absent_notes"] == absent
+    assert total["answers_that_dropped_a_caution"] == dropped
+    assert total["answers_that_denied_the_unseen"] == denied
+    assert total["unstructured"] == plain
     assert total["usd"] == 0.0  # 로컬 모델로만 쟀다
 
 
