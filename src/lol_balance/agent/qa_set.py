@@ -295,7 +295,10 @@ def report(total: dict[str, Any]) -> list[str]:
         f"도구 결과에 없는 숫자 {total['missing_numbers']}개"
         f"(답 {total['answers_with_missing_numbers']}건)"
     )
-    plain = f"형식 — 구조화된 답이 없는 것 {total['unstructured']}건"
+    plain = (
+        f"Answer 를 부르지 않고 글로만 답한 것 {total['unstructured']}건"
+        "(숫자는 글에서 확인한다)"
+    )
     if total["cited_by"] == "모델":
         # 옛 형식 — 모델이 인용을 적던 때의 기록이다
         numbers += (

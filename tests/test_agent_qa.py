@@ -1,9 +1,11 @@
 """후속 질문의 답을 **코드가 대조한다** — extension 3절 3항.
 
-    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했거나,
-       도구가 낸 주의를 뺐거나, 볼 수 없는 것을 없었다고 말했다
-    ⚪  대조할 수 없다 — 숫자도 인용도 없거나 형식이 맞지 않는다
+    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 낸 주의를 뺐거나, 볼 수 없는 것을 없었다고
+       말했다
+    ⚪  대조할 것이 없다 — 답에 숫자가 없다
     ✅  대조를 통과했다. 실제로 확인한 것만 말한다
+
+노트 블록은 코드가 붙인다(ADR 0017). 모델이 인용을 적던 때의 기록은 그때의 규칙으로 본다.
 
 모델을 부르지 않는다. 도구 출력과 답을 글로 주고 대조만 본다.
 """
@@ -298,31 +300,45 @@ def test_a_tool_line_in_the_citation_field_is_not_a_made_up_block() -> None:
     assert ask(Answer(answer="x"), cited=[Cited(patch="14_7", section="조정")]) == "⚠"
 
 
-# ── 대조할 수 없다 ──────────────────────────────────────────────────────
+# ── 대조할 것이 없다 ────────────────────────────────────────────────────
 
 
 def test_nothing_to_check_is_not_a_pass() -> None:
-    """숫자도 인용도 없으면 **통과가 아니라 「대조할 수 없다」다** — 확인한 것이 없다."""
+    """숫자가 없으면 **통과가 아니라 「대조할 것이 없다」다** — 확인한 것이 없다."""
     got = check(
         Answer(answer="자료가 없어 알 수 없다."), STEPS, context="", questions=["?"]
     )
     assert got.mark == "⚪" and "대조할 것이 없다" in got.line()
 
 
-def test_a_missing_structured_answer_cannot_be_checked() -> None:
+def test_an_empty_answer_has_nothing_to_check() -> None:
     got = check(None, STEPS, context="", questions=["?"])
-    assert got.mark == "⚪" and "형식" in got.line()
+    assert got.mark == "⚪" and "숫자가 없다" in got.line()
 
 
-def test_a_number_field_without_a_number_cannot_be_checked() -> None:
-    """숫자 칸에 숫자가 아닌 것을 적었다 — 형식이 맞지 않는다."""
-    got = check(
+def test_what_was_verified_decides_the_mark_not_the_form() -> None:
+    """**표시는 확인한 것을 따른다 — 칸을 어떻게 채웠는지를 따르지 않는다.** 숫자 칸에 숫자가
+    아닌 것(패치 이름 · 스킬 이름)을 적어도 그것만으로 표시가 바뀌지 않는다. 인용 칸을 빼자
+    로컬 모델이 그 자리에 `15_4` · `Leverage` 를 적었다 — 확인한 숫자가 없으면 ⚪ 고, 있으면
+    ✅ 다."""
+    only_words = check(
         Answer(answer="올랐다.", numbers=["많이 올랐다"]),
         STEPS,
         context="",
         questions=["?"],
     )
-    assert got.mark == "⚪"
+    assert only_words.mark == "⚪" and "숫자가 없다" in only_words.line()
+    mixed = check(
+        Answer(
+            answer="승률은 49.4% 다.", numbers=["49.4%", "14_7", "Piercing Darkness"]
+        ),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert mixed.mark == "✅" and mixed.numbers == 1
+    made_up = Answer(answer="승률은 87.6% 다.", numbers=["87.6%", "Leverage"])
+    assert ask(made_up) == "⚠"
 
 
 # ── 도구가 낸 주의 — 답이 옮겨야 한다 ────────────────────────────────────
@@ -393,8 +409,8 @@ def test_only_this_questions_tools_set_what_must_be_said() -> None:
 
 def test_a_plain_text_answer_is_still_scanned() -> None:
     """구조화된 답이 없어도 **글은 훑는다.** 도구 결과에 없는 숫자나 빠뜨린 주의가 있으면
-    ⚪ 가 아니라 ⚠ 다 — 로컬 모델이 칸을 안 채우고 글로만 「조정되지 않았으며」라고
-    답했는데 ⚪ 로 지나갔다(2026-10-01). 문제를 못 찾았을 때만 「대조할 수 없다」다."""
+    ⚠ 다 — 로컬 모델이 칸을 안 채우고 글로만 「조정되지 않았으며」라고 답했는데 ⚪ 로
+    지나갔다(2026-10-01)."""
     beyond = [Step("search_patch_notes", {}, BEYOND)]
     wrong = check(
         None,
@@ -411,14 +427,29 @@ def test_a_plain_text_answer_is_still_scanned() -> None:
     )
     assert made_up.mark == "⚠" and "87.6%" in made_up.line()
 
+
+def test_a_plain_text_answer_with_verified_numbers_passes() -> None:
+    """**글로만 답해도 숫자를 확인했으면 ✅ 다**(주인 승인 2026-10-01 · ADR 0017 덧붙임).
+
+    한때는 칸에 넣지 않은 답을 「형식이 맞지 않는다」며 ⚪ 로 뒀다. 그런데 코드는 글의 숫자를
+    이미 맞춰 본다 — 확인하고도 「대조할 수 없다」고 적는 셈이었다. 인용 칸을 빼자 로컬
+    모델이 글로만 답한 것이 27건 중 6 → 16건으로 늘었고(Ollama 는 `tool_choice` 를 무시해
+    칸을 강제할 수 없다), 숫자가 전부 맞는데 ✅ 가 15 → 5개로 줄었다. 표시는 **확인한
+    것**을 따른다 — 칸에 넣었는지를 따르지 않는다."""
     fine = check(
         None, STEPS, context="", questions=["?"], text="승률이 49.4% 로 올랐다."
     )
-    assert fine.mark == "⚪" and "형식" in fine.line()
-    # 글은 훑었다 — **확인한 것은 말한다.** 「대조할 수 없다」만 적으면 훑은 것까지 숨긴다
-    assert fine.numbers == 1 and "숫자 1개는 도구 결과에 있다" in fine.line()
+    assert fine.mark == "✅" and fine.numbers == 1
+    assert "숫자 1개가 도구 결과에 있다" in fine.line()
+    # 숫자가 없으면 확인한 것이 없다 — 칸에 넣었을 때와 같다
     bare = check(None, STEPS, context="", questions=["?"], text="자료가 없습니다.")
-    assert bare.mark == "⚪" and "도구 결과에 있다" not in bare.line()
+    assert bare.mark == "⚪" and "숫자가 없다" in bare.line()
+    # 글로 답해도 주의를 빼면 ⚠ 다
+    thin = [Step("effect_of", {}, THIN)]
+    dropped = check(
+        None, thin, context="", questions=["?"], asked=thin, text="효과는 +3.4%p 다."
+    )
+    assert dropped.mark == "⚠" and "표본이 얇다" in dropped.line()
 
 
 def test_a_thin_sample_only_matters_when_numbers_are_used() -> None:
