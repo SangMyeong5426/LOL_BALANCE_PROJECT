@@ -1,0 +1,190 @@
+"""후속 질문의 답을 **코드가 대조한다** — extension 3절 3항.
+
+    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했다
+    ⚪  대조할 수 없다 — 숫자도 인용도 없거나 형식이 맞지 않는다
+    ✅  대조를 통과했다. 실제로 확인한 것만 말한다
+
+모델을 부르지 않는다. 도구 출력과 답을 글로 주고 대조만 본다.
+"""
+
+from __future__ import annotations
+
+from lol_balance.agent.judge import Step
+from lol_balance.agent.qa import blocks_in, check, numbers_in
+from lol_balance.agent.schema import Answer, Cited
+
+EFFECT = """Senna — 14_7 에 적용된 조정의 전후 (경계: 16_19 까지의 지표)
+조정: 버프 (14_6 → 14_7)
+        조정 전(14_6)  조정 후(14_7)  변화
+승률    45.9%  49.4%  +3.6%p
+픽률    11.7%   7.2%  -4.4%p
+밴율    22.4%   8.5%  -13.9%p
+판수    3,183  36,293
+대조군 — 같은 패치에서 조정되지 않은 130종의 평균 승률 변화 +0.2%p
+효과 — 승률 변화에서 대조군 변화를 뺀 값 +3.4%p"""
+
+NOTES = """Senna 패치 노트 (경계: 16_19 노트까지)
+  [14_7] Q - Piercing Darkness
+      Heal increased to 40 from 30
+  [14_6] Stats
+      Base health reduced to 530 from 560"""
+
+STEPS = [
+    Step("effect_of", {"champion": "Senna", "patch": "14_7"}, EFFECT),
+    Step("search_patch_notes", {"champion": "Senna"}, NOTES),
+]
+
+
+def ask(answer: Answer | None, question: str = "14_7 버프 뒤에 뭐가 바뀌었어?") -> str:
+    return check(answer, STEPS, context="", questions=[question]).mark
+
+
+# ── 숫자 ───────────────────────────────────────────────────────────────
+
+
+def test_numbers_copied_from_the_tools_pass() -> None:
+    """도구가 준 숫자를 그대로 쓰면 통과한다 — **무엇을 확인했는지 센다.**"""
+    got = check(
+        Answer(
+            answer="승률이 45.9% 에서 49.4% 로 올랐고(+3.6%p) 효과는 +3.4%p 다. 조정 전 판수는 3,183판이다.",
+            numbers=["45.9%", "49.4%", "+3.6%p", "+3.4%p", "3,183"],
+        ),
+        STEPS,
+        context="",
+        questions=["14_7 버프 뒤에 뭐가 바뀌었어?"],
+    )
+    assert got.mark == "✅" and got.problems == ()
+    assert got.numbers == 5 and got.notes == 0
+    assert "숫자 5개" in got.line()
+
+
+def test_a_number_the_tools_never_gave_is_flagged() -> None:
+    """**도구 결과에 없는 숫자** — 모델이 지어냈거나 스스로 계산한 것이다."""
+    got = check(
+        Answer(answer="효과는 +3.9%p 다.", numbers=["+3.9%p"]),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert got.mark == "⚠" and "+3.9%p" in got.problems[0]
+
+
+def test_numbers_in_the_prose_are_checked_even_if_not_declared() -> None:
+    """숫자 칸을 비워 두고 글에만 숫자를 써도 잡는다 — 칸만 보면 빠져나간다."""
+    assert ask(Answer(answer="승률이 51.2% 로 올랐다.")) == "⚠"
+    assert ask(Answer(answer="승률이 49.4% 로 올랐다.")) == "✅"
+
+
+def test_a_flipped_sign_is_not_the_same_number() -> None:
+    """부호가 뒤집히면 다른 숫자다 — 오른 것을 내렸다고 쓰면 방향이 반대다."""
+    assert ask(Answer(answer="픽률 변화", numbers=["-4.4%p"])) == "✅"
+    assert ask(Answer(answer="픽률 변화", numbers=["+4.4%p"])) == "⚠"
+    assert (
+        ask(Answer(answer="픽률 변화", numbers=["4.4%p"])) == "✅"
+    )  # 부호를 안 적었다
+    assert ask(Answer(answer="픽률 변화", numbers=["−4.4%p"])) == "✅"  # 유니코드 빼기
+
+
+def test_percent_and_percent_point_are_different_units() -> None:
+    """`%` 와 `%p` 는 다른 것이다 — 52% 가 50% 가 된 것은 −2%p 이지 −2% 가 아니다."""
+    assert ask(Answer(answer="x", numbers=["3.6%p"])) == "✅"
+    assert ask(Answer(answer="x", numbers=["3.6%"])) == "⚠"
+    assert ask(Answer(answer="x", numbers=["49.4%p"])) == "⚠"
+
+
+def test_part_of_a_number_is_not_that_number() -> None:
+    """`49.4%` 가 있다고 `9.4%` 가 있는 것은 아니다."""
+    assert ask(Answer(answer="x", numbers=["9.4%"])) == "⚠"
+    assert ask(Answer(answer="x", numbers=["183"])) == "⚠"
+    assert (
+        ask(Answer(answer="x", numbers=["3183판"])) == "✅"
+    )  # 쉼표 · 단위는 달라도 된다
+
+
+def test_patch_names_and_small_counts_are_not_measurements() -> None:
+    """패치 이름과 한두 자리 개수는 재지 않는다 — 측정값이 아니다.
+
+    `14.7` 은 패치 `14_7` 을 점으로 쓴 것이고, 「두 가지」를 `2` 로 쓴 것까지 잡으면
+    경고가 흔해져 아무도 안 본다. 단위가 붙었거나 소수거나 세 자리 이상이면 잰다.
+    """
+    assert [n.core for n in numbers_in("14_7 패치에서 R3 로 봤다. 16_19 까지.")] == []
+    fine = Answer(answer="14.7 패치에서 2가지가 바뀌었다. 승률은 49.4% 다.")
+    assert ask(fine) == "✅"
+    assert ask(Answer(answer="12.5 만큼 올랐다.")) == "⚠"  # 패치가 아닌 소수
+
+
+def test_numbers_from_the_question_and_the_context_are_allowed() -> None:
+    """사람이 물은 숫자와 **코드가 만든 맥락**(기준 패치 지표 · 통계 모델 점수)은 쓸 수
+    있다. 모델이 쓴 앞선 답은 출처가 아니다."""
+    answer = Answer(answer="물으신 55% 는 넘지 않는다. 기준 패치 승률은 52.6% 다.")
+    got = check(
+        answer, STEPS, context="승률 52.6% (173종 중 1위)", questions=["55% 넘어?"]
+    )
+    assert got.mark == "✅"
+    assert check(answer, STEPS, context="", questions=["넘어?"]).mark == "⚠"
+
+
+# ── 노트 블록 ───────────────────────────────────────────────────────────
+
+
+def test_blocks_are_read_from_the_note_tool_output() -> None:
+    assert blocks_in(STEPS) == {
+        ("14_7", "q-piercingdarkness"),
+        ("14_6", "stats"),
+    }
+
+
+def test_citing_a_block_the_tool_returned_passes() -> None:
+    got = check(
+        Answer(
+            answer="14_7 에 Q 의 회복량을 올렸다.",
+            notes=[Cited(patch="14.7", section="Q - Piercing Darkness")],
+        ),
+        STEPS,
+        context="",
+        questions=["뭘 바꿨어?"],
+    )
+    assert got.mark == "✅" and got.notes == 1 and "노트 블록 1개" in got.line()
+
+
+def test_citing_a_block_no_tool_returned_is_flagged() -> None:
+    """**없는 노트 블록** — 지어낸 절이거나, 도구로 확인하지 않고 인용한 것이다."""
+    got = check(
+        Answer(
+            answer="W 를 바꿨다.",
+            notes=[Cited(patch="14_7", section="W - Last Embrace")],
+        ),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert got.mark == "⚠" and "W - Last Embrace" in got.problems[0]
+    wrong_patch = Answer(answer="x", notes=[Cited(patch="14_8", section="Stats")])
+    assert ask(wrong_patch) == "⚠"
+
+
+# ── 대조할 수 없다 ──────────────────────────────────────────────────────
+
+
+def test_nothing_to_check_is_not_a_pass() -> None:
+    """숫자도 인용도 없으면 **통과가 아니라 「대조할 수 없다」다** — 확인한 것이 없다."""
+    got = check(
+        Answer(answer="자료가 없어 알 수 없다."), STEPS, context="", questions=["?"]
+    )
+    assert got.mark == "⚪" and "대조할 것이 없다" in got.line()
+
+
+def test_a_missing_structured_answer_cannot_be_checked() -> None:
+    got = check(None, STEPS, context="", questions=["?"])
+    assert got.mark == "⚪" and "형식" in got.line()
+
+
+def test_a_number_field_without_a_number_cannot_be_checked() -> None:
+    """숫자 칸에 숫자가 아닌 것을 적었다 — 형식이 맞지 않는다."""
+    got = check(
+        Answer(answer="올랐다.", numbers=["많이 올랐다"]),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert got.mark == "⚪"
