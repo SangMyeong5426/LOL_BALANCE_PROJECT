@@ -76,6 +76,7 @@ def make_tools(
     fixed_cases: int | None = None,
     base_notes: bool = False,
     effects: bool = False,
+    cautions: bool = False,
 ) -> list[BaseTool]:
     """`as_of` 이전만 보는 도구. **경계는 여기서 한 번 박히고 끝이다.**
 
@@ -89,6 +90,8 @@ def make_tools(
                  바뀌었는지는 이미 공개됐다. 평가는 끈 채 둔다(기록을 재현한다)
     effects      조정 전후 도구(`effect_of`)를 쥐여 줄지. 화면의 Q&A 가 켠다. 평가는
                  끈 채 두고, **익명 조건에서는 켜도 안 준다** — 패치 이름이 드러난다
+    cautions     R3 표에 **표본이 얇다**는 주의를 붙일지. 화면의 Q&A 가 켠다 — 답이 그
+                 주의를 옮겼는지 코드가 본다(`qa.check`). 평가는 끈 채 둔다
 
     ## R3 의 경계를 따로 두는 이유
 
@@ -163,6 +166,14 @@ def make_tools(
             lines.append(
                 f"{when:10}{_pct(r.win_rate)}  {_pct(r.pick_rate)}  "
                 f"{_pct(r.ban_rate)}  {r.matches:>9,}  → {_outcome(r)}{source}"
+            )
+        thin = [r for r in history if r.matches < THIN_MATCHES]
+        if cautions and not anon and thin:
+            least = min(thin, key=lambda r: r.matches)
+            lines.append(
+                f"⚠ 표본이 얇다 — 보인 {len(history)}개 패치 중 {len(thin)}개가 "
+                f"{THIN_MATCHES:,}판 미만이다(가장 적은 것 {least.patch} "
+                f"{least.matches:,}판). 승률이 요동칠 수 있어 흐름을 단정하지 않는다"
             )
         mixed = {r.patch in corpus.direct for r in history}
         if len(mixed) == 2:
