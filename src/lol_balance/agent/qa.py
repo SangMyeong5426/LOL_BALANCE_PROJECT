@@ -2,10 +2,21 @@
 
     ⚠  도구 결과에 없는 숫자를 썼거나, **도구가 낸 주의를 답에서 뺐거나, 볼 수 없는 것을
        없었다고 말했다**
-    ⚪  대조할 수 없다 — 답에 숫자가 없거나 형식이 맞지 않는다
+    ⚪  대조할 것이 없다 — 답에 숫자가 없다
     ✅  대조를 통과했다. **실제로 확인한 것만 말한다**
 
 모델에게 「맞게 썼나」를 묻지 않는다. 답에 나온 숫자를 도구 출력과 맞춰 본다.
+
+## 글로만 답해도 본다 — 표시는 확인한 것을 따른다
+
+모델이 `Answer` 를 부르지 않고 글로만 답해도 **글의 숫자를 맞춰 본다.** 확인했으면 ✅ 고,
+없는 숫자나 빠뜨린 주의가 있으면 ⚠ 다. **칸에 넣었는지도, 숫자 칸에 숫자가 아닌 것을 같이
+적었는지도 표시를 가르지 않는다** — ⚪ 는 확인한 숫자가 하나도 없을 때뿐이다.
+
+한때는 칸에 넣지 않은 답을 「형식이 맞지 않는다」며 ⚪ 로 뒀다 — 확인하고도 「대조할 수
+없다」고 적는 셈이었다. 로컬 모델은 칸을 강제할 수 없다(Ollama 가 `tool_choice` 를 무시한다).
+인용 칸을 빼자 글로만 답한 것이 27건 중 6 → 16건으로 늘었고, 숫자가 전부 맞는데 ✅ 가
+15 → 5개로 줄었다. 그래서 고쳤다(주인 승인 2026-10-01, ADR 0017 덧붙임).
 
 ## 노트 블록은 코드가 붙인다 (ADR 0017)
 
@@ -286,15 +297,15 @@ def _denied(prose: str, beyond: set[str], known: set[str]) -> list[str]:
 class Check:
     """대조 결과. `numbers` 는 **실제로 확인한 개수**다.
 
-    형식이 어긋나 ⚪ 인 것도 `numbers` 는 채운다 — 거기까지는 확인했다. `notes` · `absent` ·
-    `misfiled` 는 **옛 형식의 기록**(모델이 인용을 적던 때)을 다시 채점할 때만 찬다.
+    `notes` · `absent` · `misfiled` 는 **옛 형식의 기록**(모델이 인용을 적던 때)을 다시 채점할
+    때만 찬다.
     """
 
     mark: Mark
     problems: tuple[str, ...] = ()
     numbers: int = 0
     notes: int = 0
-    why: str = ""  # ⚪ 일 때 — 왜 대조할 수 없나
+    why: str = ""  # ⚪ 일 때 — 왜 대조할 것이 없나
     # ⚠ 의 내용을 종류별로 — 고정 질문 세트를 셀 때 쓴다
     missing: tuple[str, ...] = ()  # 도구 결과에 없는 숫자
     absent: tuple[str, ...] = ()  # 도구가 준 적 없는 노트 블록
@@ -308,11 +319,7 @@ class Check:
         if self.mark == "⚠":
             return "⚠ 코드 대조 — " + " · ".join(self.problems)
         if self.mark == "⚪":
-            # 형식이 어긋나도 숫자는 맞춰 봤다 — 확인한 것은 말한다
-            found = (
-                f" (숫자 {self.numbers}개는 도구 결과에 있다)" if self.numbers else ""
-            )
-            return f"⚪ 대조할 수 없다 — {self.why}{found}"
+            return f"⚪ 대조할 것이 없다 — {self.why}"
         seen = [f"숫자 {self.numbers}개가 도구 결과에 있다"] if self.numbers else []
         if self.notes:
             seen.append(f"인용한 노트 블록 {self.notes}개를 도구가 실제로 줬다")
@@ -337,7 +344,7 @@ def check(
     asked      **이번 질문에서** 부른 도구. 답이 옮겨야 할 주의는 여기서만 본다 —
                앞 질문의 주의를 뒤 질문의 답에 요구하지 않는다. 안 주면 `steps` 전부
     text       구조화된 답이 없을 때(`answer` 가 None) 모델이 글로 쓴 답. **글도
-               훑는다** — 없는 숫자나 빠뜨린 주의가 있으면 ⚪ 가 아니라 ⚠ 다
+               똑같이 본다** — 숫자를 확인했으면 ✅, 없는 숫자나 빠뜨린 주의가 있으면 ⚠ 다
     cited      **옛 형식의 기록에서만** — 모델이 적은 노트 인용. 도구가 준 블록인지 본다.
                지금은 모델이 인용을 적지 않아 화면은 이것을 넘기지 않는다(ADR 0017)
     """
@@ -352,9 +359,8 @@ def check(
         # `14.7` 은 패치 `14_7` 을 점으로 쓴 것이다 — 측정값이 아니다
         return not n.unit and not n.sign and n.core in patches
 
-    declared = [numbers_in(entry) for entry in fields]
-    malformed = [e for e, found in zip(fields, declared, strict=True) if not found]
-    used = [n for found in declared for n in found]
+    # 숫자 칸에 숫자가 아닌 것(패치 이름 · 스킬 이름)을 적은 것은 그냥 지나간다
+    used = [n for entry in fields for n in numbers_in(entry)]
     used += [n for n in numbers_in(prose) if n.measured]
     # 균형선과 패치 이름은 잰 값이 아니다 — 출처를 묻지 않고, 확인한 숫자로 세지도 않는다
     used = [n for n in used if not n.balance and not patch_name(n)]
@@ -414,21 +420,6 @@ def check(
             denied=tuple(denied),
         )
     verified = len(pointed) - len(unknown)
-    if answer is None:
-        return Check(
-            "⚪", why="형식이 맞지 않는다 — 구조화된 답이 없다", numbers=len(checked)
-        )
-    if malformed:
-        return Check(
-            "⚪",
-            why="형식이 맞지 않는다 — 숫자 칸에 숫자가 아닌 것: "
-            + ", ".join(malformed),
-            numbers=len(checked),
-            notes=verified,
-            misfiled=tuple(misfiled),
-        )
     if not checked and not verified:
-        return Check(
-            "⚪", why="대조할 것이 없다 — 답에 숫자가 없다", misfiled=tuple(misfiled)
-        )
+        return Check("⚪", why="답에 숫자가 없다", misfiled=tuple(misfiled))
     return Check("✅", numbers=len(checked), notes=verified, misfiled=tuple(misfiled))

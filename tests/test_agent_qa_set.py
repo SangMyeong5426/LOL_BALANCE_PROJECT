@@ -328,13 +328,15 @@ SHIPPED = SAVED / "answers-dev-v1-ollama-qwen3.5-9b-r4.jsonl"
 # docs/agent.md 의 표와 같다 —
 # (파일, ✅ · ⚪ · ⚠, 없는 숫자, 없는 노트 블록, 주의를 뺀 답, 없었다고 한 답, 글로만 답한 것)
 MEASURED = [
-    ("answers-dev-v1-ollama-qwen3.5-9b.jsonl", (13, 9, 5), 0, 1, 3, 1, 6),
-    ("answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl", (15, 8, 4), 0, 3, 3, 0, 6),
-    ("answers-dev-v1-ollama-qwen3.5-9b-r3.jsonl", (12, 9, 6), 0, 2, 2, 2, 6),
-    ("answers-dev-v2-ollama-qwen3.5-9b.jsonl", (8, 9, 10), 2, 5, 3, 3, 8),
-    ("answers-dev-v3-ollama-qwen3.5-9b.jsonl", (16, 8, 3), 0, 2, 1, 1, 5),
+    # ── 모델이 노트 인용을 적던 때 — 그 인용도 그때의 규칙으로 본다 ──
+    ("answers-dev-v1-ollama-qwen3.5-9b.jsonl", (19, 3, 5), 0, 1, 3, 1, 6),
+    ("answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl", (19, 4, 4), 0, 3, 3, 0, 6),
+    ("answers-dev-v1-ollama-qwen3.5-9b-r3.jsonl", (18, 3, 6), 0, 2, 2, 2, 6),
+    ("answers-dev-v2-ollama-qwen3.5-9b.jsonl", (12, 5, 10), 2, 5, 3, 3, 8),
+    ("answers-dev-v3-ollama-qwen3.5-9b.jsonl", (20, 4, 3), 0, 2, 1, 1, 5),
     # ── 여기부터 노트 블록을 코드가 붙인다(ADR 0017) — 없는 블록은 나올 수 없다 ──
-    ("answers-dev-v1-ollama-qwen3.5-9b-r4.jsonl", (5, 19, 3), 0, 0, 2, 1, 16),
+    ("answers-dev-v1-ollama-qwen3.5-9b-r4.jsonl", (19, 5, 3), 0, 0, 2, 1, 16),
+    ("answers-dev-v4-ollama-qwen3.5-9b.jsonl", (19, 5, 3), 0, 0, 3, 0, 19),
 ]
 
 
@@ -353,9 +355,10 @@ def test_the_committed_answers_score_as_the_docs_say(
     """**문서에 적은 수치는 커밋된 답을 다시 대조한 값이다.** 대조 규칙을 고치면 여기가
     깨진다 — 그때 문서의 표(`docs/agent.md` · `ground_truth/qa/README.md`)를 같이 고친다.
 
-    고칠 때 본 질문(`dev-v1`)에서는 세 벌 모두 **도구에 없는 숫자가 0개**다. 처음 보는
-    질문에서는 `dev-v2` 2개 · `dev-v3` 0개다 — 본 질문의 수치는 좋게 나온다. 없는 노트
-    블록은 어느 쪽에서도 0 이 아니다. **완료 기준은 아직 안 찼다.**"""
+    **지금 실린 지시**(노트 블록은 코드가 붙인다)로는 고칠 때 본 질문(`dev-v1` r4)과 처음
+    보는 질문(`dev-v4`) 둘 다 도구에 없는 숫자 0개 · 없는 노트 블록 0개다 — 2단계의 완료
+    기준이다. 모델이 인용을 적던 때에는 없는 노트 블록이 한 번도 0 이 아니었고(1 · 3 · 2 ·
+    5 · 2), 처음 보는 질문 한 벌(`dev-v2`)에서는 없는 숫자도 2개 나왔다."""
     records = qa_set.read(SAVED / name)
     asked = SAVED / f"questions-{name.split('-')[1]}-{name.split('-')[2]}.jsonl"
     questions = [json.loads(x) for x in asked.read_text(encoding="utf-8").splitlines()]
