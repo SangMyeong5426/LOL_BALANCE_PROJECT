@@ -1,5 +1,6 @@
 """해설에 대해 더 묻기 — Checkpointer 가 대화를 잇고, 스레드끼리 섞이지 않고,
-파일 백엔드라 다시 열어도 남는지. 키도 모델도 원자료도 필요 없다.
+파일 백엔드라 다시 열어도 남는지. 그리고 **답이 코드 대조를 거치는지**
+(extension 3절 4항). 키도 모델도 원자료도 필요 없다.
 """
 
 from __future__ import annotations
@@ -53,9 +54,9 @@ def test_second_question_remembers_the_first(setup: Setup) -> None:
     thread = fu.thread_id("s1", ctx.at, ctx.champion)
     assert not fu.started(agent, thread)
 
-    a1, _ = fu.ask(agent, thread, "왜 너프 쪽이야?", corpus, ctx, "해설 본문")
-    a2, _ = fu.ask(agent, thread, "그럼 버프 신호는?", corpus, ctx, "해설 본문")
-    assert (a1, a2) == ("첫 답", "둘째 답")
+    a1 = fu.ask(agent, thread, "왜 너프 쪽이야?", corpus, ctx, "해설 본문")
+    a2 = fu.ask(agent, thread, "그럼 버프 신호는?", corpus, ctx, "해설 본문")
+    assert (a1.text, a2.text) == ("첫 답", "둘째 답")
 
     messages = agent.get_state({"configurable": {"thread_id": thread}}).values[
         "messages"
@@ -84,11 +85,11 @@ def test_file_backend_survives_a_restart(setup: Setup) -> None:
 
     reopened = fu.build_followup(corpus, ctx, fu.checkpointer(path))
     shown = fu.history(reopened, thread)
-    # 화면에는 깔아 둔 해설 맥락을 빼고 질문·답만 보인다
-    assert shown == [
-        {"role": "user", "content": "남아 있나?"},
-        {"role": "assistant", "content": "첫 답"},
-    ]
+    # 화면에는 깔아 둔 해설 맥락을 빼고 질문·답만 보인다. 답에는 대조 결과가 붙는다 —
+    # 글로만 답했으니 「대조할 수 없다」다
+    assert [m["role"] for m in shown] == ["user", "assistant"]
+    assert shown[0]["content"] == "남아 있나?"
+    assert shown[1]["content"].startswith("첫 답") and "⚪" in shown[1]["content"]
 
 
 def test_saved_history_reads_without_building_an_agent(setup: Setup) -> None:
@@ -133,7 +134,7 @@ def test_followup_can_measure_an_adjustment(
         tiny_corpus, ctx, fu.checkpointer(tmp_path / "followup.sqlite")
     )
 
-    answer, steps = fu.ask(
+    reply = fu.ask(
         agent,
         fu.thread_id("s1", ctx.at, ctx.champion),
         "조정 후에 뭐가 바뀌었나?",
@@ -142,7 +143,188 @@ def test_followup_can_measure_an_adjustment(
         "해설",
     )
 
-    assert answer == "도구가 준 전후를 봤다"
-    assert [s.tool for s in steps] == ["effect_of"]
-    assert "%p" in steps[0].output and "판수" in steps[0].output
+    assert reply.text == "도구가 준 전후를 봤다"
+    assert [s.tool for s in reply.steps] == ["effect_of"]
+    assert "%p" in reply.steps[0].output and "판수" in reply.steps[0].output
     assert "effect_of" in fu.SYSTEM
+
+
+# ── 답 대조 — 후속 질문의 답도 같은 대조를 거친다 ───────────────────────
+
+
+def tool_call(name: str, args: dict[str, Any], n: int) -> dict[str, Any]:
+    return {"name": name, "args": args, "id": f"call_{n}", "type": "tool_call"}
+
+
+def conversation(
+    tiny_corpus: Corpus,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    responses: list[AIMessage],
+) -> tuple[Context, Graph, str]:
+    ctx = build_context(tiny_corpus, "C3", "15_14")
+    monkeypatch.setattr(fu, "chat_model", lambda *a, **k: Scripted(responses=responses))
+    agent = fu.build_followup(
+        tiny_corpus, ctx, fu.checkpointer(tmp_path / "followup.sqlite")
+    )
+    return ctx, agent, fu.thread_id("s1", ctx.at, ctx.champion)
+
+
+def measured(corpus: Corpus) -> tuple[str, str]:
+    """15_13 에서 너프 · 버프된 챔피언과, 도구가 낼 그 조정 후 승률."""
+    row = next(
+        r
+        for r in corpus.rows
+        if r.patch == "15_12" and r.direction_next in ("nerf", "buff")
+    )
+    after = corpus.row(row.champion, "15_13")
+    assert after is not None
+    return row.champion, f"{after.win_rate:.1%}"
+
+
+def test_an_answer_built_on_the_tools_passes_the_check(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """도구가 준 숫자를 옮겨 적은 답은 ✅ 다. **무엇을 확인했는지 화면에 남는다.**"""
+    champion, win = measured(tiny_corpus)
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call("effect_of", {"champion": champion, "patch": "15_13"}, 1)
+                ],
+            ),
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call(
+                        "Answer",
+                        {"answer": f"조정 뒤 승률은 {win} 다.", "numbers": [win]},
+                        2,
+                    )
+                ],
+            ),
+        ],
+    )
+
+    reply = fu.ask(agent, thread, "조정 뒤 승률은?", tiny_corpus, ctx, "해설")
+
+    assert reply.text == f"조정 뒤 승률은 {win} 다."
+    assert reply.check.mark == "✅" and reply.check.numbers == 1
+    assert [s.tool for s in reply.steps] == [
+        "effect_of"
+    ]  # Answer 는 도구 호출이 아니다
+    shown = fu.history(agent, thread)
+    assert shown[-1]["content"].startswith(reply.text)
+    assert reply.check.line() in shown[-1]["content"]
+
+
+def test_a_number_the_tools_never_gave_is_flagged_on_screen(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """도구를 부르지 않고 숫자를 쓰면 ⚠ 다 — 다시 열어 봐도 그 표시가 남는다."""
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call(
+                        "Answer",
+                        {"answer": "승률이 87.6% 로 올랐다.", "numbers": ["87.6%"]},
+                        1,
+                    )
+                ],
+            )
+        ],
+    )
+
+    reply = fu.ask(agent, thread, "올랐어?", tiny_corpus, ctx, "해설")
+
+    assert reply.check.mark == "⚠" and "87.6%" in reply.check.line()
+    saved = fu.saved_history(fu.checkpointer(tmp_path / "followup.sqlite"), thread)
+    assert "⚠" in saved[-1]["content"] and "87.6%" in saved[-1]["content"]
+
+
+def test_numbers_from_an_earlier_tool_call_stay_usable(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """앞 질문에서 도구가 준 숫자는 다음 질문에서도 출처다 — 대화가 이어진다. **모델이
+    앞에서 쓴 글은 출처가 아니다** — 거기서 지어낸 숫자를 되풀이하면 또 걸린다."""
+    champion, win = measured(tiny_corpus)
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call("effect_of", {"champion": champion, "patch": "15_13"}, 1)
+                ],
+            ),
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call(
+                        "Answer", {"answer": "승률이 87.6% 다.", "numbers": []}, 2
+                    )
+                ],
+            ),
+            AIMessage(
+                "",
+                tool_calls=[tool_call("Answer", {"answer": f"정확히는 {win} 다."}, 3)],
+            ),
+            AIMessage(
+                "",
+                tool_calls=[tool_call("Answer", {"answer": "앞서 말한 87.6% 다."}, 4)],
+            ),
+        ],
+    )
+
+    first = fu.ask(agent, thread, "승률은?", tiny_corpus, ctx, "해설")
+    second = fu.ask(agent, thread, "정확히?", tiny_corpus, ctx, "해설")
+    third = fu.ask(agent, thread, "아까 뭐라고 했지?", tiny_corpus, ctx, "해설")
+
+    assert first.check.mark == "⚠"  # 도구가 준 적 없는 숫자
+    assert second.check.mark == "✅"  # 앞 질문의 도구 출력에 있다
+    assert third.check.mark == "⚠"  # 모델의 앞선 답은 출처가 아니다
+
+
+def test_saved_answers_reopen_without_an_unregistered_type_warning(
+    tiny_corpus: Corpus,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """대화 파일에는 구조화된 답(`Answer`)이 같이 남는다. 저장소가 그 형식을 **모르는
+    형식**으로 읽으면 langgraph 가 경고하고, 다음 판에서는 막는다고 한다 — 그러면 화면을
+    껐다 켰을 때 대화가 안 열린다. 형식을 등록해 둔다."""
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [AIMessage("", tool_calls=[tool_call("Answer", {"answer": "모른다."}, 1)])],
+    )
+    fu.ask(agent, thread, "?", tiny_corpus, ctx, "해설")
+
+    with caplog.at_level("WARNING"):
+        saved = fu.saved_history(fu.checkpointer(tmp_path / "followup.sqlite"), thread)
+
+    assert saved[-1]["content"].startswith("모른다.")
+    assert "unregistered type" not in caplog.text
+
+
+def test_a_plain_text_answer_cannot_be_checked(setup: Setup) -> None:
+    """구조화된 답 없이 글로만 답하면 대조할 수 없다 — ⚪ 로 보인다."""
+    corpus, ctx, agent, _ = setup
+    reply = fu.ask(
+        agent, fu.thread_id("s1", ctx.at, ctx.champion), "?", corpus, ctx, "해설"
+    )
+    assert reply.text == "첫 답" and reply.check.mark == "⚪"
