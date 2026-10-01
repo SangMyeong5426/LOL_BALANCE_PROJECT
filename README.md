@@ -157,7 +157,7 @@ LLM 이 만든 것은 정답지 라벨 1,630종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 633개 · 검사 11개
+./scripts/check-all                 # 테스트 642개 · 검사 11개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -195,7 +195,7 @@ src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전�
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
 ground_truth/      정답지. 실제 조정 결과 1,630건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             633개 · 커버리지 94%
+tests/             642개 · 커버리지 94%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
@@ -257,6 +257,6 @@ ollama pull qwen3.5:9b && ollama serve
 | [`docs/spec/`](docs/spec/data-sources.md) | 데이터를 어디서 어떤 형식으로 받는가 |
 | [`docs/agent.md`](docs/agent.md) | 에이전트(`B8`) — 화면 · 해설 · 코드 대조 · 평가 |
 | [`docs/extension.md`](docs/extension.md) | 확장 작업 규칙. 공개 범위 · 계산은 한 곳 · 들이지 않는 것 · 단계별 완료 기준 |
-| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 16건 |
+| [`docs/adr/`](docs/adr/README.md) | 기술 결정 기록 17건 |
 | [`docs/glossary.md`](docs/glossary.md) | 용어. 여기 있는 말만 쓴다 |
 | [`CLAUDE.md`](CLAUDE.md) | 작업 규칙. 무엇을 만들고 무엇을 안 하는가 |

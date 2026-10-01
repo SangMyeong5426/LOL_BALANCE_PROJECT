@@ -9,8 +9,9 @@ Checkpointer 가 기억하므로 새 질문만 보낸다 — 교재 7장 「동�
 
 ## 후속 답도 코드 대조를 거친다 (2026-10-01)
 
-답을 `Answer` 로 받는다 — 답 · 답에 쓴 숫자 · 근거로 쓴 노트 블록. 코드가 그 숫자와
-인용을 도구 출력과 맞춰 보고 ✅ · ⚪ · ⚠ 를 붙인다(`qa.check`, extension 3절).
+답을 `Answer` 로 받는다 — 답 · 답에 쓴 숫자. 코드가 그 숫자를 도구 출력과 맞춰 보고
+✅ · ⚪ · ⚠ 를 붙인다(`qa.check`, extension 3절). **근거로 본 노트 블록은 모델이 적지
+않고 코드가 붙인다**(ADR 0017) — 이번 질문에서 노트 도구가 돌려준 블록이다.
 **대조는 저장된 대화만으로 다시 계산한다** — 화면을 껐다 켜도 같은 표시가 나온다.
 
 한때는 자유 서술이라 「대조 안 됨」을 붙였다. ADR 0007 이 글에서 값을 뽑는 파서를
@@ -24,7 +25,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -85,8 +86,7 @@ SYSTEM = """당신은 리그 오브 레전드 밸런스 조정 판단을 돕는 
 안 됩니다.
 - answer   질문에 대한 답. 두세 문장으로 짧게 한국어로
 - numbers  answer 에 쓴 숫자를 **도구가 준 표기 그대로** 하나씩 옮깁니다 (예: "+3.4%p", "49.4%")
-- notes    근거로 쓴 패치 노트 블록 — search_patch_notes 가 `[패치] 절` 로 준 것만. 안 썼으면 비웁니다
-코드가 numbers 와 notes 를 도구 결과와 대조합니다.
+코드가 numbers 를 도구 결과와 대조합니다.
 """
 
 
@@ -163,6 +163,8 @@ class Reply:
     check: qa.Check
     cautions: list[qa.Caution]  # 이 질문에서 도구가 낸 주의 — 화면이 답 아래에 붙인다
     usd: float = 0.0  # 이 답에 든 돈. 로컬 모델이면 0 이다. 장부에서 잰다
+    # 이 질문에서 노트 도구가 돌려준 블록 — **코드가 붙인다**, 모델이 적지 않는다(ADR 0017)
+    blocks: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -219,7 +221,8 @@ def turns(messages: Sequence[BaseMessage]) -> list[Turn]:
             text=text,
         )
         raised = qa.cautions(steps)
-        out.append(Turn(questions[-1], Reply(text, answer, steps, found, raised)))
+        reply = Reply(text, answer, steps, found, raised, blocks=qa.note_blocks(steps))
+        out.append(Turn(questions[-1], reply))
 
     for m in messages[2:]:
         if isinstance(m, HumanMessage):
@@ -272,6 +275,9 @@ def _shown(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:
         out.append({"role": "user", "content": turn.question})
         text = turn.reply.text or "(답이 없다)"
         notes = [turn.reply.check.line()]
+        # **근거로 본 노트 블록도 코드가 붙인다** — 도구가 실제로 돌려준 것만 나온다
+        if turn.reply.blocks:
+            notes.append("근거로 본 노트 블록 — " + " · ".join(turn.reply.blocks))
         # **주의는 코드가 붙인다** — 모델이 답에서 빼도 사람은 본다
         notes += [f"도구가 낸 주의 — {c.text}" for c in turn.reply.cautions]
         out.append(

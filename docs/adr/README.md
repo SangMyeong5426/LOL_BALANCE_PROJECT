@@ -35,3 +35,4 @@
 - [ADR 0014: 방향 출력 형식과 모델을 같은 입력으로 비교한다](0014-direction-output-comparison.md)
 - [ADR 0015: ① 대상의 정답에서 버그 수정을 뺀다](0015-bug-fixes-are-not-balance-intent.md)
 - [ADR 0016: 확장은 Python 하나로 — 정적 API 와 로컬 Q&A, 서버를 두지 않는다](0016-static-api-and-local-qa.md)
+- [ADR 0017: 후속 답의 노트 인용은 코드가 붙인다 — 모델이 적지 않는다](0017-note-citations-by-code.md)
