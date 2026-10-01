@@ -141,3 +141,39 @@ class Explanation(BaseModel):
     stance: Literal["동의", "부분 동의", "반대", "판단 보류"] = Field(
         description="베이스라인이 본 조정 여부·방향에 대한 입장"
     )
+
+
+# ── 후속 질문의 답 — 코드가 도구 결과와 대조한다 ──────────────────────
+
+
+class Cited(BaseModel):
+    """근거로 쓴 패치 노트 블록 하나. 도구가 `[패치] 절` 로 준 것을 그대로 옮긴다."""
+
+    patch: str = Field(description='노트의 패치. 도구가 준 그대로 — 예: "16_10"')
+    section: str = Field(
+        description='절 이름. 도구가 대괄호 뒤에 준 그대로 — 예: "Q - Piercing Darkness"'
+    )
+
+
+class Answer(BaseModel):
+    """후속 질문의 답 — **답 · 답에 쓴 숫자 · 근거로 쓴 노트 블록.**
+
+    숫자와 인용을 **따로 옮겨 적게** 하고 코드가 도구 결과와 대조한다
+    ([extension 3절](../../../docs/extension.md)). 해설의 `baseline_side` ·
+    `tension_quote` 와 같은 방식이다 — 글에서 값을 뽑지 않고, 옮겨 적은 칸을 본다.
+    """
+
+    answer: str = Field(
+        description="질문에 대한 답. 짧게 한국어로. 숫자는 도구가 준 것만 쓴다"
+    )
+    numbers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "답에 쓴 숫자를 **도구가 준 표기 그대로** 하나씩 옮긴다 — "
+            '예: "+3.4%p", "49.4%", "3,183". 숫자를 안 썼으면 비운다'
+        ),
+    )
+    notes: list[Cited] = Field(
+        default_factory=list,
+        description="근거로 쓴 패치 노트 블록. search_patch_notes 가 준 것만. 안 썼으면 비운다",
+    )
