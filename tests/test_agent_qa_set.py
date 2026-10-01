@@ -291,12 +291,13 @@ def test_the_committed_set_is_fixed_and_in_the_training_range() -> None:
 
 SAVED = ROOT / "ground_truth" / "qa"
 # 지금 실린 지시(프롬프트 · 답 형식 · 도구 설명)로 받은 답
-SHIPPED = SAVED / "answers-dev-v1-ollama-qwen3.5-9b-r3.jsonl"
+SHIPPED = SAVED / "answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl"
 # (파일, ✅ · ⚪ · ⚠, 없는 숫자, 없는 노트 블록) — docs/agent.md 의 표와 같다
 MEASURED = [
     ("answers-dev-v1-ollama-qwen3.5-9b.jsonl", (13, 9, 5), 0, 1),
     ("answers-dev-v1-ollama-qwen3.5-9b-r2.jsonl", (15, 8, 4), 0, 3),
     ("answers-dev-v1-ollama-qwen3.5-9b-r3.jsonl", (12, 9, 6), 0, 2),
+    ("answers-dev-v2-ollama-qwen3.5-9b.jsonl", (8, 9, 10), 2, 5),
 ]
 
 
@@ -307,10 +308,12 @@ def test_the_committed_answers_score_as_the_docs_say(
     """**문서에 적은 수치는 커밋된 답을 다시 대조한 값이다.** 대조 규칙을 고치면 여기가
     깨진다 — 그때 문서의 표(`docs/agent.md` · `ground_truth/qa/README.md`)를 같이 고친다.
 
-    세 벌 모두 **도구에 없는 숫자는 0개**다. 없는 노트 블록은 어느 지시에서도 0 이 아니다
-    — 완료 기준의 절반이 아직 안 찼다."""
+    고칠 때 본 질문(`dev-v1`)에서는 세 벌 모두 **도구에 없는 숫자가 0개**다. 처음 보는
+    질문(`dev-v2`)에서는 2개가 나왔다 — 본 질문의 수치는 좋게 나온다. 없는 노트 블록은 어느
+    쪽에서도 0 이 아니다. **완료 기준은 아직 안 찼다.**"""
     records = qa_set.read(SAVED / name)
-    questions = [json.loads(x) for x in FIXED.read_text(encoding="utf-8").splitlines()]
+    asked = SAVED / f"questions-{name.split('-')[1]}-{name.split('-')[2]}.jsonl"
+    questions = [json.loads(x) for x in asked.read_text(encoding="utf-8").splitlines()]
     assert [r["id"] for r in records] == [q["id"] for q in questions]
     assert [r["question"] for r in records] == [q["question"] for q in questions]
 
