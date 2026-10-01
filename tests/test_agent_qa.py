@@ -1,9 +1,11 @@
 """후속 질문의 답을 **코드가 대조한다** — extension 3절 3항.
 
-    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했거나,
-       도구가 낸 주의를 뺐거나, 볼 수 없는 것을 없었다고 말했다
-    ⚪  대조할 수 없다 — 숫자도 인용도 없거나 형식이 맞지 않는다
+    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 낸 주의를 뺐거나, 볼 수 없는 것을 없었다고
+       말했다
+    ⚪  대조할 것이 없다 — 답에 숫자가 없다
     ✅  대조를 통과했다. 실제로 확인한 것만 말한다
+
+노트 블록은 코드가 붙인다(ADR 0017). 모델이 인용을 적던 때의 기록은 그때의 규칙으로 본다.
 
 모델을 부르지 않는다. 도구 출력과 답을 글로 주고 대조만 본다.
 """
@@ -11,9 +13,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 
 from lol_balance.agent.judge import Step
-from lol_balance.agent.qa import Check, blocks_in, cautions, check, numbers_in
+from lol_balance.agent.qa import (
+    Check,
+    blocks_in,
+    cautions,
+    check,
+    note_blocks,
+    numbers_in,
+)
 from lol_balance.agent.schema import Answer, Cited
 
 EFFECT = """Senna — 14_7 에 적용된 조정의 전후 (경계: 16_19 까지의 지표)
@@ -38,8 +48,12 @@ STEPS = [
 ]
 
 
-def ask(answer: Answer | None, question: str = "14_7 버프 뒤에 뭐가 바뀌었어?") -> str:
-    return check(answer, STEPS, context="", questions=[question]).mark
+def ask(
+    answer: Answer | None,
+    question: str = "14_7 버프 뒤에 뭐가 바뀌었어?",
+    cited: Sequence[Cited] = (),
+) -> str:
+    return check(answer, STEPS, context="", questions=[question], cited=cited).mark
 
 
 # ── 숫자 ───────────────────────────────────────────────────────────────
@@ -130,7 +144,63 @@ def test_numbers_from_the_question_and_the_context_are_allowed() -> None:
     assert check(answer, STEPS, context="", questions=["넘어?"]).mark == "⚠"
 
 
-# ── 노트 블록 ───────────────────────────────────────────────────────────
+# ── 노트 블록 — 코드가 붙인다 (ADR 0017) ─────────────────────────────────
+
+
+def test_the_model_no_longer_writes_citations() -> None:
+    """**답 형식에 노트 블록 칸이 없다**(ADR 0017). 모델은 답과 숫자만 적는다.
+
+    모델이 적는 인용은 고정 질문을 다섯 번 받아 한 번도 0 이 아니었다(1 · 3 · 2 · 5 · 2) —
+    예시를 베끼고, `Q - ` 를 붙이고, `[패치]` 같은 빈말을 적었다. 어느 블록을 도구가
+    돌려줬는지는 코드가 이미 안다."""
+    form = Answer.model_json_schema()
+    assert set(form["properties"]) == {"answer", "numbers"}
+    assert "Cited" not in json.dumps(form)
+    # 옛 대화에 남은 답(인용 칸이 있다)도 그대로 읽힌다 — 그 칸은 버린다
+    old = Answer.model_validate(
+        {"answer": "x", "numbers": [], "notes": [{"patch": "14_7", "section": "Q"}]}
+    )
+    assert old.answer == "x" and not hasattr(old, "notes")
+
+
+def test_note_blocks_are_what_the_notes_tool_returned() -> None:
+    """**근거로 본 노트 블록은 코드가 도구 출력에서 꺼낸다** — 도구가 준 그대로, 준 순서로.
+    다른 도구의 줄이나 「찾지 못함」은 블록이 아니다. 같은 블록은 한 번만."""
+    assert note_blocks(STEPS) == ["[14_7] Q - Piercing Darkness", "[14_6] Stats"]
+    assert note_blocks([Step("effect_of", {}, EFFECT)]) == []
+    assert note_blocks([Step("search_patch_notes", {}, BEYOND)]) == []
+    twice = [
+        Step("search_patch_notes", {}, NOTES),
+        Step("search_patch_notes", {}, NOTES),
+    ]
+    assert note_blocks(twice) == ["[14_7] Q - Piercing Darkness", "[14_6] Stats"]
+    # 블록 본문에 대괄호로 시작하는 줄이 있어도 노트 도구의 머리 줄만 꺼낸다
+    fake = [Step("lookup_stats", {}, "  [14_7] 이것은 노트가 아니다")]
+    assert note_blocks(fake) == []
+
+
+def test_an_answer_about_notes_without_numbers_is_not_a_pass() -> None:
+    """노트 질문에 숫자 없이 답하면 **코드가 확인한 것이 없다 — ⚪ 다.** 전에는 모델이 적은
+    인용이 맞으면 ✅ 였다. 이제 블록은 코드가 붙이므로 맞고 틀리고가 없다. 확인한 것이
+    없으면 통과라고 하지 않는다(ADR 0017 이 치르는 값이다)."""
+    got = check(
+        Answer(answer="14_7 에 Q 의 회복량을 올렸다."),
+        STEPS,
+        context="",
+        questions=["뭘 바꿨어?"],
+    )
+    assert got.mark == "⚪" and "답에 숫자가 없다" in got.line()
+    with_numbers = Answer(
+        answer="Q 의 회복량을 30 에서 40 으로 올렸다.", numbers=["30", "40"]
+    )
+    assert ask(with_numbers) == "✅"
+
+
+# ── 옛 형식 — 모델이 인용을 적던 때의 기록을 다시 채점한다 ────────────────
+#
+# ADR 0017 전에는 모델이 `notes` 칸에 인용을 적었다. 그때 받아 커밋한 답 다섯 벌
+# (`ground_truth/qa/`)은 **그때의 규칙으로 다시 채점할 수 있어야 한다** — 문서에 적은
+# 수치가 계속 재현돼야 한다. 그 인용을 `cited=` 로 넘긴다.
 
 
 def test_blocks_are_read_from_the_note_tool_output() -> None:
@@ -142,13 +212,11 @@ def test_blocks_are_read_from_the_note_tool_output() -> None:
 
 def test_citing_a_block_the_tool_returned_passes() -> None:
     got = check(
-        Answer(
-            answer="14_7 에 Q 의 회복량을 올렸다.",
-            notes=[Cited(patch="14.7", section="Q - Piercing Darkness")],
-        ),
+        Answer(answer="14_7 에 Q 의 회복량을 올렸다."),
         STEPS,
         context="",
         questions=["뭘 바꿨어?"],
+        cited=[Cited(patch="14.7", section="Q - Piercing Darkness")],
     )
     assert got.mark == "✅" and got.notes == 1 and "노트 블록 1개" in got.line()
 
@@ -158,33 +226,30 @@ def test_brackets_around_the_cited_patch_do_not_matter() -> None:
     칸 설명을 「대괄호 안에 준 그대로」로 고쳐 봤더니 인용 3건이 전부 `[14_9]` 꼴로 와서
     있는 블록이 「없는 블록」으로 걸렸다(2026-10-01). 표기는 봐주고 내용은 그대로 본다."""
     got = check(
-        Answer(
-            answer="Q 의 회복량을 올렸다.",
-            notes=[Cited(patch="[14_7]", section="Q - Piercing Darkness")],
-        ),
+        Answer(answer="Q 의 회복량을 올렸다."),
         STEPS,
         context="",
         questions=["?"],
+        cited=[Cited(patch="[14_7]", section="Q - Piercing Darkness")],
     )
     assert got.mark == "✅" and got.notes == 1
-    made_up = Answer(answer="x", notes=[Cited(patch="[14_7]", section="Stats")])
-    assert ask(made_up) == "⚠"  # 14_7 에는 Stats 절이 없다 — 14_6 에 있다
+    # 14_7 에는 Stats 절이 없다 — 14_6 에 있다
+    assert (
+        ask(Answer(answer="x"), cited=[Cited(patch="[14_7]", section="Stats")]) == "⚠"
+    )
 
 
 def test_citing_a_block_no_tool_returned_is_flagged() -> None:
     """**없는 노트 블록** — 지어낸 절이거나, 도구로 확인하지 않고 인용한 것이다."""
     got = check(
-        Answer(
-            answer="W 를 바꿨다.",
-            notes=[Cited(patch="14_7", section="W - Last Embrace")],
-        ),
+        Answer(answer="W 를 바꿨다."),
         STEPS,
         context="",
         questions=["?"],
+        cited=[Cited(patch="14_7", section="W - Last Embrace")],
     )
     assert got.mark == "⚠" and "W - Last Embrace" in got.problems[0]
-    wrong_patch = Answer(answer="x", notes=[Cited(patch="14_8", section="Stats")])
-    assert ask(wrong_patch) == "⚠"
+    assert ask(Answer(answer="x"), cited=[Cited(patch="14_8", section="Stats")]) == "⚠"
 
 
 def test_a_tool_line_in_the_citation_field_is_not_a_made_up_block() -> None:
@@ -194,14 +259,11 @@ def test_a_tool_line_in_the_citation_field_is_not_a_made_up_block() -> None:
     블록으로 세지도 않는다. **어느 도구도 준 적 없는 것만 ⚠ 다.**"""
     header = "Senna — 14_7 에 적용된 조정의 전후 (경계: 16_19 까지의 지표)"
     got = check(
-        Answer(
-            answer="효과는 +3.4%p 다.",
-            numbers=["+3.4%p"],
-            notes=[Cited(patch="14_7", section=header)],
-        ),
+        Answer(answer="효과는 +3.4%p 다.", numbers=["+3.4%p"]),
         STEPS,
         context="",
         questions=["?"],
+        cited=[Cited(patch="14_7", section=header)],
     )
     assert got.mark == "✅" and got.numbers == 1 and got.notes == 0
     assert got.absent == () and got.misfiled == (f"[14_7] {header}",)
@@ -210,65 +272,73 @@ def test_a_tool_line_in_the_citation_field_is_not_a_made_up_block() -> None:
     # 「패치: 이유」 줄을 패치와 절로 쪼개 적은 것도 같다(고정 질문 q27)
     refusal = [Step("effect_of", {}, "16_14: 경계 밖 — 16_13 뒤의 자료는 보지 않는다")]
     split = check(
-        Answer(
-            answer="16_14 는 기준 패치 뒤라 볼 수 없습니다.",
-            notes=[
-                Cited(patch="16_14", section="경계 밖 — 16_13 뒤의 자료는 보지 않는다")
-            ],
-        ),
+        Answer(answer="16_14 는 기준 패치 뒤라 볼 수 없습니다."),
         refusal,
         context="",
         questions=["?"],
         asked=refusal,
+        cited=[Cited(patch="16_14", section="경계 밖 — 16_13 뒤의 자료는 보지 않는다")],
     )
     assert split.mark == "⚪" and "대조할 것이 없다" in split.line()
     assert split.misfiled and split.absent == ()
 
     # 진짜 블록과 같이 적으면 진짜 블록만 센다
     both = check(
-        Answer(
-            answer="Q 의 회복량을 올렸다.",
-            notes=[
-                Cited(patch="14_7", section="Q - Piercing Darkness"),
-                Cited(patch="14_7", section=header),
-            ],
-        ),
+        Answer(answer="Q 의 회복량을 올렸다."),
         STEPS,
         context="",
         questions=["?"],
+        cited=[
+            Cited(patch="14_7", section="Q - Piercing Darkness"),
+            Cited(patch="14_7", section=header),
+        ],
     )
     assert both.mark == "✅" and both.notes == 1 and "노트 블록 1개" in both.line()
 
     # 있는 절 이름을 다른 패치에 붙인 것 · 도구가 준 줄이 아닌 것은 여전히 지어낸 인용이다
-    assert ask(Answer(answer="x", notes=[Cited(patch="14_8", section="Stats")])) == "⚠"
-    assert ask(Answer(answer="x", notes=[Cited(patch="14_7", section="조정")])) == "⚠"
+    assert ask(Answer(answer="x"), cited=[Cited(patch="14_8", section="Stats")]) == "⚠"
+    assert ask(Answer(answer="x"), cited=[Cited(patch="14_7", section="조정")]) == "⚠"
 
 
-# ── 대조할 수 없다 ──────────────────────────────────────────────────────
+# ── 대조할 것이 없다 ────────────────────────────────────────────────────
 
 
 def test_nothing_to_check_is_not_a_pass() -> None:
-    """숫자도 인용도 없으면 **통과가 아니라 「대조할 수 없다」다** — 확인한 것이 없다."""
+    """숫자가 없으면 **통과가 아니라 「대조할 것이 없다」다** — 확인한 것이 없다."""
     got = check(
         Answer(answer="자료가 없어 알 수 없다."), STEPS, context="", questions=["?"]
     )
     assert got.mark == "⚪" and "대조할 것이 없다" in got.line()
 
 
-def test_a_missing_structured_answer_cannot_be_checked() -> None:
+def test_an_empty_answer_has_nothing_to_check() -> None:
     got = check(None, STEPS, context="", questions=["?"])
-    assert got.mark == "⚪" and "형식" in got.line()
+    assert got.mark == "⚪" and "숫자가 없다" in got.line()
 
 
-def test_a_number_field_without_a_number_cannot_be_checked() -> None:
-    """숫자 칸에 숫자가 아닌 것을 적었다 — 형식이 맞지 않는다."""
-    got = check(
+def test_what_was_verified_decides_the_mark_not_the_form() -> None:
+    """**표시는 확인한 것을 따른다 — 칸을 어떻게 채웠는지를 따르지 않는다.** 숫자 칸에 숫자가
+    아닌 것(패치 이름 · 스킬 이름)을 적어도 그것만으로 표시가 바뀌지 않는다. 인용 칸을 빼자
+    로컬 모델이 그 자리에 `15_4` · `Leverage` 를 적었다 — 확인한 숫자가 없으면 ⚪ 고, 있으면
+    ✅ 다."""
+    only_words = check(
         Answer(answer="올랐다.", numbers=["많이 올랐다"]),
         STEPS,
         context="",
         questions=["?"],
     )
-    assert got.mark == "⚪"
+    assert only_words.mark == "⚪" and "숫자가 없다" in only_words.line()
+    mixed = check(
+        Answer(
+            answer="승률은 49.4% 다.", numbers=["49.4%", "14_7", "Piercing Darkness"]
+        ),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert mixed.mark == "✅" and mixed.numbers == 1
+    made_up = Answer(answer="승률은 87.6% 다.", numbers=["87.6%", "Leverage"])
+    assert ask(made_up) == "⚠"
 
 
 # ── 도구가 낸 주의 — 답이 옮겨야 한다 ────────────────────────────────────
@@ -339,8 +409,8 @@ def test_only_this_questions_tools_set_what_must_be_said() -> None:
 
 def test_a_plain_text_answer_is_still_scanned() -> None:
     """구조화된 답이 없어도 **글은 훑는다.** 도구 결과에 없는 숫자나 빠뜨린 주의가 있으면
-    ⚪ 가 아니라 ⚠ 다 — 로컬 모델이 칸을 안 채우고 글로만 「조정되지 않았으며」라고
-    답했는데 ⚪ 로 지나갔다(2026-10-01). 문제를 못 찾았을 때만 「대조할 수 없다」다."""
+    ⚠ 다 — 로컬 모델이 칸을 안 채우고 글로만 「조정되지 않았으며」라고 답했는데 ⚪ 로
+    지나갔다(2026-10-01)."""
     beyond = [Step("search_patch_notes", {}, BEYOND)]
     wrong = check(
         None,
@@ -357,14 +427,29 @@ def test_a_plain_text_answer_is_still_scanned() -> None:
     )
     assert made_up.mark == "⚠" and "87.6%" in made_up.line()
 
+
+def test_a_plain_text_answer_with_verified_numbers_passes() -> None:
+    """**글로만 답해도 숫자를 확인했으면 ✅ 다**(주인 승인 2026-10-01 · ADR 0017 덧붙임).
+
+    한때는 칸에 넣지 않은 답을 「형식이 맞지 않는다」며 ⚪ 로 뒀다. 그런데 코드는 글의 숫자를
+    이미 맞춰 본다 — 확인하고도 「대조할 수 없다」고 적는 셈이었다. 인용 칸을 빼자 로컬
+    모델이 글로만 답한 것이 27건 중 6 → 16건으로 늘었고(Ollama 는 `tool_choice` 를 무시해
+    칸을 강제할 수 없다), 숫자가 전부 맞는데 ✅ 가 15 → 5개로 줄었다. 표시는 **확인한
+    것**을 따른다 — 칸에 넣었는지를 따르지 않는다."""
     fine = check(
         None, STEPS, context="", questions=["?"], text="승률이 49.4% 로 올랐다."
     )
-    assert fine.mark == "⚪" and "형식" in fine.line()
-    # 글은 훑었다 — **확인한 것은 말한다.** 「대조할 수 없다」만 적으면 훑은 것까지 숨긴다
-    assert fine.numbers == 1 and "숫자 1개는 도구 결과에 있다" in fine.line()
+    assert fine.mark == "✅" and fine.numbers == 1
+    assert "숫자 1개가 도구 결과에 있다" in fine.line()
+    # 숫자가 없으면 확인한 것이 없다 — 칸에 넣었을 때와 같다
     bare = check(None, STEPS, context="", questions=["?"], text="자료가 없습니다.")
-    assert bare.mark == "⚪" and "도구 결과에 있다" not in bare.line()
+    assert bare.mark == "⚪" and "숫자가 없다" in bare.line()
+    # 글로 답해도 주의를 빼면 ⚠ 다
+    thin = [Step("effect_of", {}, THIN)]
+    dropped = check(
+        None, thin, context="", questions=["?"], asked=thin, text="효과는 +3.4%p 다."
+    )
+    assert dropped.mark == "⚠" and "표본이 얇다" in dropped.line()
 
 
 def test_a_thin_sample_only_matters_when_numbers_are_used() -> None:
@@ -462,14 +547,3 @@ def test_a_denial_in_the_present_tense_is_still_a_denial() -> None:
         asked=inside,
     )
     assert said.mark == "⚪"
-
-
-def test_the_answer_form_gives_no_section_name_to_copy() -> None:
-    """답 형식의 **절 이름 칸에는 예시를 두지 않는다.** 설명은 모델에게 그대로 간다.
-
-    진짜 절 이름(`Q - Piercing Darkness`)을 예로 들었더니 다른 챔피언의 노트를 그 이름으로
-    인용했고(고정 질문 dev-v1 q15), 가짜 예시(`Q - 스킬 이름`)로 바꿨더니 도구가 준 절 이름
-    앞에 `Q - ` 를 붙였다 — 처음 보는 질문(dev-v2)의 노트 인용 5건이 전부 그랬다."""
-    section = Cited.model_json_schema()["properties"]["section"]["description"]
-    assert "예:" not in section and "Q - " not in section
-    assert "Piercing Darkness" not in json.dumps(Answer.model_json_schema())

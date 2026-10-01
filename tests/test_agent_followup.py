@@ -88,7 +88,7 @@ def test_file_backend_survives_a_restart(setup: Setup) -> None:
     reopened = fu.build_followup(corpus, ctx, fu.checkpointer(path))
     shown = fu.history(reopened, thread)
     # 화면에는 깔아 둔 해설 맥락을 빼고 질문·답만 보인다. 답에는 대조 결과가 붙는다 —
-    # 글로만 답했으니 「대조할 수 없다」다
+    # 답에 숫자가 없으니 「대조할 것이 없다」다
     assert [m["role"] for m in shown] == ["user", "assistant"]
     assert shown[0]["content"] == "남아 있나?"
     assert shown[1]["content"].startswith("첫 답") and "⚪" in shown[1]["content"]
@@ -369,13 +369,96 @@ def test_a_thin_sample_shows_on_screen_whatever_the_model_writes(
     assert "표본이 얇다" in fu.SYSTEM and "경계 밖" in fu.SYSTEM
 
 
-def test_a_plain_text_answer_cannot_be_checked(setup: Setup) -> None:
-    """구조화된 답 없이 글로만 답하면 대조할 수 없다 — ⚪ 로 보인다."""
+def test_note_blocks_are_attached_by_code_not_by_the_model(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**근거로 본 노트 블록은 코드가 붙인다**(ADR 0017). 모델은 답과 숫자만 적고, 화면이
+    이번 질문에서 노트 도구가 돌려준 블록을 답 아래에 적는다 — 그래서 없는 블록이 나올 수
+    없다. **앞 질문에서 본 블록을 뒤 질문의 답에 붙이지 않는다.**"""
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call(
+                        "search_patch_notes", {"champion": "C3", "patch": "15_12"}, 1
+                    )
+                ],
+            ),
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call(
+                        "Answer",
+                        {
+                            "answer": "Q 의 피해량을 60 에서 50 으로 줄였다.",
+                            "numbers": ["60", "50"],
+                        },
+                        2,
+                    )
+                ],
+            ),
+            AIMessage(
+                "", tool_calls=[tool_call("Answer", {"answer": "너프입니다."}, 3)]
+            ),
+        ],
+    )
+
+    first = fu.ask(agent, thread, "15_12 에 뭘 바꿨어?", tiny_corpus, ctx, "해설")
+    second = fu.ask(agent, thread, "그게 너프야?", tiny_corpus, ctx, "해설")
+
+    assert first.blocks == ["[15_12] Q - Blade"]
+    assert first.check.mark == "✅" and first.check.numbers == 2
+    assert second.blocks == []  # 이번 질문에서는 노트 도구를 부르지 않았다
+    shown = fu.history(agent, thread)
+    assert "근거로 본 노트 블록 — [15_12] Q - Blade" in shown[1]["content"]
+    assert "근거로 본 노트 블록" not in shown[3]["content"]
+    # 모델에게 인용을 적으라고 하지 않는다
+    assert "notes" not in fu.SYSTEM.split("## 답하는 방법")[1]
+
+
+def test_a_plain_text_answer_without_numbers_has_nothing_to_check(setup: Setup) -> None:
+    """글로만 답했고 숫자도 없으면 확인한 것이 없다 — ⚪ 로 보인다."""
     corpus, ctx, agent, _ = setup
     reply = fu.ask(
         agent, fu.thread_id("s1", ctx.at, ctx.champion), "?", corpus, ctx, "해설"
     )
     assert reply.text == "첫 답" and reply.check.mark == "⚪"
+    assert reply.answer is None  # 칸에 넣지 않았다
+
+
+def test_a_plain_text_answer_is_checked_like_any_other(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**글로만 답해도 숫자를 확인했으면 ✅ 다.** 로컬 모델은 `Answer` 를 부르지 않고 글로
+    답하는 일이 잦다 — 그래도 코드는 글의 숫자를 도구 결과와 맞춰 본다. 지어낸 숫자면 ⚠ 다."""
+    champion, win = measured(tiny_corpus)
+    call = AIMessage(
+        "",
+        tool_calls=[
+            tool_call("effect_of", {"champion": champion, "patch": "15_13"}, 1)
+        ],
+    )
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [
+            call,
+            AIMessage(f"조정 뒤 승률은 {win} 입니다. 표본이 얇아 단정하기 어렵습니다."),
+            AIMessage("조정 뒤 승률은 87.6% 입니다."),
+        ],
+    )
+
+    grounded = fu.ask(agent, thread, "조정 뒤 승률은?", tiny_corpus, ctx, "해설")
+    made_up = fu.ask(agent, thread, "다시?", tiny_corpus, ctx, "해설")
+
+    assert grounded.answer is None and grounded.check.mark == "✅"
+    assert grounded.check.numbers == 1
+    assert made_up.check.mark == "⚠" and "87.6%" in made_up.check.line()
 
 
 # ── 비용 — 쓴 돈이 장부에 남고, 상한에 닿으면 묻기 전에 멈춘다 ─────────────
