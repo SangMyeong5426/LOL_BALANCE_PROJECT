@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""저장한 Q&A 답을 **채점만** 한다. 모델을 부르지 않는다.
+
+    ./scripts/score-qa                                   전부 — ground_truth/qa/answers-*.jsonl
+    ./scripts/score-qa runs/qa-dev-v1-….jsonl            한 벌만
+    ./scripts/score-qa --detail                          ⚠ · ⚪ 가 붙은 답을 하나씩 보인다
+
+`run-qa` 가 받은 답을 글로 커밋해 두고 여기서 다시 대조한다 — 기록에 적힌 표시는 믿지
+않고 **답과 도구 출력에서 다시 계산한다.** 대조 규칙을 고쳐도 모델을 다시 돌리지 않는다.
+자료(`data/`)도 필요 없다 — 기록에 코드가 만든 맥락과 도구 출력이 들어 있다.
+
+완료 기준([extension 2단계](../docs/extension.md))은 「도구에 없는 숫자 0개, 없는 노트
+블록 0개」다. **✅ 는 「맞는 답」이 아니다** — 숫자와 인용의 출처가 있다는 뜻이다.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.agent import qa_set  # noqa: E402
+
+SAVED = ROOT / "ground_truth" / "qa"
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    detail = "--detail" in sys.argv
+    given = [Path(a) for a in sys.argv[1:] if not a.startswith("-")]
+    files = given or sorted(SAVED.glob("answers-*.jsonl"))
+    if not files:
+        print("채점할 기록이 없다 — ./scripts/run-qa 로 먼저 답을 받는다.")
+        return 1
+
+    for path in files:
+        records = qa_set.read(path)
+        if not records:
+            print(f"{path}: 비었다")
+            continue
+        total = qa_set.summarize(records)
+        models = sorted({r["model"] for r in records})
+        print(f"\n{path.name} — {' · '.join(models)}")
+        print("\n".join(f"  {line}" for line in qa_set.report(total)))
+        print("  종류          ✅   ⚪   ⚠")
+        for kind, row in total["by_kind"].items():
+            print(f"  {kind:11}{row['✅']:>4}{row['⚪']:>5}{row['⚠']:>4}")
+        if detail:
+            for r in records:
+                found = qa_set.rescore(r)
+                if found.mark != "✅":
+                    print(f"\n  {r['id']} {r['kind']} — {r['question']}")
+                    print(f"    답: {r['text'][:160]}")
+                    print(f"    {found.line()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

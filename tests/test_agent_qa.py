@@ -1,6 +1,7 @@
 """후속 질문의 답을 **코드가 대조한다** — extension 3절 3항.
 
-    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했다
+    ⚠  도구 결과에 없는 숫자를 썼거나, 도구가 준 적 없는 노트 블록을 인용했거나,
+       도구가 낸 주의를 뺐거나, 볼 수 없는 것을 없었다고 말했다
     ⚪  대조할 수 없다 — 숫자도 인용도 없거나 형식이 맞지 않는다
     ✅  대조를 통과했다. 실제로 확인한 것만 말한다
 
@@ -8,6 +9,8 @@
 """
 
 from __future__ import annotations
+
+import json
 
 from lol_balance.agent.judge import Step
 from lol_balance.agent.qa import Check, blocks_in, cautions, check, numbers_in
@@ -109,7 +112,10 @@ def test_patch_names_and_small_counts_are_not_measurements() -> None:
     """
     assert [n.core for n in numbers_in("14_7 패치에서 R3 로 봤다. 16_19 까지.")] == []
     fine = Answer(answer="14.7 패치에서 2가지가 바뀌었다. 승률은 49.4% 다.")
-    assert ask(fine) == "✅"
+    got = check(fine, STEPS, context="", questions=["?"])
+    # 패치 이름은 확인한 숫자로 세지 않는다
+    assert got.mark == "✅" and got.numbers == 1
+    assert ask(Answer(answer="14.7 패치에서 바뀌었다.")) == "⚪"
     assert ask(Answer(answer="12.5 만큼 올랐다.")) == "⚠"  # 패치가 아닌 소수
 
 
@@ -147,6 +153,24 @@ def test_citing_a_block_the_tool_returned_passes() -> None:
     assert got.mark == "✅" and got.notes == 1 and "노트 블록 1개" in got.line()
 
 
+def test_brackets_around_the_cited_patch_do_not_matter() -> None:
+    """도구는 `[14_7] 절` 로 준다. 모델이 패치를 **대괄호째** 옮겨 적어도 같은 블록이다 —
+    칸 설명을 「대괄호 안에 준 그대로」로 고쳐 봤더니 인용 3건이 전부 `[14_9]` 꼴로 와서
+    있는 블록이 「없는 블록」으로 걸렸다(2026-10-01). 표기는 봐주고 내용은 그대로 본다."""
+    got = check(
+        Answer(
+            answer="Q 의 회복량을 올렸다.",
+            notes=[Cited(patch="[14_7]", section="Q - Piercing Darkness")],
+        ),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert got.mark == "✅" and got.notes == 1
+    made_up = Answer(answer="x", notes=[Cited(patch="[14_7]", section="Stats")])
+    assert ask(made_up) == "⚠"  # 14_7 에는 Stats 절이 없다 — 14_6 에 있다
+
+
 def test_citing_a_block_no_tool_returned_is_flagged() -> None:
     """**없는 노트 블록** — 지어낸 절이거나, 도구로 확인하지 않고 인용한 것이다."""
     got = check(
@@ -161,6 +185,63 @@ def test_citing_a_block_no_tool_returned_is_flagged() -> None:
     assert got.mark == "⚠" and "W - Last Embrace" in got.problems[0]
     wrong_patch = Answer(answer="x", notes=[Cited(patch="14_8", section="Stats")])
     assert ask(wrong_patch) == "⚠"
+
+
+def test_a_tool_line_in_the_citation_field_is_not_a_made_up_block() -> None:
+    """**도구가 준 줄을 인용 칸에 적은 것은 지어낸 인용이 아니다.** 로컬 모델이
+    `effect_of` 의 머리 줄을 노트 블록 칸에 적었다(고정 질문 q01) — 답의 숫자는 전부
+    출처에 있는데 ⚠ 가 붙었다. 가리킨 줄은 도구가 실제로 준 것이라 **걸지 않는다.** 노트
+    블록으로 세지도 않는다. **어느 도구도 준 적 없는 것만 ⚠ 다.**"""
+    header = "Senna — 14_7 에 적용된 조정의 전후 (경계: 16_19 까지의 지표)"
+    got = check(
+        Answer(
+            answer="효과는 +3.4%p 다.",
+            numbers=["+3.4%p"],
+            notes=[Cited(patch="14_7", section=header)],
+        ),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert got.mark == "✅" and got.numbers == 1 and got.notes == 0
+    assert got.absent == () and got.misfiled == (f"[14_7] {header}",)
+    assert "노트 블록" not in got.line()  # 확인한 것만 말한다 — 노트는 확인한 것이 없다
+
+    # 「패치: 이유」 줄을 패치와 절로 쪼개 적은 것도 같다(고정 질문 q27)
+    refusal = [Step("effect_of", {}, "16_14: 경계 밖 — 16_13 뒤의 자료는 보지 않는다")]
+    split = check(
+        Answer(
+            answer="16_14 는 기준 패치 뒤라 볼 수 없습니다.",
+            notes=[
+                Cited(patch="16_14", section="경계 밖 — 16_13 뒤의 자료는 보지 않는다")
+            ],
+        ),
+        refusal,
+        context="",
+        questions=["?"],
+        asked=refusal,
+    )
+    assert split.mark == "⚪" and "대조할 것이 없다" in split.line()
+    assert split.misfiled and split.absent == ()
+
+    # 진짜 블록과 같이 적으면 진짜 블록만 센다
+    both = check(
+        Answer(
+            answer="Q 의 회복량을 올렸다.",
+            notes=[
+                Cited(patch="14_7", section="Q - Piercing Darkness"),
+                Cited(patch="14_7", section=header),
+            ],
+        ),
+        STEPS,
+        context="",
+        questions=["?"],
+    )
+    assert both.mark == "✅" and both.notes == 1 and "노트 블록 1개" in both.line()
+
+    # 있는 절 이름을 다른 패치에 붙인 것 · 도구가 준 줄이 아닌 것은 여전히 지어낸 인용이다
+    assert ask(Answer(answer="x", notes=[Cited(patch="14_8", section="Stats")])) == "⚠"
+    assert ask(Answer(answer="x", notes=[Cited(patch="14_7", section="조정")])) == "⚠"
 
 
 # ── 대조할 수 없다 ──────────────────────────────────────────────────────
@@ -280,6 +361,10 @@ def test_a_plain_text_answer_is_still_scanned() -> None:
         None, STEPS, context="", questions=["?"], text="승률이 49.4% 로 올랐다."
     )
     assert fine.mark == "⚪" and "형식" in fine.line()
+    # 글은 훑었다 — **확인한 것은 말한다.** 「대조할 수 없다」만 적으면 훑은 것까지 숨긴다
+    assert fine.numbers == 1 and "숫자 1개는 도구 결과에 있다" in fine.line()
+    bare = check(None, STEPS, context="", questions=["?"], text="자료가 없습니다.")
+    assert bare.mark == "⚪" and "도구 결과에 있다" not in bare.line()
 
 
 def test_a_thin_sample_only_matters_when_numbers_are_used() -> None:
@@ -290,3 +375,102 @@ def test_a_thin_sample_only_matters_when_numbers_are_used() -> None:
     assert carried("그 패치는 자료가 없습니다.", THIN).mark == "⚪"
     assert carried("효과는 +3.4%p 다.", THIN).mark == "⚠"
     assert carried("조정되지 않았습니다.", BEYOND, "search_patch_notes").mark == "⚠"
+
+
+# ── 고정 질문 세트에서 찾은 것 (2026-10-01) ─────────────────────────────
+
+
+def test_the_balance_line_is_not_a_measurement() -> None:
+    """**「50%」는 균형선이다** — 측정값이 아니라 기준이라 출처를 묻지 않는다. 고정 질문
+    27개에서 「도구 결과에 없는 숫자」로 걸린 2건이 둘 다 「50% 선 근처」였다."""
+    assert ask(Answer(answer="승률은 50% 선 근처를 유지했다.")) == "⚪"
+    assert ask(Answer(answer="승률은 49.4% 로 50% 에 가까워졌다.")) == "✅"
+    assert ask(Answer(answer="승률은 50.3% 였다.")) == "⚠"  # 균형선이 아니라 지어낸 값
+
+
+def test_what_cannot_be_seen_must_not_be_denied() -> None:
+    """「볼 수 없다」고 쓰면서 **「조정이 이루어지지 않았다」고 단정한 답**이 통과했다
+    (고정 질문 q26). 볼 수 없다는 말이 있어도, 없었다고 말했으면 ⚠ 다."""
+    both = carried(
+        "16_14 에는 조정이 이루어지지 않았습니다. 16_13 이후 자료를 볼 수 없기 때문입니다.",
+        BEYOND,
+        "search_patch_notes",
+    )
+    assert both.mark == "⚠" and "없었다" in both.line()
+    assert both.denied == ("조정이 이루어지지 않았",) and both.dropped == ()
+    # 패치 이름 없이 말해도 지금 묻는 패치(경계 밖)를 두고 한 말이다
+    bare = carried(
+        "조정은 없었습니다. 볼 수 없기 때문입니다.", BEYOND, "search_patch_notes"
+    )
+    assert bare.mark == "⚠" and bare.denied
+
+
+def test_a_denial_about_a_patch_in_range_is_left_alone() -> None:
+    """그 말 **앞에서 가장 가까운 패치 이름**이 가리키는 패치를 본다 — 볼 수 있는 패치를
+    두고 한 말은 잡지 않는다. 「기록이 없다」도 잡지 않는다(자료에 없다는 말이다)."""
+    mixed = carried(
+        "16_13 에는 조정되지 않았고, 16_14 는 기준 패치 뒤라 볼 수 없습니다.",
+        BEYOND,
+        "search_patch_notes",
+    )
+    assert mixed.mark == "⚪" and mixed.denied == ()
+    dotted = carried(
+        "16.14 는 볼 수 없습니다. 16.13 에는 너프를 받지 않았습니다.",
+        BEYOND,
+        "search_patch_notes",
+    )
+    assert dotted.mark == "⚪"
+    record = carried(
+        "16_14 의 조정은 기록되지 않았습니다. 기준 패치 뒤라 볼 수 없기 때문입니다.",
+        BEYOND,
+        "search_patch_notes",
+    )
+    assert record.mark == "⚪"
+    # 단정이 아닌 말은 잡지 않는다 — 「…았는지는 볼 수 없다」 · 「…았다는 뜻이 아니다」
+    for unsure in (
+        "16_14 에 조정되지 않았는지는 기준 패치 뒤라 볼 수 없습니다.",
+        "볼 수 없다는 것이지, 16_14 에 조정이 없었다는 뜻이 아닙니다.",
+        "16_14 에 조정되지 않았다고 단정할 수 없습니다. 볼 수 없기 때문입니다.",
+        "16_14 에 조정이 없다는 뜻이 아닙니다. 기준 패치 뒤라 볼 수 없습니다.",
+        "16_14 에 버프가 없었다면 승률이 그대로였겠지만, 볼 수 없습니다.",
+        "16_14 에 조정이 있었는지 없었는지는 볼 수 없습니다.",
+    ):
+        assert carried(unsure, BEYOND, "search_patch_notes").denied == (), unsure
+
+
+def test_a_denial_in_the_present_tense_is_still_a_denial() -> None:
+    """「없었다」뿐 아니라 **「없습니다 · 없으며」**도 같은 단정이다. 고정 질문에서 모델이
+    「15_14 패치 노트에서도 변경 내용이 없으며 … 경계 밖으로 판단합니다」라고 답했다 —
+    「경계 밖」이라는 낱말이 있어 주의를 옮긴 것으로 지나갔다. 도구는 「볼 수 없다」고 했지
+    「변경이 없다」고 하지 않았다."""
+    for wrong in (
+        "16_14 패치 노트에서도 변경 내용이 없으며, 통계 모델은 경계 밖으로 판단합니다.",
+        "16_14 에는 조정이 없습니다. 기준 패치 뒤라 볼 수 없기 때문입니다.",
+        "16_14 에는 변경 사항이 없고, 그 뒤는 볼 수 없습니다.",
+    ):
+        got = carried(wrong, BEYOND, "search_patch_notes")
+        assert got.mark == "⚠" and got.denied, wrong
+    # 도구가 「경계 밖」이라고 하지 않았으면 「조정되지 않았다」는 말은 그대로 둔다
+    inside = [
+        Step("effect_of", {}, "Fizz 은 15_5 에 조정되지 않았다 — 조정 전후가 아니다")
+    ]
+    said = check(
+        Answer(answer="Fizz 는 15_5 에 조정되지 않았습니다."),
+        inside,
+        context="",
+        questions=["?"],
+        asked=inside,
+    )
+    assert said.mark == "⚪"
+
+
+def test_the_answer_form_shows_no_real_section_name() -> None:
+    """답 형식의 설명에 **진짜 절 이름**을 예로 적어 두었더니 모델이 그것을 그대로 인용했다
+    (고정 질문 q15 — Illaoi 의 노트를 Senna 의 `Q - Piercing Darkness` 로 인용). Senna 를
+    물었다면 베낀 인용이 대조를 통과했을 것이다. **예시는 어떤 도구도 주지 않을 말로 둔다.**
+
+    예시를 아예 빼지는 않는다 — 빼면 모델이 그 칸에 무엇을 적는지 몰라 다른 도구의 줄이나
+    `[패치]` 같은 빈말을 적는다(27건 중 6건)."""
+    form = json.dumps(Answer.model_json_schema(), ensure_ascii=False)
+    assert "Piercing Darkness" not in form
+    assert "스킬 이름" in form  # 가짜임이 분명한 예시 — 노트의 절 이름은 영어다
