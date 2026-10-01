@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from pydantic import ValidationError
 
+from lol_balance import spend
 from lol_balance.agent import qa
 from lol_balance.agent.data import Corpus
 from lol_balance.agent.judge import (
@@ -48,6 +49,7 @@ from lol_balance.agent.judge import (
 )
 from lol_balance.agent.schema import Answer
 from lol_balance.agent.tools import make_tools
+from lol_balance.config import PROJECT_ROOT
 
 # **해설의 규칙 묶음(`judge.RULES`)을 그대로 붙이지 않는다.** 거기에는 답 형식에 없는
 # 칸(`tension` · `tension_quote`)이 나온다. 그것을 붙이고 「답하는 방법」을 중간에 뒀더니
@@ -112,7 +114,8 @@ def build_followup(
     **model_kwargs: Any,
 ) -> Graph:
     return create_agent(
-        model=chat_model(model, **model_kwargs),
+        # 유료 모델이면 쓴 돈이 장부에 `qa` 로 적힌다 — 후속 질문에 든 돈을 따로 본다
+        model=chat_model(model, why="qa", **model_kwargs),
         # 조정 전후 도구는 **여기서만** 쥐여 준다 — 평가 도구 묶음은 그대로 둔다
         tools=make_tools(corpus, ctx.at, base_notes=True, effects=True, cautions=True),
         system_prompt=SYSTEM.format(champion=ctx.champion, at=ctx.at, nxt=ctx.nxt),
@@ -140,6 +143,7 @@ class Reply:
     steps: list[Step]  # 이 질문에서 부른 도구
     check: qa.Check
     cautions: list[qa.Caution]  # 이 질문에서 도구가 낸 주의 — 화면이 답 아래에 붙인다
+    usd: float = 0.0  # 이 답에 든 돈. 로컬 모델이면 0 이다. 장부에서 잰다
 
 
 @dataclass(frozen=True)
@@ -233,8 +237,13 @@ def ask(
         if first
         else [HumanMessage(question)]
     )
+    # **이 답에 든 돈을 장부에서 잰다** — 묻기 전과 뒤의 차다. 토큰 수를 따로 세지
+    # 않는다(장부가 한 곳이다). 상한에 닿았으면 `invoke` 가 묻기 전에 멈춘다.
+    book = spend.ledger(PROJECT_ROOT)
+    before = book.spent()
     state = agent.invoke({"messages": messages}, _config(thread))
-    return turns(state["messages"])[-1].reply
+    reply = turns(state["messages"])[-1].reply
+    return replace(reply, usd=book.spent() - before)
 
 
 def _shown(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:

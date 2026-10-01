@@ -14,6 +14,8 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage, HumanMessage
 
 import lol_balance.agent.followup as fu
+import lol_balance.agent.judge as judge
+from lol_balance import spend
 from lol_balance.agent.data import Corpus
 from lol_balance.agent.judge import Context, Graph, build_context
 
@@ -374,3 +376,101 @@ def test_a_plain_text_answer_cannot_be_checked(setup: Setup) -> None:
         agent, fu.thread_id("s1", ctx.at, ctx.champion), "?", corpus, ctx, "해설"
     )
     assert reply.text == "첫 답" and reply.check.mark == "⚪"
+
+
+# ── 비용 — 쓴 돈이 장부에 남고, 상한에 닿으면 묻기 전에 멈춘다 ─────────────
+
+PAID = "openai:gpt-4.1-mini"
+
+
+def paid(text: str) -> AIMessage:
+    """유료 모델이 보고하는 토큰 수가 붙은 답."""
+    return AIMessage(
+        text,
+        usage_metadata={
+            "input_tokens": 2000,
+            "output_tokens": 150,
+            "total_tokens": 2150,
+        },
+    )
+
+
+@pytest.fixture
+def book(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> spend.Ledger:
+    """장부는 임시 폴더다 — `data/spend.jsonl` 을 건드리지 않는다. 진짜 모델도 안 부른다."""
+    ledger = spend.Ledger(tmp_path / "spend.jsonl")
+    monkeypatch.setattr(spend, "ledger", lambda root: ledger)
+    monkeypatch.setenv("LOL_BALANCE_SPEND_CAP", "1.0")
+    return ledger
+
+
+def paid_conversation(
+    tiny_corpus: Corpus,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    responses: list[AIMessage],
+) -> tuple[Context, Graph, str, dict[str, Any]]:
+    """`chat_model` 이 받은 인자를 적어 두고, 장부가 붙은 가짜 모델을 돌려준다."""
+    seen: dict[str, Any] = {}
+
+    def fake(model: str, **kwargs: Any) -> Scripted:
+        seen.update(kwargs, model=model)
+        guard = judge.SpendGuard(model, why=kwargs.get("why", "agent"))
+        return Scripted(responses=responses, callbacks=[guard])
+
+    monkeypatch.setattr(fu, "chat_model", fake)
+    ctx = build_context(tiny_corpus, "C3", "15_14")
+    agent = fu.build_followup(
+        tiny_corpus, ctx, fu.checkpointer(tmp_path / "followup.sqlite"), PAID
+    )
+    return ctx, agent, fu.thread_id("s1", ctx.at, ctx.champion), seen
+
+
+def test_a_paid_answer_is_written_to_the_ledger_as_qa(
+    tiny_corpus: Corpus,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    book: spend.Ledger,
+) -> None:
+    """**쓴 비용이 장부에 남는다.** 후속 질문에 쓴 돈은 `qa` 로 적히고, 그 답에 든 돈이
+    답과 함께 돌아온다 — 화면이 보여 준다."""
+    ctx, agent, thread, seen = paid_conversation(
+        tiny_corpus, tmp_path, monkeypatch, [paid("모른다.")]
+    )
+
+    reply = fu.ask(agent, thread, "?", tiny_corpus, ctx, "해설")
+
+    assert seen["why"] == "qa"
+    expected = spend.cost(PAID, 2000, 150)
+    assert reply.usd == pytest.approx(expected) and expected > 0
+    assert book.spent("qa") == pytest.approx(expected)
+
+
+def test_at_the_cap_a_question_is_never_sent(
+    tiny_corpus: Corpus,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    book: spend.Ledger,
+) -> None:
+    """상한에 닿았으면 **묻기 전에** 멈춘다 — 답도 장부도 그대로다."""
+    book.add(PAID, 5_000_000, 0, why="test")  # $2.00 — 상한 $1 을 넘는다
+    before = book.spent()
+    ctx, agent, thread, _ = paid_conversation(
+        tiny_corpus, tmp_path, monkeypatch, [paid("나가면 안 되는 답")]
+    )
+
+    with pytest.raises(spend.SpendCapReached):
+        fu.ask(agent, thread, "?", tiny_corpus, ctx, "해설")
+
+    assert book.spent() == before
+    assert fu.history(agent, thread) == [] or "나가면 안 되는 답" not in str(
+        fu.history(agent, thread)
+    )
+
+
+def test_a_local_answer_costs_nothing(setup: Setup) -> None:
+    corpus, ctx, agent, _ = setup
+    reply = fu.ask(
+        agent, fu.thread_id("s1", ctx.at, ctx.champion), "?", corpus, ctx, "해설"
+    )
+    assert reply.usd == 0.0

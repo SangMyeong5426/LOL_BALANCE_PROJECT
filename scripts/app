@@ -34,6 +34,7 @@ import gradio as gr
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from lol_balance import spend  # noqa: E402
 from lol_balance.agent import followup  # noqa: E402
 from lol_balance.agent.data import PANEL, available, load  # noqa: E402
 from lol_balance.agent.judge import (  # noqa: E402
@@ -329,8 +330,19 @@ def ask_followup(question, champion, at, model, explanation, visitor):
         return shown, question, f"실패: `{type(exc).__name__}: {exc}`"
     used = ", ".join(TOOL_NAMES.get(s.tool, s.tool) for s in reply.steps) or "없음"
     # 대조 결과는 답마다 대화 안에도 붙는다(`followup.history`) — 다시 열어도 남는다
-    note = f"{reply.check.line()}  \n이번 답에 부른 도구: {used}"
+    note = f"{reply.check.line()}  \n이번 답에 부른 도구: {used} · {cost_note(reply.usd, model)}"
     return followup.history(agent, thread), "", note
+
+
+def cost_note(usd: float, model: str) -> str:
+    """이 답에 든 돈과 지금까지 쓴 돈. **장부(`data/spend.jsonl`)에서 읽는다.**"""
+    if spend.is_local(model):
+        return "로컬 모델이라 비용이 없다"
+    book = spend.ledger(ROOT)
+    return (
+        f"이번 답 ${usd:.4f} · 후속 질문 누적 ${book.spent('qa'):.4f} · "
+        f"유료 전체 ${book.spent():.4f} / 상한 ${spend.cap():.2f}"
+    )
 
 
 def reveal(champion: str, at: str, opened: bool) -> str:
