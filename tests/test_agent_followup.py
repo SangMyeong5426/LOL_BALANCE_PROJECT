@@ -369,6 +369,57 @@ def test_a_thin_sample_shows_on_screen_whatever_the_model_writes(
     assert "표본이 얇다" in fu.SYSTEM and "경계 밖" in fu.SYSTEM
 
 
+def test_note_blocks_are_attached_by_code_not_by_the_model(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**근거로 본 노트 블록은 코드가 붙인다**(ADR 0017). 모델은 답과 숫자만 적고, 화면이
+    이번 질문에서 노트 도구가 돌려준 블록을 답 아래에 적는다 — 그래서 없는 블록이 나올 수
+    없다. **앞 질문에서 본 블록을 뒤 질문의 답에 붙이지 않는다.**"""
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call(
+                        "search_patch_notes", {"champion": "C3", "patch": "15_12"}, 1
+                    )
+                ],
+            ),
+            AIMessage(
+                "",
+                tool_calls=[
+                    tool_call(
+                        "Answer",
+                        {
+                            "answer": "Q 의 피해량을 60 에서 50 으로 줄였다.",
+                            "numbers": ["60", "50"],
+                        },
+                        2,
+                    )
+                ],
+            ),
+            AIMessage(
+                "", tool_calls=[tool_call("Answer", {"answer": "너프입니다."}, 3)]
+            ),
+        ],
+    )
+
+    first = fu.ask(agent, thread, "15_12 에 뭘 바꿨어?", tiny_corpus, ctx, "해설")
+    second = fu.ask(agent, thread, "그게 너프야?", tiny_corpus, ctx, "해설")
+
+    assert first.blocks == ["[15_12] Q - Blade"]
+    assert first.check.mark == "✅" and first.check.numbers == 2
+    assert second.blocks == []  # 이번 질문에서는 노트 도구를 부르지 않았다
+    shown = fu.history(agent, thread)
+    assert "근거로 본 노트 블록 — [15_12] Q - Blade" in shown[1]["content"]
+    assert "근거로 본 노트 블록" not in shown[3]["content"]
+    # 모델에게 인용을 적으라고 하지 않는다
+    assert "notes" not in fu.SYSTEM.split("## 답하는 방법")[1]
+
+
 def test_a_plain_text_answer_cannot_be_checked(setup: Setup) -> None:
     """구조화된 답 없이 글로만 답하면 대조할 수 없다 — ⚪ 로 보인다."""
     corpus, ctx, agent, _ = setup
