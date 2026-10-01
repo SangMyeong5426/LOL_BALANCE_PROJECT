@@ -241,8 +241,10 @@ class SpendGuard(BaseCallbackHandler):
     # 나갔다(2026-09-28, 가짜 모델로 확인).
     raise_error = True
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, why: str = "agent") -> None:
         self.model = model
+        # 무엇에 쓴 돈인가 — 장부에 같이 적는다. 후속 질문은 `qa` 다
+        self.why = why
         self.book = spend.ledger(PROJECT_ROOT)
 
     def on_chat_model_start(
@@ -263,7 +265,7 @@ class SpendGuard(BaseCallbackHandler):
                 if not (tin or tout):
                     continue
                 try:
-                    self.book.add(self.model, tin, tout, why="agent")
+                    self.book.add(self.model, tin, tout, why=self.why)
                 except OSError as exc:
                     # **이미 돈을 낸 답은 잃지 않는다.** 예외로 끝내면 답이 버려진다.
                     print(
@@ -272,8 +274,10 @@ class SpendGuard(BaseCallbackHandler):
                     )
 
 
-def chat_model(model: str, **kwargs: Any) -> BaseChatModel:
+def chat_model(model: str, why: str = "agent", **kwargs: Any) -> BaseChatModel:
     """모델을 만든다. **응답 한 번의 길이에 상한을 건다.**
+
+    `why` 는 유료 호출을 장부에 적을 때 붙는 용도다(`agent` · `qa`).
 
     호출 제한 미들웨어는 *횟수*를 막지 *한 번의 길이*를 막지 않는다. 로컬
     qwen3.5:2b 가 같은 문단을 2,400토큰 되풀이하다 `Judgment` 없이 끝난 적이
@@ -290,7 +294,7 @@ def chat_model(model: str, **kwargs: Any) -> BaseChatModel:
         # **유료면 장부를 붙인다 — 단가를 몰라도 붙인다.** 상한에 닿았거나 단가를
         # 모르면 호출 전에 멈춘다. 전에는 단가표에 있는 모델에만 붙여서, 표에 없는
         # 모델은 장부도 상한도 없이 나갔다.
-        extra["callbacks"] = [SpendGuard(model), *kwargs.pop("callbacks", [])]
+        extra["callbacks"] = [SpendGuard(model, why), *kwargs.pop("callbacks", [])]
         # 재시도는 한 번까지 — 반 전체가 나눠 쓰는 크레딧이다
         extra["max_retries"] = 1
     llm: BaseChatModel = init_chat_model(

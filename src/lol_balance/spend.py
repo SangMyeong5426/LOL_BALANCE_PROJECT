@@ -81,13 +81,17 @@ class Ledger:
 
     path: Path
 
-    def spent(self) -> float:
+    def spent(self, why: str | None = None) -> float:
+        """지금까지 쓴 돈. `why` 를 주면 그 용도로 쓴 것만 — 상한은 늘 **전부**로 잰다."""
         if not self.path.is_file():
             return 0.0
         total = 0.0
         for line in self.path.read_text().splitlines():
-            if line.strip():
-                total += float(json.loads(line).get("usd", 0.0))
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            if why is None or entry.get("why") == why:
+                total += float(entry.get("usd", 0.0))
         return total
 
     def add(self, model: str, tokens_in: int, tokens_out: int, why: str) -> float:
