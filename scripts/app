@@ -176,6 +176,7 @@ TOOL_NAMES = {
     "find_similar_cases": "비슷했던 과거 사례 찾기",
     "search_patch_notes": "지난 패치 노트 찾기",
     "lookup_stats": "이 챔피언의 지표 조회",
+    "effect_of": "조정 전후 비교",
 }
 SOURCE_NAMES = {
     "R1": "비슷한 사례",

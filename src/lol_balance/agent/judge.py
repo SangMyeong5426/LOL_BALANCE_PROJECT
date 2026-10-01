@@ -373,6 +373,8 @@ TOOL_SOURCE = {
     "find_similar_cases": "R1",
     "search_patch_notes": "R2",
     "lookup_stats": "R3",
+    # 조정 전후 — 패널 지표로 계산한다(`effect.change_of`). 후속 질문에서만 쥔다
+    "effect_of": "R3",
 }
 
 

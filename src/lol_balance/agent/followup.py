@@ -44,13 +44,18 @@ SYSTEM = (
 앞에서 {champion} ({at} → {nxt})에 대한 해설을 했고, 사람이 그 해설에 대해 더 묻습니다.
 최종 판단은 사람이 합니다.
 
-## 도구 — 전부 {at} 이전 기록만 보입니다
+## 도구 — {at} 뒤의 기록은 보이지 않습니다
 - find_similar_cases  R1 비슷했던 과거 사례
 - lookup_stats        R3 이 챔피언의 과거 지표
 - search_patch_notes  R2 과거에 무엇을 얼마나 바꿨나
+- effect_of           R3 조정 전후 — 그 조정 뒤 승률·픽률·밴율·판수가 어떻게 달라졌나
 
 필요하면 도구로 확인하고, 짧게 한국어로 답합니다. 근거에는 출처(R1·R2·R3·베이스라인)를
 괄호로 붙입니다.
+
+**숫자는 도구가 준 것만 씁니다.** 직접 빼거나 더해 새 숫자를 만들지 않습니다. 조정의
+효과를 「먹혔다 · 안 먹혔다」로 단정하지 않고 전후 변화와 판수를 같이 말합니다. 도구가
+표본이 얇다고 하면 답에도 그렇게 적습니다.
 
 """
     + RULES
@@ -80,7 +85,8 @@ def build_followup(
 ) -> Graph:
     return create_agent(
         model=chat_model(model, **model_kwargs),
-        tools=make_tools(corpus, ctx.at, base_notes=True),
+        # 조정 전후 도구는 **여기서만** 쥐여 준다 — 평가 도구 묶음은 그대로 둔다
+        tools=make_tools(corpus, ctx.at, base_notes=True, effects=True),
         system_prompt=SYSTEM.format(champion=ctx.champion, at=ctx.at, nxt=ctx.nxt),
         checkpointer=saver,
         middleware=guards(),

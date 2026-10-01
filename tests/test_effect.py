@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import PanelRowFactory
-from lol_balance.effect import Outcome, balance_control, outcomes
+from lol_balance.effect import Outcome, balance_control, change_of, outcomes
 
 
 def test_effect_subtracts_what_happened_to_everyone(make_row: PanelRowFactory) -> None:
@@ -177,3 +177,75 @@ def test_missing_pro_data_is_not_zero() -> None:
     """**모르는 것을 0 으로 적지 않는다.**"""
     assert pro(None, 0.2).pro_change is None
     assert pro(0.2, None).pro_change is None
+
+
+# ── 한 챔피언의 전후 — Q&A 도구(`effect_of`)가 쓴다 ───────────────────────
+
+
+def test_change_of_carries_the_same_numbers_as_outcomes(
+    make_row: PanelRowFactory,
+) -> None:
+    """**계산은 한 곳이다.** 한 챔피언의 전후를 볼 때도 대조군과 효과는 `outcomes`
+    (`run-effect` · 정적 API)의 것과 같다. 거기에 픽률 · 밴율 · 판수를 같이 둔다 —
+    표본 수 없이 변화만 보이면 잡음을 효과로 읽는다."""
+    before = (
+        make_row(
+            "13_14",
+            1,
+            win_rate=0.52,
+            pick_rate=0.10,
+            ban_rate=0.20,
+            matches=50_000,
+            adjusted_next=True,
+            direction_next="nerf",
+        ),
+        make_row("13_14", 2, win_rate=0.50),
+        make_row("13_14", 3, win_rate=0.48),
+    )
+    after = (
+        make_row(
+            "13_15", 1, win_rate=0.50, pick_rate=0.08, ban_rate=0.12, matches=40_000
+        ),
+        make_row("13_15", 2, win_rate=0.51),
+        make_row("13_15", 3, win_rate=0.49),
+    )
+    (expected,) = outcomes(before, after)
+
+    got = change_of(1, before, after)
+
+    assert got is not None and got.outcome == expected
+    assert got.baseline_shift == expected.baseline_shift and got.controls == 2
+    assert got.raw_shift == expected.raw_shift
+    assert got.adjusted_shift == expected.adjusted_shift
+    assert (got.before.pick_rate, got.after.pick_rate) == (0.10, 0.08)
+    assert (got.before.ban_rate, got.after.ban_rate) == (0.20, 0.12)
+    assert (got.before.matches, got.after.matches) == (50_000, 40_000)
+
+
+def test_change_of_measures_without_a_direction(make_row: PanelRowFactory) -> None:
+    """방향이 갈린 조정(`mixed`)은 「의도대로」를 말할 수 없다. 전후와 대조군은 잰다."""
+    before = (
+        make_row("13_14", 1, win_rate=0.52, adjusted_next=True, direction_next="mixed"),
+        make_row("13_14", 2, win_rate=0.50),
+    )
+    after = (
+        make_row("13_15", 1, win_rate=0.50),
+        make_row("13_15", 2, win_rate=0.51),
+    )
+
+    got = change_of(1, before, after)
+
+    assert got is not None and got.outcome is None
+    assert got.raw_shift == pytest.approx(-0.02)
+    assert got.adjusted_shift == pytest.approx(-0.03)
+
+
+def test_change_of_needs_both_patches_and_a_control_group(
+    make_row: PanelRowFactory,
+) -> None:
+    """한쪽 패치에 없거나 대조군이 없으면 변화를 정의할 수 없다 — 지어내지 않는다."""
+    before = (make_row("13_14", 1, adjusted_next=True, direction_next="nerf"),)
+    after = (make_row("13_15", 1),)
+
+    assert change_of(1, before, after) is None  # 대조군이 없다
+    assert change_of(9, before, after) is None  # 그 챔피언이 없다
