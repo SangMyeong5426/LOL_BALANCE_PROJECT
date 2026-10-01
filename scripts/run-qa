@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""고정 질문을 모델에게 묻고 **답 · 도구 출력 · 대조 결과**를 적는다.
+
+    ./scripts/run-qa dev-v1                                로컬 모델(키 없음 · 비용 0)
+    ./scripts/run-qa dev-v1 --limit 5                      앞에서 5개만
+    ./scripts/run-qa dev-v1 --label r2                     새 이름에 처음부터 다시 받는다
+    ./scripts/run-qa dev-v1 --model openai:gpt-4.1-mini    유료 — 아래 「비용」 참조
+
+질문마다 새 대화로 묻는다. **이어받는다** — 이미 답한 질문은 건너뛴다(같은 입력을 두 번
+부르지 않는다). 기록은 `runs/qa-<세트>-<모델>[-<라벨>].jsonl` 이다(커밋하지 않는다). 다 돈
+것을 `ground_truth/qa/answers-….jsonl` 로 옮겨 커밋하면 `score-qa` 가 모델 없이 채점만
+다시 한다.
+
+**프롬프트 · 답 형식 · 도구 설명을 고쳤으면 `--label` 로 새 이름에 받는다.** 기록마다 그
+지시의 지문을 적어 두고, 지문이 다른 답이 있는 파일에는 이어 적지 않는다 — 섞이면 무엇을
+잰 것인지 알 수 없다.
+
+## 비용
+
+**기본은 로컬 모델이다.** 키가 있어도 유료 모델을 고르지 않는다 — 유료는 `--model` 로
+적어야 돈다(extension 4절 3항). 유료 호출은 장부(`data/spend.jsonl`)에 `qa` 로 적히고,
+**이 실험의 누적 상한 $1** 에 닿으면 묻기 전에 멈추고 거기까지를 보고한다. 재시도는
+한 번까지고 출력은 호출당 600토큰이다(`judge.chat_model`).
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance import spend  # noqa: E402
+from lol_balance.agent import qa_set  # noqa: E402
+from lol_balance.agent.data import PANEL, available, load  # noqa: E402
+from lol_balance.config import LOCAL_AGENT_MODEL  # noqa: E402
+
+QUESTIONS = ROOT / "ground_truth" / "qa"
+# 크레딧은 반 전체가 나눠 쓴다 — 이 실험이 쓸 수 있는 유료 누적 상한(extension 4절 2항)
+EXPERIMENT_CAP = 1.0
+
+
+def arg(flag: str, default: str) -> str:
+    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+
+def main() -> int:
+    if len(sys.argv) < 2 or sys.argv[1].startswith("-"):
+        print(__doc__)
+        return 0 if {"-h", "--help"} & set(sys.argv) else 2
+    name = sys.argv[1]
+    source = QUESTIONS / f"questions-{name}.jsonl"
+    if not source.is_file():
+        print(
+            f"{source.relative_to(ROOT)} 가 없다 — ./scripts/make-qa-questions {name}"
+        )
+        return 2
+    if not available():
+        print(
+            f"{PANEL.relative_to(ROOT)} 가 없다 — 수집부터 한다(README 「시작하기」)."
+        )
+        return 1
+
+    model = arg("--model", LOCAL_AGENT_MODEL)
+    kwargs = {"reasoning": False} if model.startswith("ollama:") else {}
+    slug = model.replace(":", "-").replace("/", "-")
+    label = arg("--label", "")
+    out = ROOT / "runs" / f"qa-{name}-{slug}{'-' + label if label else ''}.jsonl"
+    questions = qa_set.read(source)
+    count = int(arg("--limit", "9999"))
+    todo = qa_set.pending(questions, out, model)[:count]
+    book = spend.ledger(ROOT)
+    limit = min(spend.cap(), EXPERIMENT_CAP)
+    print(
+        f"{model} · 질문 {len(questions)}개 중 {len(todo)}개를 묻는다 → {out.relative_to(ROOT)}"
+    )
+    if not spend.is_local(model):
+        print(
+            f"  유료 모델이다 — 지금까지 ${book.spent():.4f} · 이 실험의 상한 ${limit:.2f}"
+        )
+
+    corpus = load()
+    try:
+        for record in qa_set.run(
+            corpus,
+            questions,
+            model,
+            out,
+            # 대화는 받은 답 파일마다 따로 둔다 — 다른 이름으로 다시 받아도 앞의 것이 남는다
+            ROOT / "runs" / "qa-threads" / out.stem,
+            book,
+            limit=limit,
+            count=count,
+            **kwargs,
+        ):
+            tools = ",".join(s["tool"] for s in record["steps"]) or "없음"
+            print(
+                f"  {record['id']} {record['kind']:10} {record['check']['mark']} "
+                f"{record['seconds']:>5.1f}초  도구: {tools}",
+                flush=True,
+            )
+    except spend.SpendCapReached as exc:
+        print(f"멈춘다 — {exc}")
+    except qa_set.InstructionsChanged as exc:
+        print(f"멈춘다 — {exc}")
+        return 2
+
+    done = [r for r in qa_set.read(out) if r.get("model") == model]
+    if done:
+        print(f"\n받은 답 {len(done)}/{len(questions)}개")
+        print("\n".join(f"  {line}" for line in qa_set.report(qa_set.summarize(done))))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
