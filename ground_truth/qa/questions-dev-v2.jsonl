@@ -1,0 +1,27 @@
+{"id": "q01", "kind": "effect", "champion": "Caitlyn", "at": "15_13", "question": "13_15 패치에서 Caitlyn 버프 뒤에 뭐가 바뀌었어?", "patch": "13_15"}
+{"id": "q02", "kind": "effect", "champion": "Karthus", "at": "15_13", "question": "14_11 패치에서 Karthus 너프 뒤에 뭐가 바뀌었어?", "patch": "14_11"}
+{"id": "q03", "kind": "effect", "champion": "Veigar", "at": "15_13", "question": "13_22 패치에서 Veigar 버프 뒤에 뭐가 바뀌었어?", "patch": "13_22"}
+{"id": "q04", "kind": "effect", "champion": "Heimerdinger", "at": "15_13", "question": "13_22 패치에서 Heimerdinger 버프 뒤에 뭐가 바뀌었어?", "patch": "13_22"}
+{"id": "q05", "kind": "effect", "champion": "Jhin", "at": "15_13", "question": "14_2 패치에서 Jhin 버프 뒤에 뭐가 바뀌었어?", "patch": "14_2"}
+{"id": "q06", "kind": "effect", "champion": "Karma", "at": "15_13", "question": "15_6 패치에서 Karma 너프 뒤에 뭐가 바뀌었어?", "patch": "15_6"}
+{"id": "q07", "kind": "effect", "champion": "Brand", "at": "15_13", "question": "14_13 패치에서 Brand 너프 뒤에 뭐가 바뀌었어?", "patch": "14_13"}
+{"id": "q08", "kind": "effect", "champion": "Aatrox", "at": "15_13", "question": "14_4 패치에서 Aatrox 버프 뒤에 뭐가 바뀌었어?", "patch": "14_4"}
+{"id": "q09", "kind": "mixed", "champion": "Elise", "at": "15_13", "question": "14_12 패치에서 Elise 조정 뒤에 뭐가 바뀌었어?", "patch": "14_12"}
+{"id": "q10", "kind": "mixed", "champion": "Ivern", "at": "15_13", "question": "14_1 패치에서 Ivern 조정 뒤에 뭐가 바뀌었어?", "patch": "14_1"}
+{"id": "q11", "kind": "unadjusted", "champion": "Syndra", "at": "15_13", "question": "14_6 패치에서 Syndra 조정 뒤에 뭐가 바뀌었어?", "patch": "14_6"}
+{"id": "q12", "kind": "unadjusted", "champion": "Kennen", "at": "15_13", "question": "14_14 패치에서 Kennen 조정 뒤에 뭐가 바뀌었어?", "patch": "14_14"}
+{"id": "q13", "kind": "gap", "champion": "Blitzcrank", "at": "15_13", "question": "14_23 패치에서 Blitzcrank 조정 뒤에 뭐가 바뀌었어?", "patch": "14_23"}
+{"id": "q14", "kind": "gap", "champion": "Annie", "at": "15_13", "question": "15_4 패치에서 Annie 조정 뒤에 뭐가 바뀌었어?", "patch": "15_4"}
+{"id": "q15", "kind": "notes", "champion": "Lux", "at": "15_13", "question": "14_7 패치 노트에서는 Lux 의 뭘 바꿨어?", "patch": "14_7"}
+{"id": "q16", "kind": "notes", "champion": "Volibear", "at": "15_13", "question": "14_2 패치 노트에서는 Volibear 의 뭘 바꿨어?", "patch": "14_2"}
+{"id": "q17", "kind": "notes", "champion": "Jarvan IV", "at": "15_13", "question": "13_23 패치 노트에서는 Jarvan IV 의 뭘 바꿨어?", "patch": "13_23"}
+{"id": "q18", "kind": "notes", "champion": "Fiddlesticks", "at": "15_13", "question": "15_11 패치 노트에서는 Fiddlesticks 의 뭘 바꿨어?", "patch": "15_11"}
+{"id": "q19", "kind": "notes", "champion": "Rell", "at": "15_13", "question": "14_18 패치 노트에서는 Rell 의 뭘 바꿨어?", "patch": "14_18"}
+{"id": "q20", "kind": "stats", "champion": "Kha'Zix", "at": "15_13", "question": "Kha'Zix 의 최근 승률 흐름은 어때?"}
+{"id": "q21", "kind": "stats", "champion": "Heimerdinger", "at": "15_13", "question": "Heimerdinger 의 최근 승률 흐름은 어때?"}
+{"id": "q22", "kind": "stats", "champion": "Zeri", "at": "15_13", "question": "Zeri 의 최근 승률 흐름은 어때?"}
+{"id": "q23", "kind": "cases", "champion": "Cho'Gath", "at": "15_13", "question": "Cho'Gath 하고 지표가 비슷했던 챔피언들은 다음 패치에 어떻게 됐어?"}
+{"id": "q24", "kind": "cases", "champion": "Samira", "at": "15_13", "question": "Samira 하고 지표가 비슷했던 챔피언들은 다음 패치에 어떻게 됐어?"}
+{"id": "q25", "kind": "beyond", "champion": "Diana", "at": "15_13", "question": "15_14 패치에서는 Diana 조정이 어떻게 됐어?", "patch": "15_14"}
+{"id": "q26", "kind": "beyond", "champion": "Yasuo", "at": "15_13", "question": "15_14 패치에서는 Yasuo 조정이 어떻게 됐어?", "patch": "15_14"}
+{"id": "q27", "kind": "beyond", "champion": "Urgot", "at": "15_13", "question": "15_14 패치에서는 Urgot 조정이 어떻게 됐어?", "patch": "15_14"}

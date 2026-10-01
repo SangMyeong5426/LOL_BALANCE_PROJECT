@@ -20,6 +20,8 @@ Checkpointer 가 기억하므로 새 질문만 보낸다 — 교재 7장 「동�
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -30,6 +32,7 @@ from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from pydantic import ValidationError
@@ -106,6 +109,23 @@ def thread_id(session: str, at: str, champion: str) -> str:
     return f"{session}:{at}:{champion}"
 
 
+def tools_for(corpus: Corpus, at: str) -> list[BaseTool]:
+    """후속 질문이 쥐는 도구. 조정 전후 도구는 **여기서만** 쥐여 준다 — 평가 도구 묶음은
+    그대로 둔다."""
+    return make_tools(corpus, at, base_notes=True, effects=True, cautions=True)
+
+
+def stamp(tools: Sequence[BaseTool]) -> str:
+    """**모델이 받는 지시의 지문** — 프롬프트 · 답 형식 · 도구 설명 중 하나라도 바뀌면 달라진다.
+
+    고정 질문의 답마다 같이 적는다(`qa_set.ask`). 답 형식 설명에 적어 둔 예시 하나가 답을
+    바꿨다(고정 질문 q15, 2026-10-01) — 어떤 지시로 받은 답인지 모르면 견줄 수 없다.
+    """
+    told = [SYSTEM, json.dumps(Answer.model_json_schema(), sort_keys=True)]
+    told += [f"{t.name}\n{t.description}" for t in tools]
+    return hashlib.sha256("\n".join(told).encode("utf-8")).hexdigest()[:8]
+
+
 def build_followup(
     corpus: Corpus,
     ctx: Context,
@@ -116,8 +136,7 @@ def build_followup(
     return create_agent(
         # 유료 모델이면 쓴 돈이 장부에 `qa` 로 적힌다 — 후속 질문에 든 돈을 따로 본다
         model=chat_model(model, why="qa", **model_kwargs),
-        # 조정 전후 도구는 **여기서만** 쥐여 준다 — 평가 도구 묶음은 그대로 둔다
-        tools=make_tools(corpus, ctx.at, base_notes=True, effects=True, cautions=True),
+        tools=tools_for(corpus, ctx.at),
         system_prompt=SYSTEM.format(champion=ctx.champion, at=ctx.at, nxt=ctx.nxt),
         # 답을 칸으로 받는다 — 숫자와 인용을 옮겨 적게 하고 코드가 대조한다
         response_format=ToolStrategy(Answer),

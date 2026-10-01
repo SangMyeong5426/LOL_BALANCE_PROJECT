@@ -1,0 +1,27 @@
+{"id": "q01", "kind": "effect", "champion": "Rammus", "at": "15_13", "question": "13_21 패치에서 Rammus 너프 뒤에 뭐가 바뀌었어?", "patch": "13_21"}
+{"id": "q02", "kind": "effect", "champion": "LeBlanc", "at": "15_13", "question": "13_21 패치에서 LeBlanc 버프 뒤에 뭐가 바뀌었어?", "patch": "13_21"}
+{"id": "q03", "kind": "effect", "champion": "Volibear", "at": "15_13", "question": "14_7 패치에서 Volibear 너프 뒤에 뭐가 바뀌었어?", "patch": "14_7"}
+{"id": "q04", "kind": "effect", "champion": "Aurelion Sol", "at": "15_13", "question": "14_9 패치에서 Aurelion Sol 너프 뒤에 뭐가 바뀌었어?", "patch": "14_9"}
+{"id": "q05", "kind": "effect", "champion": "Kai'Sa", "at": "15_13", "question": "15_6 패치에서 Kai'Sa 버프 뒤에 뭐가 바뀌었어?", "patch": "15_6"}
+{"id": "q06", "kind": "effect", "champion": "Caitlyn", "at": "15_13", "question": "15_6 패치에서 Caitlyn 너프 뒤에 뭐가 바뀌었어?", "patch": "15_6"}
+{"id": "q07", "kind": "effect", "champion": "Lee Sin", "at": "15_13", "question": "14_13 패치에서 Lee Sin 버프 뒤에 뭐가 바뀌었어?", "patch": "14_13"}
+{"id": "q08", "kind": "effect", "champion": "Maokai", "at": "15_13", "question": "14_4 패치에서 Maokai 너프 뒤에 뭐가 바뀌었어?", "patch": "14_4"}
+{"id": "q09", "kind": "mixed", "champion": "Akshan", "at": "15_13", "question": "14_14 패치에서 Akshan 조정 뒤에 뭐가 바뀌었어?", "patch": "14_14"}
+{"id": "q10", "kind": "mixed", "champion": "Ornn", "at": "15_13", "question": "14_12 패치에서 Ornn 조정 뒤에 뭐가 바뀌었어?", "patch": "14_12"}
+{"id": "q11", "kind": "unadjusted", "champion": "Thresh", "at": "15_13", "question": "13_15 패치에서 Thresh 조정 뒤에 뭐가 바뀌었어?", "patch": "13_15"}
+{"id": "q12", "kind": "unadjusted", "champion": "Fizz", "at": "15_13", "question": "15_5 패치에서 Fizz 조정 뒤에 뭐가 바뀌었어?", "patch": "15_5"}
+{"id": "q13", "kind": "gap", "champion": "Lissandra", "at": "15_13", "question": "15_4 패치에서 Lissandra 조정 뒤에 뭐가 바뀌었어?", "patch": "15_4"}
+{"id": "q14", "kind": "gap", "champion": "Malphite", "at": "15_13", "question": "15_8 패치에서 Malphite 조정 뒤에 뭐가 바뀌었어?", "patch": "15_8"}
+{"id": "q15", "kind": "notes", "champion": "Illaoi", "at": "15_13", "question": "14_3 패치 노트에서는 Illaoi 의 뭘 바꿨어?", "patch": "14_3"}
+{"id": "q16", "kind": "notes", "champion": "Azir", "at": "15_13", "question": "15_12 패치 노트에서는 Azir 의 뭘 바꿨어?", "patch": "15_12"}
+{"id": "q17", "kind": "notes", "champion": "Talon", "at": "15_13", "question": "14_17 패치 노트에서는 Talon 의 뭘 바꿨어?", "patch": "14_17"}
+{"id": "q18", "kind": "notes", "champion": "LeBlanc", "at": "15_13", "question": "15_12 패치 노트에서는 LeBlanc 의 뭘 바꿨어?", "patch": "15_12"}
+{"id": "q19", "kind": "notes", "champion": "Renata Glasc", "at": "15_13", "question": "13_21 패치 노트에서는 Renata Glasc 의 뭘 바꿨어?", "patch": "13_21"}
+{"id": "q20", "kind": "stats", "champion": "Senna", "at": "15_13", "question": "Senna 의 최근 승률 흐름은 어때?"}
+{"id": "q21", "kind": "stats", "champion": "Shen", "at": "15_13", "question": "Shen 의 최근 승률 흐름은 어때?"}
+{"id": "q22", "kind": "stats", "champion": "Irelia", "at": "15_13", "question": "Irelia 의 최근 승률 흐름은 어때?"}
+{"id": "q23", "kind": "cases", "champion": "Twitch", "at": "15_13", "question": "Twitch 하고 지표가 비슷했던 챔피언들은 다음 패치에 어떻게 됐어?"}
+{"id": "q24", "kind": "cases", "champion": "Kog'Maw", "at": "15_13", "question": "Kog'Maw 하고 지표가 비슷했던 챔피언들은 다음 패치에 어떻게 됐어?"}
+{"id": "q25", "kind": "beyond", "champion": "Riven", "at": "15_13", "question": "15_14 패치에서는 Riven 조정이 어떻게 됐어?", "patch": "15_14"}
+{"id": "q26", "kind": "beyond", "champion": "Katarina", "at": "15_13", "question": "15_14 패치에서는 Katarina 조정이 어떻게 됐어?", "patch": "15_14"}
+{"id": "q27", "kind": "beyond", "champion": "Tahm Kench", "at": "15_13", "question": "15_14 패치에서는 Tahm Kench 조정이 어떻게 됐어?", "patch": "15_14"}
