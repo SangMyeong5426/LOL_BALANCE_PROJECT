@@ -203,7 +203,10 @@ def test_an_answer_built_on_the_tools_passes_the_check(
                 tool_calls=[
                     tool_call(
                         "Answer",
-                        {"answer": f"조정 뒤 승률은 {win} 다.", "numbers": [win]},
+                        {
+                            "answer": f"조정 뒤 승률은 {win} 다. 표본이 얇다.",
+                            "numbers": [win],
+                        },
                         2,
                     )
                 ],
@@ -213,7 +216,8 @@ def test_an_answer_built_on_the_tools_passes_the_check(
 
     reply = fu.ask(agent, thread, "조정 뒤 승률은?", tiny_corpus, ctx, "해설")
 
-    assert reply.text == f"조정 뒤 승률은 {win} 다."
+    # 작은 패널은 챔피언당 수천 판이라 도구가 표본 주의를 낸다 — 답이 그것을 옮겼다
+    assert reply.text == f"조정 뒤 승률은 {win} 다. 표본이 얇다."
     assert reply.check.mark == "✅" and reply.check.numbers == 1
     assert [s.tool for s in reply.steps] == [
         "effect_of"
@@ -319,6 +323,48 @@ def test_saved_answers_reopen_without_an_unregistered_type_warning(
 
     assert saved[-1]["content"].startswith("모른다.")
     assert "unregistered type" not in caplog.text
+
+
+def test_a_thin_sample_shows_on_screen_whatever_the_model_writes(
+    tiny_corpus: Corpus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**표본이 작으면 답에 그 사실을 적는다**(extension 3절 7항). 모델이 그 말을 빼면
+    ⚠ 가 붙고, 빼든 말든 **도구가 낸 주의는 화면이 답 아래에 붙인다** — 사람이 못 보고
+    지나가지 않게."""
+    champion, win = measured(tiny_corpus)
+    call = AIMessage(
+        "",
+        tool_calls=[
+            tool_call("effect_of", {"champion": champion, "patch": "15_13"}, 1)
+        ],
+    )
+
+    def answer(text: str, n: int) -> AIMessage:
+        return AIMessage(
+            "", tool_calls=[tool_call("Answer", {"answer": text, "numbers": [win]}, n)]
+        )
+
+    ctx, agent, thread = conversation(
+        tiny_corpus,
+        tmp_path,
+        monkeypatch,
+        [
+            call,
+            answer(f"조정 뒤 승률은 {win} 다.", 2),
+            call,
+            answer(f"조정 뒤 승률은 {win} 다. 표본이 얇아 단정하기 어렵다.", 4),
+        ],
+    )
+
+    dropped = fu.ask(agent, thread, "조정 뒤 승률은?", tiny_corpus, ctx, "해설")
+    kept = fu.ask(agent, thread, "다시 알려줘", tiny_corpus, ctx, "해설")
+
+    assert dropped.check.mark == "⚠" and "표본이 얇다" in dropped.check.line()
+    assert kept.check.mark == "✅"
+    assert [c.kind for c in dropped.cautions] == ["표본"]
+    shown = fu.history(agent, thread)
+    assert "도구가 낸 주의" in shown[1]["content"] and "판(기준" in shown[1]["content"]
+    assert "표본이 얇다" in fu.SYSTEM and "경계 밖" in fu.SYSTEM
 
 
 def test_a_plain_text_answer_cannot_be_checked(setup: Setup) -> None:
