@@ -39,3 +39,14 @@ jobs:
 
       - name: 문서 링크
         run: ./scripts/check-links
+
+  # 재현 패키징 — `Dockerfile` 이 계속 빌드되고, 이미지에 든 것만으로 테스트가 도는지.
+  # 이미지에 키 · 자료가 없는지도 본다. 자료가 없어 배포 페이지 재현은 여기서 못 본다 —
+  # 그것은 자료가 있는 기계에서 같은 스크립트가 본다(docs/extension.md 3단계).
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 이미지를 빌드해 그 안에서 테스트를 돌린다
+        run: ./scripts/check-docker --require
