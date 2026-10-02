@@ -25,6 +25,7 @@ import json
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -61,7 +62,70 @@ NOTES = [
     "조정 효과는 같은 패치에서 조정되지 않은 챔피언의 평균 변화를 뺀 승률 변화다"
     "(run-effect 와 같은 계산). 측정이지 판정이 아니다.",
     "같은 버전 안에서는 칸을 더하기만 한다. 빼거나 뜻을 바꾸면 v2 로 낸다.",
+    "비율과 점수는 소수 넷째 자리로 줄인다. 그 값을 화면에 보이는 자리(비율은 % 의 소수 "
+    "첫째, 점수는 소수 둘째)로 다시 줄여도 원래 값을 한 번 줄인 것과 같도록, 딱 중간에 "
+    "걸리는 값은 자리를 늘려 싣는다.",
 ]
+
+# ── 값을 줄이는 법 ──────────────────────────────────────────────────────
+#
+# **두 번 줄이면 틀린다.** 0.48951 을 넷째 자리로 줄이면 0.4895 고, 페이지가 그것을 `%` 의
+# 첫째 자리로 다시 줄이면 48.9% 와 49.0% 의 딱 중간이다 — 원래 값을 한 번 줄이면 49.0% 인데
+# 페이지에는 48.9% 가 나왔다. 공개 페이지가 보이는 값의 4.5% 가 그렇게 0.1%p 어긋나 있었다
+# (2026-10-02 · 38,566개 중 1,741개 — 로컬 화면과 근거 글이 적는 값과 견줬다).
+#
+# 줄인 값이 다시 줄일 자리의 **딱 중간**에 걸릴 때만 생기는 일이다. 그때는 자리를 늘려
+# 원래 값이 어느 쪽이었는지를 남긴다. 중간이 아니면 두 번 줄여도 한 번 줄인 것과 같다.
+
+# 페이지가 보이는 자리 — `docs/site/index.html` 의 `pc` · `pp` · `two` 와 맞춰 둔다
+RATE = 3  # 비율 · 변화: `%` 로 소수 첫째 자리 = 소수 셋째 자리
+SCORE = 2  # 점수: 소수 둘째 자리
+DIGITS = 4  # 공개하는 자리. 중간에 걸리면 늘린다
+# 소수가 들어가는 칸 → 페이지가 줄이는 자리. 모르는 칸이 생기면 계약 테스트가 멈춘다
+SHOWN = {
+    "score": SCORE,
+    **dict.fromkeys(
+        (
+            "win_rate",
+            "pick_rate",
+            "ban_rate",
+            "pro_presence",
+            "win_rate_before",
+            "win_rate_after",
+            "control_shift",
+            "effect",
+            "pro_before",
+            "pro_after",
+        ),
+        RATE,
+    ),
+}
+
+
+def on_boundary(value: float, shown: int) -> bool:
+    """`value` 가 소수 `shown` 자리로 줄일 때의 **딱 중간**인가 — 다음 자리가 5 고 그 뒤가 없다.
+
+    십진수로 본다(JSON 에 적히는 글자 그대로). 이진수의 오차는 여기 끼지 않는다.
+    """
+    scaled = abs(Decimal(repr(value))).scaleb(shown)
+    return scaled - scaled.to_integral_value(ROUND_FLOOR) == Decimal("0.5")
+
+
+def keep(value: float, shown: int, digits: int = DIGITS) -> float:
+    """공개할 값. 소수 `digits` 자리로 줄이되 **`shown` 자리로 다시 줄여도 원래 값을 한 번
+    줄인 것과 같게** 한다 — 줄인 값이 그 자리의 딱 중간에 걸리면 걸리지 않을 때까지 자리를
+    늘린다.
+
+    끝까지 걸리면 원래 값을 그대로 준다. 그때는 페이지가 보는 값이 원래 값과 같은 수다.
+    """
+    for places in range(max(digits, shown + 1), 17):
+        kept = round(value, places)
+        if kept == 0 and value != 0:
+            # 0 으로 줄면 부호가 사라진다 — 조금 내린 것(−0.0%p)이 +0.0%p 로 보인다
+            continue
+        if not on_boundary(kept, shown):
+            return kept
+    return value
 
 
 # ── 모양 ────────────────────────────────────────────────────────────────
@@ -277,7 +341,8 @@ def picks(
 
 
 def _r(value: float | None) -> float | None:
-    return None if value is None else round(value, 4)
+    """비율 하나 — 없으면 없는 대로."""
+    return None if value is None else keep(value, RATE)
 
 
 def _candidate(rank: int, pick: Pick, want: str) -> Candidate:
@@ -286,7 +351,7 @@ def _candidate(rank: int, pick: Pick, want: str) -> Candidate:
         rank=rank,
         champion_id=r.champion_id,
         champion=r.champion,
-        score=round(pick.score, 4),
+        score=keep(pick.score, SCORE),
         matches=r.matches,
         # 출처 · 방향 값은 pydantic 이 만들 때 검사한다 — 정해 둔 값이 아니면 멈춘다
         evidence=[
@@ -344,10 +409,10 @@ def _effect(o: Outcome, applied: str) -> Effect:
         patch=o.patch,
         next=applied,
         direction=cast(Direction, o.direction),
-        win_rate_before=round(o.before, 4),
-        win_rate_after=round(o.after, 4),
-        control_shift=round(o.baseline_shift, 4),
-        effect=round(o.adjusted_shift, 4),
+        win_rate_before=keep(o.before, RATE),
+        win_rate_after=keep(o.after, RATE),
+        control_shift=keep(o.baseline_shift, RATE),
+        effect=keep(o.adjusted_shift, RATE),
         intended=o.worked,
         closer=o.closer,
         pro_before=_r(o.pro_before),
@@ -379,8 +444,8 @@ def champion_files(
             history=[
                 HistoryRow(
                     patch=r.patch,
-                    win_rate=round(r.win_rate, 4),
-                    pick_rate=round(r.pick_rate, 4),
+                    win_rate=keep(r.win_rate, RATE),
+                    pick_rate=keep(r.pick_rate, RATE),
                     ban_rate=_r(r.ban_rate),
                     matches=r.matches,
                     pro_presence=_r(r.pro_presence),
