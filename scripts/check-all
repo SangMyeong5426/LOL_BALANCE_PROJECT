@@ -43,6 +43,9 @@ CHECKS: tuple[tuple[str, list[str], Path | None], ...] = (
     ("README 수치", ["./scripts/check-docs"], PANEL),
     ("라벨 충돌", ["./scripts/score-labels"], PANEL),
     ("노트 검색", ["./scripts/score-retrieval"], NOTES),
+    # 커밋된 정적 API 가 지금 코드 · 자료로 만든 것과 바이트까지 같은가. 쓰지 않고 견준다 —
+    # 코드를 고치고 `make-site` 를 안 돌리면 여기서 걸린다
+    ("배포 페이지", ["./scripts/make-site", "--check"], PANEL),
     ("누출", ["./scripts/check-leakage"], PANEL),
     ("재현", ["./scripts/check-repro"], PANEL),
 )
