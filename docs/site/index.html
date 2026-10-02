@@ -346,12 +346,23 @@ function fail(e) {
 
 // 한글 이름이 없으면 영문 그대로 — 자료가 없어도 페이지가 돈다.
 const ko = n => KO[n] || n;
+// 숫자를 줄이는 법은 파이썬과 같게 한다 — 근거 글(파이썬이 적었다)과 표(여기서 줄인다)에
+// 같은 값이 다르게 보이면 안 된다. `toFixed` 는 딱 중간이면 늘 올리고 파이썬은 짝수 쪽으로
+// 간다. 프로 픽·밴율 1/80 = 1.25% 가 여기서는 1.3%, 근거 글에서는 1.2% 였다.
+// 딱 중간은 값이 (홀수)/2^(자리+1) 일 때뿐이다 — 그때만 짝수 쪽을 고른다.
+// API 는 줄인 값이 중간에 걸리지 않게 자리를 늘려 싣는다(site_api.keep). 그래서 여기서 다시
+// 줄여도 원래 값을 한 번 줄인 것과 같다 — 전에는 보이는 값의 4.5% 가 0.1%p 어긋났다.
+// 이 함수를 고치면 tests/test_site_api.py 의 옮겨 적은 것도 같이 고친다.
+const cut = (y, places) => {
+  const odd = y * 2 ** (places + 1);
+  if (!Number.isInteger(odd) || odd % 2 === 0) return y.toFixed(places);
+  const low = Math.floor(y * 10 ** places);
+  return ((low % 2 ? low + 1 : low) / 10 ** places).toFixed(places);
+};
 // 값이 없으면(밴 자료가 빠진 패치, 프로 경기가 없는 챔피언) 0 이 아니라 「—」로 적는다.
-const pc = x => x == null ? '—' : (x * 100).toFixed(1) + '%';
-const pp = x => (x < 0 ? '−' : '+') + Math.abs(x * 100).toFixed(1) + '%p';
-// 점수는 API 에 소수 넷째 자리까지 있다. `toFixed(2)` 만 쓰면 0.7450 이 이진수로
-// 0.74499… 라 0.74 로 내려간다(16_2 케인 — 실제 값은 0.74502). 반올림을 한 번 해 둔다.
-const two = x => (Math.round(x * 100) / 100).toFixed(2);
+const pc = x => x == null ? '—' : cut(x * 100, 1) + '%';
+const pp = x => (x < 0 ? '−' : '+') + cut(Math.abs(x * 100), 1) + '%p';
+const two = x => cut(x, 2);
 const num = x => x.toLocaleString('ko-KR');
 const games = n => n >= 10000 ? (n / 10000).toFixed(1) + '만 ' : num(n);
 const yes = b => b ? '예' : '아니오';
