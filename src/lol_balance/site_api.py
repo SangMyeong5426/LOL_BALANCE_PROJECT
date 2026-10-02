@@ -527,33 +527,69 @@ def check_public_range(files: Mapping[str, Any]) -> None:
                     fail(path, token)
 
 
-def write(site: Path, files: Mapping[str, _Model]) -> list[Path]:
-    """`site/api/v1/` 에 쓴다. **공개 범위를 먼저 검사한다.** 없어진 응답은 지운다."""
+def render(files: Mapping[str, _Model]) -> dict[str, str]:
+    """`api/v1/` 아래에 놓일 글 전부 — 경로 → 파일 내용. **공개 범위를 먼저 검사한다.**
+
+    응답과 스키마를 같이 낸다. `write` 는 이것을 쓰고 `stale` 은 이것과 디스크를 견준다 —
+    쓰는 쪽과 견주는 쪽이 같은 글을 봐야 「다시 만들어도 같다」가 뜻을 가진다.
+    """
     dumped = {path: model.model_dump(mode="json") for path, model in files.items()}
     check_public_range(dumped)
 
+    texts = {
+        path: json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n"
+        for path, data in sorted(dumped.items())
+    }
+    for name, model in SCHEMAS.items():
+        schema = json.dumps(model.model_json_schema(), ensure_ascii=False, indent=2)
+        texts[f"schema/{name}.json"] = schema + "\n"
+    return texts
+
+
+def write(site: Path, files: Mapping[str, _Model]) -> list[Path]:
+    """`site/api/v1/` 에 쓴다. **공개 범위를 먼저 검사한다.** 없어진 응답 · 스키마는 지운다."""
+    texts = render(files)
+
     root = site / API_DIR
-    wanted = {root / path for path in dumped}
+    wanted = {root / path for path in texts}
     if root.exists():
         for old in root.rglob("*.json"):
-            if old not in wanted and "schema" not in old.relative_to(root).parts:
+            if old not in wanted:
                 old.unlink()
 
     written: list[Path] = []
-    for path, data in sorted(dumped.items()):
+    for path, text in texts.items():
         out = root / path
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n",
-            encoding="utf-8",
-        )
-        written.append(out)
-    for name, model in SCHEMAS.items():
-        out = root / "schema" / f"{name}.json"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            json.dumps(model.model_json_schema(), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        # 줄 끝을 바꾸지 않는다 — 어느 기계에서 만들어도 바이트가 같아야 한다
+        out.write_bytes(text.encode("utf-8"))
         written.append(out)
     return written
+
+
+def stale(site: Path, files: Mapping[str, _Model]) -> list[str]:
+    """디스크의 `site/api/v1/` 이 지금 만들 것과 **바이트까지 같은지.** 다른 것을 낸다.
+
+    **쓰지 않는다.** 검사가 고쳐 버리면 무엇이 달랐는지 남지 않고, 자료를 읽기 전용으로
+    붙인 컨테이너에서도 돌아야 한다([extension 3단계](../../docs/extension.md)).
+
+        다르다  내용이 다르다
+        없다    만들어야 하는데 디스크에 없다
+        남았다  디스크에 있는데 이제 만들지 않는다
+    """
+    texts = render(files)
+    root = site / API_DIR
+    on_disk = (
+        {p.relative_to(root).as_posix() for p in root.rglob("*.json")}
+        if root.exists()
+        else set()
+    )
+    problems: list[str] = []
+    for path, text in texts.items():
+        if path not in on_disk:
+            problems.append(f"없다: {path}")
+        elif (root / path).read_bytes() != text.encode("utf-8"):
+            problems.append(f"다르다: {path}")
+    problems += [f"남았다: {path}" for path in sorted(on_disk - set(texts))]
+    order = {"다르다": 0, "없다": 1, "남았다": 2}
+    return sorted(problems, key=lambda line: (order[line.split(":")[0]], line))

@@ -129,6 +129,62 @@ def test_scores_are_not_called_probabilities() -> None:
     assert not {"prob", "probability"} & fields
 
 
+# ── 다시 만들어 견준다 — 쓰지 않고 본다 ─────────────────────────────────
+
+
+def small_api() -> dict[str, Any]:
+    summary = site_api.PatchSummary(id="15_14", next="15_15", candidates=3)
+    return {"patches.json": site_api.PatchList(split="15_13", patches=[summary])}
+
+
+def test_a_fresh_write_is_never_stale(tmp_path: Path) -> None:
+    """**같은 자료로 다시 만들면 바이트까지 같은가**(extension 3단계). 방금 쓴 것을 다시
+    만들어 견주면 다른 것이 없어야 한다 — 응답도 스키마도."""
+    written = site_api.write(tmp_path, small_api())
+    assert site_api.stale(tmp_path, small_api()) == []
+    assert {p.relative_to(tmp_path / site_api.API_DIR).as_posix() for p in written} == {
+        "patches.json",
+        *(f"schema/{name}.json" for name in site_api.SCHEMAS),
+    }
+
+
+def test_stale_names_what_differs_and_writes_nothing(tmp_path: Path) -> None:
+    """다른 것을 **종류별로 말하고, 디스크는 건드리지 않는다.** 검사가 고쳐 버리면 무엇이
+    달랐는지 남지 않는다 — 자료를 읽기 전용으로 붙인 컨테이너에서도 돌아야 한다."""
+    site_api.write(tmp_path, small_api())
+    root = tmp_path / site_api.API_DIR
+    changed = root / "patches.json"
+    changed.write_bytes(changed.read_bytes().replace(b"15_14", b"15_12"))
+    (root / "old.json").write_text("{}\n", encoding="utf-8")
+    (root / "schema" / "patch.json").unlink()
+    before = {p: p.read_bytes() for p in root.rglob("*.json")}
+
+    problems = site_api.stale(tmp_path, small_api())
+
+    assert problems == [
+        "다르다: patches.json",
+        "없다: schema/patch.json",
+        "남았다: old.json",
+    ]
+    assert {p: p.read_bytes() for p in root.rglob("*.json")} == before
+
+
+def test_writing_removes_what_is_no_longer_made(tmp_path: Path) -> None:
+    """없어진 응답과 **없어진 스키마**를 지운다 — 남아 있으면 「다시 만들어도 같다」가 늘
+    거짓이 된다."""
+    site_api.write(tmp_path, small_api())
+    root = tmp_path / site_api.API_DIR
+    (root / "patches").mkdir()
+    (root / "patches" / "13_1.json").write_text("{}\n", encoding="utf-8")
+    (root / "schema" / "gone.json").write_text("{}\n", encoding="utf-8")
+
+    site_api.write(tmp_path, small_api())
+
+    assert not (root / "patches" / "13_1.json").exists()
+    assert not (root / "schema" / "gone.json").exists()
+    assert site_api.stale(tmp_path, small_api()) == []
+
+
 # ── 계약: 커밋된 파일 ────────────────────────────────────────────────────
 
 

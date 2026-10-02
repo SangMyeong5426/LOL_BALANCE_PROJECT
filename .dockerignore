@@ -1,0 +1,27 @@
+# 이미지에 넣지 않는 것 — docs/extension.md 4절 5 · 6항.
+# 자료와 키는 실행할 때 붙인다:  docker run -v "$PWD/data:/app/data:ro" --env-file .env …
+
+# 키 — 틀(.env.example)에는 키가 없다
+.env
+.env.*
+!.env.example
+
+# 자료와 산출물
+data/
+runs/
+outputs/
+*.tar
+*.gz
+
+# 저장소와 도구가 만든 것
+.git/
+.venv/
+.claude/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.DS_Store

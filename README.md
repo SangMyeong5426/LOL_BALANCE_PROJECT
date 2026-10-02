@@ -157,7 +157,7 @@ LLM 이 만든 것은 정답지 라벨 1,630종, 밸런스 규칙 12개, 판단 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-./scripts/check-all                 # 테스트 642개 · 검사 11개
+./scripts/check-all                 # 테스트 653개 · 검사 12개
 ```
 
 API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직후 `data/` 는 비어 있고,
@@ -188,6 +188,23 @@ API 키는 필요하지 않다. 원자료는 커밋하지 않으므로 clone 직
 판단한 뒤 맞춰 보도록 한 것이다. 검색 경계는 `as_of` 로 도구가 지키므로 질의한 패치
 이후의 정보는 검색 대상에 포함되지 않는다.
 
+### 다른 기계에서 다시 만들어 보기 — Docker
+
+파이썬 3.11.15 와 고정한 의존성을 담은 이미지 하나다. **자료와 키는 이미지에 넣지 않고**
+실행할 때 붙인다. 서버가 아니다 — 테스트와 계산을 다시 돌려 보는 것이다.
+
+```bash
+docker build -t lol-balance .
+docker run --rm lol-balance                                   # 테스트 — 자료 없이 돈다
+docker run --rm -v "$PWD/data:/app/data:ro" lol-balance ./scripts/make-site --check
+docker run --rm -v "$PWD/data:/app/data:ro" lol-balance ./scripts/run-report
+./scripts/check-docker              # 위를 한 번에 — 이미지에 키 · 자료가 없는지도 본다
+```
+
+같은 자료를 붙이면 배포 페이지의 정적 API 202개가 **바이트까지 같고**, `run-report` 의 표가
+한 글자도 다르지 않다 — 머리 숫자(27.4% · 22.9% · 0.900)를 포함한 숫자 145개다. 로컬 화면과
+로컬 모델(Ollama)은 이미지 밖이다([extension 3단계](docs/extension.md)).
+
 ## 구조
 
 ```text
@@ -195,7 +212,7 @@ src/lol_balance/   수집 · 파싱 · 패널 · 예측 · 평가 · 에이전�
 scripts/           실행 진입점 (수집 · 라벨링 · 예측 · 리포트 · 검증 · 화면)
 ground_truth/      정답지. 실제 조정 결과 1,630건 (커밋한다)
 rules/             밸런스 규칙 12개 (커밋한다)
-tests/             642개 · 커버리지 94%
+tests/             653개 · 커버리지 94%
 data/ · runs/      원자료와 산출물 (커밋하지 않는다)
 ```
 
