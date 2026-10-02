@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""재현 패키징을 **실제로 돌려 본다** — 이미지를 빌드하고 그 안에서 테스트와 배포 페이지를 본다.
+
+    ./scripts/check-docker                          빌드부터 전부
+    ./scripts/check-docker --no-build               이미 빌드한 이미지로
+    ./scripts/check-docker --platform linux/amd64   다른 CPU 로 — 에뮬레이션이라 느리다
+    ./scripts/check-docker --require                Docker 를 못 쓰면 실패로 센다 (CI)
+
+[extension 3단계](../docs/extension.md)의 완료 기준이다.
+
+    Dockerfile 하나. 자료와 키는 볼륨으로 붙인다
+    새 머신에서 테스트가 통과하고, 같은 자료로 빌드한 배포 페이지가 커밋된 것과 바이트까지 같다
+
+## 무엇을 보나
+
+    빌드      `docker build` 가 된다
+    비었나    이미지에 `.env` · `data/` · `runs/` 가 없고, 환경변수와 빌드 이력에 키가 없고,
+              루트로 돌지 않는다
+    테스트    **자료 없이** 통과한다 — 컨테이너에는 이미지에 든 것뿐이다. clone 직후와 같다
+    자료      `data/` 를 **읽기 전용**으로 붙이면 자료가 필요한 테스트까지 통과한다
+    재현      같은 자료로 배포 페이지를 다시 만들면 커밋된 것과 바이트까지 같다
+              (`make-site --check` — 쓰지 않고 견준다)
+    숫자      `run-report` 의 표가 이 기계에서 낸 것과 **한 글자도 다르지 않다** — 머리
+              숫자(27.4% · 22.9% · 0.900)를 포함해 arm 전부다
+
+`data/` 가 없으면 뒤의 셋은 건너뛴다. **끝줄은 실제로 본 것만 말한다.**
+
+## `check-all` 에 넣지 않았다
+
+몇 분 걸리고 Docker 가 떠 있어야 한다. `Dockerfile` · 의존성 · 배포 페이지 빌드를 고쳤을 때
+돌린다. Docker 가 없거나 꺼져 있으면 **건너뛴 것으로 적고 실패로 세지 않는다.**
+
+CI 는 `--require` 로 매번 돌린다 — 거기서는 Docker 를 못 쓰는 것이 실패다(늘 건너뛰는 검사는
+초록불이 아무 말도 안 한다). 자료가 없어 빌드 · 비었나 · 테스트까지만 본다.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+import sys
+import time
+from collections.abc import Sequence
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "data"
+PANEL = DATA / "panel.sqlite"
+IMAGE = "lol-balance:check"
+# 이미지에 있으면 안 되는 것(extension 4절 5 · 6항)
+FORBIDDEN = (".env", "data", "runs")
+SECRET = re.compile(r"(?i)api[_-]?key|token|secret|password")
+
+
+def docker(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["docker", *args], cwd=ROOT, capture_output=True, text=True)
+
+
+def target() -> tuple[str, tuple[str, ...]]:
+    """(이미지 이름, `build` · `run` 에 붙일 플랫폼 인자). `--platform` 을 주면 그 CPU 로 본다."""
+    if "--platform" not in sys.argv:
+        return IMAGE, ()
+    platform = sys.argv[sys.argv.index("--platform") + 1]
+    return f"{IMAGE}-{platform.split('/')[-1]}", ("--platform", platform)
+
+
+def unavailable() -> str | None:
+    """Docker 를 못 쓰는 이유. 쓸 수 있으면 None."""
+    if shutil.which("docker") is None:
+        return "docker 가 없다"
+    if docker("info").returncode != 0:
+        return "Docker 가 꺼져 있다"
+    return None
+
+
+def leaks(
+    listing: Sequence[str], env: Sequence[str], history: str, uid: str
+) -> list[str]:
+    """이미지에 들어가면 안 되는 것이 들어갔나. **값은 적지 않는다** — 이름만 낸다."""
+    found = [f"이미지에 {name} 가 있다" for name in FORBIDDEN if name in listing]
+    found += [
+        f"환경변수에 키처럼 보이는 이름이 있다: {item.split('=')[0]}"
+        for item in env
+        if SECRET.search(item.split("=")[0])
+    ]
+    if SECRET.search(history):
+        found.append("빌드 이력에 키처럼 보이는 말이 있다")
+    if uid.strip() == "0":
+        found.append("루트로 돈다")
+    return found
+
+
+def table(report: str) -> list[str]:
+    """`run-report` 출력에서 표만 — 「저장: runs/…」 줄부터는 실행마다 다르다."""
+    out: list[str] = []
+    for line in report.splitlines():
+        if line.startswith("저장:"):
+            break
+        out.append(line.rstrip())
+    while out and not out[-1]:
+        out.pop()
+    return out
+
+
+def tail(done: subprocess.CompletedProcess[str], lines: int = 12) -> str:
+    text = (done.stdout + done.stderr).strip()
+    return "\n".join(f"       {line}" for line in text.splitlines()[-lines:])
+
+
+def main() -> int:
+    if {"-h", "--help"} & set(sys.argv):
+        print(__doc__)
+        return 0
+    why = unavailable()
+    if why and "--require" in sys.argv:
+        print(f"❌ {why} — 재현 패키징을 확인할 수 없다.")
+        return 1
+    if why:
+        print(f"건너뜀 — {why}. 재현 패키징은 확인하지 못했다.")
+        return 0
+
+    image, platform = target()
+    failed: list[str] = []
+
+    def step(name: str, work: object) -> None:
+        started = time.perf_counter()
+        print(f"  {name:8}", end="", flush=True)
+        ok, note = work()  # type: ignore[operator]
+        took = time.perf_counter() - started
+        print(
+            f"{'✅' if ok else '❌'}  {took:>6.1f}s  {note.splitlines()[0] if ok else ''}"
+        )
+        if not ok:
+            failed.append(name)
+            print(note)
+
+    def run(*command: str, mounted: bool = False) -> subprocess.CompletedProcess[str]:
+        """컨테이너에서 돌린다. 자료는 **읽기 전용**으로 붙인다 — 원자료를 못 건드린다."""
+        mount = ("-v", f"{DATA}:/app/data:ro") if mounted else ()
+        return docker("run", "--rm", *platform, *mount, image, *command)
+
+    def build() -> tuple[bool, str]:
+        done = docker("build", *platform, "-t", image, ".")
+        if done.returncode != 0:
+            return False, tail(done)
+        about = docker(
+            "image", "inspect", image, "--format", "{{.Size}} {{.Os}}/{{.Architecture}}"
+        ).stdout.split()
+        return True, f"{image} · {about[1]} · {int(about[0]) / 1e6:,.0f} MB"
+
+    def empty() -> tuple[bool, str]:
+        listing = run("ls", "-A", "/app").stdout.split()
+        env = json.loads(
+            docker("image", "inspect", image, "--format", "{{json .Config.Env}}").stdout
+        )
+        history = docker("history", "--no-trunc", "--format", "{{.CreatedBy}}", image)
+        uid = run("id", "-u").stdout
+        found = leaks(listing, env, history.stdout, uid)
+        if found:
+            return False, "\n".join(f"       {line}" for line in found)
+        return True, f".env · data/ · runs/ 없음 · 키 없음 · uid {uid.strip()}"
+
+    def tests() -> tuple[bool, str]:
+        done = run()
+        if done.returncode != 0:
+            return False, tail(done)
+        return True, done.stdout.strip().splitlines()[-1]
+
+    def with_data() -> tuple[bool, str]:
+        done = run(mounted=True)
+        if done.returncode != 0:
+            return False, tail(done)
+        return True, done.stdout.strip().splitlines()[-1]
+
+    def site() -> tuple[bool, str]:
+        done = run("./scripts/make-site", "--check", mounted=True)
+        if done.returncode != 0:
+            return False, tail(done, 24)
+        return True, done.stdout.strip().splitlines()[-1]
+
+    def numbers() -> tuple[bool, str]:
+        """`run-report` 의 표를 이 기계와 컨테이너에서 내어 견준다."""
+        here = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "run-report")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        there = run("./scripts/run-report", mounted=True)
+        for name, done in (("이 기계", here), ("컨테이너", there)):
+            if done.returncode != 0:
+                return False, f"       {name}에서 run-report 가 실패했다\n{tail(done)}"
+        ours, theirs = table(here.stdout), table(there.stdout)
+        if ours != theirs:
+            differ = [
+                f"       {a!r} ≠ {b!r}"
+                for a, b in zip(ours, theirs, strict=False)
+                if a != b
+            ]
+            return False, "\n".join(differ[:8]) or "       줄 수가 다르다"
+        count = len(re.findall(r"\d+\.\d+%?|\d+%", "\n".join(ours)))
+        return True, f"표 {len(ours)}줄 · 숫자 {count}개가 이 기계와 같다"
+
+    if "--no-build" not in sys.argv:
+        step("빌드", build)
+    seen = "테스트가 통과한다"
+    if not failed:
+        step("비었나", empty)
+        step("테스트", tests)
+        if PANEL.exists():
+            step("자료", with_data)
+            step("재현", site)
+            step("숫자", numbers)
+            seen = (
+                "테스트가 통과하고, 배포 페이지가 바이트까지 같고, 보고서의 숫자가 같다"
+            )
+        else:
+            print(f"  자료 · 재현 · 숫자  건너뜀 — {PANEL.relative_to(ROOT)} 없음")
+            seen += "(자료가 없어 배포 페이지와 숫자의 재현은 못 봤다)"
+
+    print()
+    if failed:
+        print(f"❌ {len(failed)}개 실패 — {' · '.join(failed)}")
+        return 1
+    print(f"✅ 새 기계(컨테이너)에서 {seen}.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
