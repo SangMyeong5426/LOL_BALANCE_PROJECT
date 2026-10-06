@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""굵은 글씨 표시(`**`)가 GitHub 에서 실제로 굵게 보이는지 본다.
+
+    ./scripts/check-emphasis
+
+**닫는 `**` 의 앞이 구두점이고 뒤가 바로 글자면 GitHub 은 닫는 표시로 보지 않는다.**
+별표가 그대로 보인다. 한국어는 조사가 바로 붙어서 자주 걸린다.
+
+    **「프로 경기」**다      별표가 보인다 — 닫는 표시 앞이 」, 뒤가 「다」
+    「**프로 경기**」다      굵게 보인다
+    **8,602행(98%)**에      별표가 보인다
+    **8,602행**(98%)에      굵게 보인다
+
+**틀려도 오류가 없고 로컬에서는 안 보인다.** 2026-10-06 에 문서 12개에서 32곳을 찾았다.
+그날 쓴 글에도 하나 있었다.
+
+CommonMark 의 규칙(표시가 왼쪽 · 오른쪽 어디에 붙었나)을 `**` 에만 옮겼다. 문단 · 제목 ·
+표의 한 칸 안에서 짝을 맞추고, 코드 안은 보지 않는다. 고치기 전 문서 40개를 GitHub 의
+변환기(`gh api markdown`)에 넣어 견줬더니 남은 `**` 의 개수가 문서마다 같았다(합쳐 65개).
+
+**안 보는 것.** 별표 하나(`*기울임*`)와 밑줄(`_기울임_`), 들여쓴 코드 블록.
+바깥에 묻지도 않는다 — 망 상태에 따라 결과가 달라지면 검사가 아니다.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+# git 이 없을 때만 쓴다 — 도구가 만든 것과 커밋하지 않는 원자료 · 산출물
+SKIP = (".venv", "node_modules", "__pycache__", ".pytest_cache", "data", "runs")
+
+ASCII_PUNCTUATION = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+FENCE = re.compile(r"^\s{0,3}(```|~~~)")
+RULE = re.compile(r"^\s{0,3}([-*_])(?:\s*\1){2,}\s*$")
+HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
+ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+QUOTE = re.compile(r"^\s{0,3}(?:>\s?)+")
+# 역따옴표 n개로 열면 n개로만 닫힌다 — 코드 안에 역따옴표를 적는 길이다
+CODE = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
+# 별표 둘 이상. `\*` 로 적은 것은 글자다
+MARK = re.compile(r"(?<![\\*])\*{2,}(?!\*)")
+
+
+@dataclass(frozen=True)
+class Unit:
+    """한 번에 읽히는 덩어리 — 문단 · 제목 · 목록의 한 항목 · 표의 한 칸."""
+
+    line: int
+    text: str
+
+
+@dataclass(frozen=True)
+class Stray:
+    """짝을 못 찾아 별표로 보이는 표시."""
+
+    line: int
+    around: str
+
+
+def is_punctuation(ch: str) -> bool:
+    return ch in ASCII_PUNCTUATION or unicodedata.category(ch).startswith("P")
+
+
+def is_space(ch: str) -> bool:
+    return ch in "\t\n\f\r" or unicodedata.category(ch) == "Zs"
+
+
+def hide_code(text: str) -> str:
+    """코드 안을 가린다. **길이와 역따옴표는 그대로 둔다** — 표시 옆 글자를 봐야 한다."""
+    return CODE.sub(lambda m: "`" + "c" * (len(m.group(0)) - 2) + "`", text)
+
+
+def cells(row: str) -> list[str]:
+    """표의 한 줄을 칸으로 가른다. 코드 안의 `|` 와 `\\|` 는 가르지 않는다."""
+    hidden = hide_code(row)
+    out: list[str] = []
+    start = 0
+    for i, ch in enumerate(hidden):
+        if ch == "|" and (i == 0 or hidden[i - 1] != "\\"):
+            out.append(row[start:i])
+            start = i + 1
+    out.append(row[start:])
+    return out
+
+
+def units(text: str) -> list[Unit]:
+    """문서를 한 번에 읽히는 덩어리로 가른다. 굵은 글씨는 덩어리를 넘지 못한다."""
+    out: list[Unit] = []
+    paragraph: list[str] = []
+    begun = 0
+    fenced = False
+
+    def flush() -> None:
+        if paragraph:
+            out.append(Unit(begun, "\n".join(paragraph)))
+            paragraph.clear()
+
+    for number, raw in enumerate(text.splitlines(), 1):
+        if FENCE.match(raw):
+            flush()
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        line = QUOTE.sub("", raw)
+        if not line.strip() or RULE.match(line):
+            flush()
+        elif HEADING.match(line):
+            flush()
+            out.append(Unit(number, line))
+        elif line.lstrip().startswith("|"):
+            flush()
+            out.extend(Unit(number, cell) for cell in cells(line))
+        else:
+            item = ITEM.match(line)
+            if item:
+                flush()
+                line = line[item.end() :]
+            if not paragraph:
+                begun = number
+            paragraph.append(line.strip())
+    flush()
+    return out
+
+
+def strays(unit: Unit) -> list[Stray]:
+    """그 덩어리에서 짝을 못 찾은 `**`.
+
+    표시가 열 수 있는지 · 닫을 수 있는지는 양옆 글자가 정한다(CommonMark 6.2).
+    닫을 수 있는 표시는 가장 가까운 여는 표시와 짝을 짓고, 남은 것이 별표로 보인다.
+    """
+    text = hide_code(unit.text)
+    opened: list[re.Match[str]] = []
+    dead: list[re.Match[str]] = []
+    for mark in MARK.finditer(text):
+        before = text[mark.start() - 1] if mark.start() else " "
+        after = text[mark.end()] if mark.end() < len(text) else " "
+        can_open = not is_space(after) and (
+            not is_punctuation(after) or is_space(before) or is_punctuation(before)
+        )
+        can_close = not is_space(before) and (
+            not is_punctuation(before) or is_space(after) or is_punctuation(after)
+        )
+        if can_close and opened:
+            opened.pop()
+        elif can_open:
+            opened.append(mark)
+        else:
+            dead.append(mark)
+    return [
+        Stray(
+            unit.line + text.count("\n", 0, mark.start()),
+            " ".join(unit.text[max(0, mark.start() - 24) : mark.end() + 14].split()),
+        )
+        for mark in sorted(dead + opened, key=lambda m: m.start())
+    ]
+
+
+def scan(path: Path) -> list[Stray]:
+    return [s for u in units(path.read_text(encoding="utf-8")) for s in strays(u)]
+
+
+def documents() -> list[Path]:
+    """커밋하는 문서 — 추적 중이거나, 새로 만들었고 무시되지 않는 것.
+
+    **git 이 없거나 저장소가 아니면 폴더를 훑는다** — 재현용 이미지에는 git 이 없다.
+    """
+    try:
+        done = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+            + ["*.md"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        done = None
+    if done is not None and done.returncode == 0 and done.stdout:
+        listed = (ROOT / name for name in done.stdout.split("\0") if name)
+        return sorted(p for p in listed if p.exists())
+    return sorted(
+        p for p in ROOT.rglob("*.md") if not any(part in SKIP for part in p.parts)
+    )
+
+
+def main() -> int:
+    files = documents()
+    found = [(path, stray) for path in files for stray in scan(path)]
+    print(f"문서 {len(files)}개")
+    if found:
+        print(f"\n❌ 굵게 안 보인다 — {len(found)}개")
+        for path, stray in found:
+            print(
+                f"   {path.relative_to(ROOT).as_posix()}:{stray.line}  …{stray.around}…"
+            )
+        print(
+            "\n   표시 옆의 구두점을 밖으로 뺀다 — 「**…**」 · **…**(…) · [**…**](…)"
+            "\n   아니면 조사까지 굵게 한다 — **… 「…」을** 담는다"
+        )
+        return 1
+    print("\n✅ 전부 굵게 보인다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
