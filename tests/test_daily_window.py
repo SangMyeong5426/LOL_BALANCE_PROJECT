@@ -1,4 +1,4 @@
-"""매일 수집의 창 — **놓친 날을 메우되 무한정 거슬러 가지 않는다.**
+"""매일 수집의 창 — **놓친 날을 마지막으로 받은 경기부터 메운다.**
 
 맥이 자거나 꺼져 있으면 그날 실행이 통째로 빠진다. 26시간 창만 보면 그 사이가
 영영 빈다 — 2026-09-22 뒤로 닷새가 그렇게 사라졌다.
@@ -63,16 +63,29 @@ def test_a_missed_day_is_filled_from_the_last_game(daily, tmp_path, monkeypatch)
     assert abs((daily.window_start("16_19") - last).total_seconds()) < 2
 
 
-def test_the_catch_up_stops_at_the_limit(daily, tmp_path, monkeypatch):
-    """**무한정 거슬러 가지 않는다.**
+def test_a_long_gap_is_filled_from_the_last_game_too(daily, tmp_path, monkeypatch):
+    """**거슬러 가는 데 한계를 두지 않는다.**
 
-    이용자 기록은 최근 20판까지만 보인다. 나흘 너머를 요청해도 받은 경기가 전부
-    창 밖이라 버려지기만 하고, 그러면 수집이 한 판도 못 건지고 끝난다.
+    2026-10-06 까지는 96시간에서 끊었다. 「이용자 기록은 최근 20판까지만 보인다」가
+    근거였는데 틀렸다 — 경기 목록은 창으로 묻고, `16_13` 은 75 ~ 88일 지난 창을
+    받았다. 그날 실행은 한계 164초 전에 시작해 겨우 이어졌다.
     """
     monkeypatch.setattr(daily, "ROOT", tmp_path)
-    write(tmp_path / "data" / "riot" / "16_19", datetime.now(UTC) - timedelta(days=30))
+    last = datetime.now(UTC) - timedelta(days=9)
+    write(tmp_path / "data" / "riot" / "16_19", last)
+    assert abs((daily.window_start("16_19") - last).total_seconds()) < 2
+
+
+def test_another_patch_does_not_pull_the_window_back(daily, tmp_path, monkeypatch):
+    """**보는 것은 이 패치의 마지막 경기다.** 그래서 아무리 멀어도 패치가 나온 날까지다.
+
+    한계를 없앤 뒤로는 이것이 창을 묶는 유일한 것이다. 앞 패치에 받아 둔 경기가
+    창을 끌고 가면 새 패치 첫날에 몇 주를 거슬러 가 전부 버린다.
+    """
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    write(tmp_path / "data" / "riot" / "16_18", datetime.now(UTC) - timedelta(days=20))
     hours = (datetime.now(UTC) - daily.window_start("16_19")).total_seconds() / 3600
-    assert hours == pytest.approx(daily.CATCH_UP_LIMIT_HOURS, abs=1)
+    assert daily.WINDOW_HOURS - 1 < hours < daily.WINDOW_HOURS + 1
 
 
 def test_a_broken_line_does_not_stop_the_scan(daily, tmp_path, monkeypatch):
