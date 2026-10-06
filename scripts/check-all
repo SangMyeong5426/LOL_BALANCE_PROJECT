@@ -38,6 +38,8 @@ CHECKS: tuple[tuple[str, list[str], Path | None], ...] = (
     ("ruff format", ["ruff", "format", "--check", "src", "scripts", "tests"], None),
     ("mypy", ["mypy", "src"], None),
     ("문서 링크", ["./scripts/check-links"], None),
+    # 굵은 글씨 표시가 GitHub 에서 닫히는가. 틀려도 오류가 없고 로컬에서는 안 보인다
+    ("굵은 글씨", ["./scripts/check-emphasis"], None),
     ("AGENTS ≡ CLAUDE", ["./scripts/check-rule-docs"], None),
     ("테스트", [sys.executable, "-m", "pytest", "-q"], None),
     ("README 수치", ["./scripts/check-docs"], PANEL),
