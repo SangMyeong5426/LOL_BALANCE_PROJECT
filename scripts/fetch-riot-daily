@@ -7,7 +7,8 @@
 
 **키가 필요하다**(ADR 0010). 현재 패치는 Data Dragon 의 가장 새 버전으로 정한다
 (`16.18.1` → `16_18`). 창은 지난 26시간 — 하루에 한 번 돌리므로 두 시간을 겹쳐
-놓치는 틈을 없앤다. 겹친 경기는 경기 ID 로 걸러진다.
+놓치는 틈을 없앤다. 겹친 경기는 경기 ID 로 걸러진다. 며칠 못 돌았으면 마지막으로
+받은 경기부터 메운다(`window_start`).
 
 패치가 바뀐 날에는 창 안에 앞 패치 경기가 섞인다. `gameVersion` 으로 걸러
 `.skip` 으로 가므로 섞이지 않는다.
@@ -36,15 +37,11 @@ from lol_balance.fetch import get_with_retry  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = "https://ddragon.leagueoflegends.com/api/versions.json"
 WINDOW_HOURS = 26
-# **놓친 날은 마지막으로 받은 경기부터 메운다.** 맥이 자거나 꺼져 있으면 그날
-# 실행이 통째로 빠지고, 26시간 창만 보면 그 사이가 영영 빈다. 그렇다고 무한정
-# 거슬러 올라갈 수는 없다 — 이용자 기록은 최근 20판까지만 보여서, 하루 다섯 판을
-# 치면 **나흘쯤이 한계**다. 그 너머를 요청해도 받은 경기가 전부 창 밖이라 버려진다.
-CATCH_UP_LIMIT_HOURS = 96
 # **한 번에 이만큼을 넘기면 포기한다.** 맥이 자는 동안 멈췄다 깨기를 되풀이하면
 # 한 실행이 며칠씩 걸리고, `launchd` 는 같은 작업이 돌고 있으면 새로 안 띄운다.
 # 그래서 하루가 늦는 것이 아니라 **그 뒤로 전부 건너뛴다** — 2026-09-22 실행이
-# 엿새를 붙들어 닷새치를 통째로 잃었다. 창이 26시간이라 놓친 날은 못 채운다.
+# 엿새를 붙들어 닷새치를 통째로 잃었다. 그때는 창이 26시간뿐이라 놓친 날을 못
+# 채웠다(지금은 `window_start` 가 마지막 경기부터 메운다).
 #
 # **다만 맥이 자는 시간은 세지 않는다.** 2026-09-29 실행은 벽시계로 3시간 45분을
 # 넘겼는데도 걸리지 않았다 — 거의 내내 자고 있었다. 그래서 예약 실행은 아예 맥이
@@ -97,19 +94,25 @@ def last_game(patch: str) -> datetime | None:
 
 
 def window_start(patch: str) -> datetime:
-    """창의 시작. **놓친 날이 있으면 거기부터 메운다.**
+    """창의 시작. **놓친 날이 있으면 마지막으로 받은 경기부터 메운다.**
 
-    보통은 지난 26시간이다(두 시간을 겹쳐 틈을 없앤다). 며칠 못 돌았으면 마지막
-    경기부터 잡아 그 사이를 메우되, `CATCH_UP_LIMIT_HOURS` 보다 더 거슬러 가지
-    않는다 — 이용자 기록이 거기까지만 보여서 더 요청해도 버려지기만 한다.
+    보통은 지난 26시간이다(두 시간을 겹쳐 틈을 없앤다). 맥이 자거나 꺼져 있으면
+    그날 실행이 통째로 빠지고, 26시간 창만 보면 그 사이가 영영 빈다 — 그래서 며칠
+    못 돌았으면 마지막 경기부터 잡는다.
+
+    **거슬러 가는 데 한계를 두지 않는다.** 2026-10-06 까지는 96시간에서 끊었다.
+    「이용자 기록은 최근 20판까지만 보여 그 너머는 받아도 버려진다」고 적었는데
+    틀렸다 — 경기 목록은 창(`startTime` · `endTime`)으로 묻고, `16_13` 은 75 ~ 88일
+    지난 창을 평소 속도로 받았다. 그날 실행은 한계 164초 전에 시작해 겨우 이어졌다.
+
+    보는 것은 **이 패치의** 마지막 경기라 아무리 멀어도 패치가 나온 날까지다.
+    **양은 그대로다** — 창이 넓어져도 `--add` 만큼만 받으므로 빈 날은 얇게 찬다.
     """
-    now = time.time()
-    usual = datetime.fromtimestamp(now - WINDOW_HOURS * 3600, UTC)
-    floor = datetime.fromtimestamp(now - CATCH_UP_LIMIT_HOURS * 3600, UTC)
+    usual = datetime.fromtimestamp(time.time() - WINDOW_HOURS * 3600, UTC)
     seen = last_game(patch)
     if seen is None or seen >= usual:
         return usual
-    return max(seen, floor)
+    return seen
 
 
 def too_soon(now: datetime) -> float | None:
