@@ -76,16 +76,67 @@ def test_a_long_gap_is_filled_from_the_last_game_too(daily, tmp_path, monkeypatc
     assert abs((daily.window_start("16_19") - last).total_seconds()) < 2
 
 
-def test_another_patch_does_not_pull_the_window_back(daily, tmp_path, monkeypatch):
-    """**보는 것은 이 패치의 마지막 경기다.** 그래서 아무리 멀어도 패치가 나온 날까지다.
+def test_a_new_patch_starts_where_the_previous_one_stopped(
+    daily, tmp_path, monkeypatch
+):
+    """**새 패치의 첫 실행은 앞 패치에서 마지막으로 받은 경기부터 본다.**
 
-    한계를 없앤 뒤로는 이것이 창을 묶는 유일한 것이다. 앞 패치에 받아 둔 경기가
-    창을 끌고 가면 새 패치 첫날에 몇 주를 거슬러 가 전부 버린다.
+    패치 교체일을 끼고 덮개를 닫아 두면 26시간 창으로는 앞 패치의 끝도 새 패치의 처음도
+    못 받는다. 창 안의 앞 패치 경기는 버리지 않고 그 패치에 잇는다(`fetch-riot --tail`).
     """
     monkeypatch.setattr(daily, "ROOT", tmp_path)
-    write(tmp_path / "data" / "riot" / "16_18", datetime.now(UTC) - timedelta(days=20))
-    hours = (datetime.now(UTC) - daily.window_start("16_19")).total_seconds() / 3600
+    last = datetime.now(UTC) - timedelta(days=3)
+    write(tmp_path / "data" / "riot" / "16_19", last)
+    assert abs((daily.window_start("16_20") - last).total_seconds()) < 2
+
+
+def test_a_new_patch_the_day_after_a_run_uses_the_usual_window(
+    daily, tmp_path, monkeypatch
+):
+    """어제 앞 패치를 받았으면 평소대로 지난 26시간이다."""
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    write(tmp_path / "data" / "riot" / "16_19", datetime.now(UTC) - timedelta(hours=3))
+    hours = (datetime.now(UTC) - daily.window_start("16_20")).total_seconds() / 3600
     assert daily.WINDOW_HOURS - 1 < hours < daily.WINDOW_HOURS + 1
+
+
+def test_a_file_without_games_is_a_patch_without_games(daily, tmp_path, monkeypatch):
+    """빈 파일은 받은 것이 아니다 — 2026-10-07 에 0판으로 끝난 첫 실행이 남겼다."""
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    last = datetime.now(UTC) - timedelta(days=2)
+    write(tmp_path / "data" / "riot" / "16_19", last)
+    (tmp_path / "data" / "riot" / "16_20").mkdir()
+    (tmp_path / "data" / "riot" / "16_20" / "kr.jsonl").write_text("")
+    assert abs((daily.window_start("16_20") - last).total_seconds()) < 2
+
+
+def test_once_the_new_patch_has_games_the_previous_one_is_not_consulted(
+    daily, tmp_path, monkeypatch
+):
+    """앞 패치를 보는 것은 첫 실행뿐이다. 그 뒤로는 이 패치의 마지막 경기가 창을 묶는다."""
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    write(tmp_path / "data" / "riot" / "16_19", datetime.now(UTC) - timedelta(days=20))
+    write(tmp_path / "data" / "riot" / "16_20", datetime.now(UTC) - timedelta(hours=3))
+    hours = (datetime.now(UTC) - daily.window_start("16_20")).total_seconds() / 3600
+    assert daily.WINDOW_HOURS - 1 < hours < daily.WINDOW_HOURS + 1
+
+
+def test_the_previous_patch_is_the_latest_older_one_with_games(
+    daily, tmp_path, monkeypatch
+):
+    """이름을 숫자로 견준다 — `16_9` 는 `16_19` 보다 앞이다. 받은 적 없는 패치는 건너뛴다."""
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    riot = tmp_path / "data" / "riot"
+    for name in ("16_9", "16_18", "16_19"):
+        write(riot / name, datetime.now(UTC))
+    (riot / "16_20").mkdir()
+    (riot / "16_20" / "kr.jsonl").write_text("")  # 0판으로 끝난 실행
+    write(riot / "v1" / "16_25", datetime.now(UTC))  # 옛 형식 보관함 — 패치가 아니다
+
+    assert daily.previous_patch("16_20") == "16_19"
+    assert daily.previous_patch("17_1") == "16_19"
+    assert daily.previous_patch("16_10") == "16_9"
+    assert daily.previous_patch("16_9") is None
 
 
 def test_a_broken_line_does_not_stop_the_scan(daily, tmp_path, monkeypatch):
