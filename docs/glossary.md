@@ -515,7 +515,7 @@ BM25 + nomic-embed-text     0.599     95.1%
 
 | 용어 | 뜻 |
 | --- | --- |
-| **손 라벨** | 대화 중 Claude 가 패치 노트를 읽고 붙인 방향. 52패치 구간 1,599종에 `16_17`·`16_18` 31종을 더해 1,630종이다 |
+| **손 라벨** | 대화 중 Claude 가 패치 노트를 읽고 붙인 방향. 52패치 구간 1,599종에 `16_17`·`16_18`·`16_20` 52종을 더해 1,651종이다 |
 | **자동 판정** | Data Dragon·CommunityDragon 의 버전 diff 로 기계가 낸 방향 |
 | **방향** | `nerf` · `buff` · `mixed` · `adjust` 넷. 기준은 [labeling-guide](spec/labeling-guide.md)에 있다 |
 
