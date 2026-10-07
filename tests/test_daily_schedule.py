@@ -114,6 +114,22 @@ def test_too_soon_counts_from_the_last_collected_file(
     assert daily.too_soon(now) is None
 
 
+def test_an_empty_file_is_not_a_collection(
+    daily: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """한 판도 못 받은 실행은 받은 것이 아니다 — 다음 확인 때 다시 돈다.
+
+    2026-10-07 에 새 패치의 첫 실행이 0판으로 끝나며 빈 파일을 남겼다. 그 파일이 방금
+    생겼다는 이유로 스무 시간 동안 다시 돌지 않았다.
+    """
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    collected(tmp_path, hours_ago=30)
+    empty = tmp_path / "data" / "riot" / "16_20" / "kr.jsonl"
+    empty.parent.mkdir(parents=True)
+    empty.write_text("")
+    assert daily.too_soon(datetime.now(UTC)) is None
+
+
 def test_a_scheduled_run_skips_quietly_after_a_recent_collection(
     daily: ModuleType,
     tmp_path: Path,
@@ -181,6 +197,45 @@ def test_a_scheduled_run_goes_when_due_and_awake(
     assert run_main(daily, monkeypatch, "--scheduled") == 0
     assert len(calls) == 1
     assert calls[0][calls[0].index("--add") + 1] == "300"
+
+
+def test_a_run_on_a_new_patch_asks_for_the_previous_patchs_tail(
+    daily: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """패치가 바뀐 날 — 앞 패치를 받던 맥이면 그 끝도 받으라고 넘긴다. 양은 그대로다."""
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    collected(tmp_path, hours_ago=30)  # `16_19` 를 받던 맥
+    monkeypatch.setattr(daily, "awake", lambda: True)
+    monkeypatch.setattr(daily, "current_patch", lambda: "16_20")
+    monkeypatch.setattr(daily, "code_line", lambda: "코드 시험")
+    calls: list[list[str]] = []
+
+    def fake_call(cmd: list[str], **kwargs: Any) -> int:
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(daily.subprocess, "call", fake_call)
+    assert run_main(daily, monkeypatch, "--scheduled") == 0
+    assert calls[0][calls[0].index("--tail") + 1] == "16_19"
+    assert calls[0][calls[0].index("--add") + 1] == "300"
+
+
+def test_no_tail_without_a_patch_collected_before(
+    daily: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """앞 패치를 받은 적이 없으면 넘길 것이 없다."""
+    monkeypatch.setattr(daily, "ROOT", tmp_path)
+    monkeypatch.setattr(daily, "current_patch", lambda: "16_20")
+    monkeypatch.setattr(daily, "code_line", lambda: "코드 시험")
+    calls: list[list[str]] = []
+
+    def fake_call(cmd: list[str], **kwargs: Any) -> int:
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(daily.subprocess, "call", fake_call)
+    assert run_main(daily, monkeypatch) == 0
+    assert "--tail" not in calls[0]
 
 
 def test_a_manual_run_does_not_check(

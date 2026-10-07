@@ -17,7 +17,7 @@ import io
 import random
 import urllib.error
 import urllib.request
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -440,7 +440,10 @@ class FakeRiot:
 
 
 def run_collect(
-    fake: FakeRiot, target: int, seen: set[str] | None = None
+    fake: FakeRiot,
+    target: int,
+    seen: set[str] | None = None,
+    other: Callable[[Match], bool] | None = None,
 ) -> tuple[int, list[Match], list[str], list[str]]:
     written: list[Match] = []
     skipped: list[str] = []
@@ -456,6 +459,7 @@ def run_collect(
         written.append,
         skipped.append,
         lines.append,
+        other,
     )
     return got, written, skipped, lines
 
@@ -535,6 +539,58 @@ def test_collect_stops_when_every_fetched_game_is_another_patch(
 
     assert got == 0 and written == []
     assert skipped  # 받기는 했고 버렸다
+    assert "다른 패치다. 멈춘다" in lines[-1]
+
+
+def test_collect_hands_other_patch_games_in_the_window_to_the_hook(
+    small_ladder: FakeRiot,
+) -> None:
+    """패치가 바뀌는 날 — 창 안에서 만난 다른 패치 경기를 버리기 전에 넘긴다.
+
+    넘겨도 이 패치의 `.skip` 에는 적는다. 이 패치로는 쓸 수 없고 다시 받을 까닭도 없다.
+    """
+    small_ladder.matches_of["p2"] = ["KR_3", "KR_5"]
+    small_ladder.games["KR_5"] = payload(  # 다른 패치인데 창 밖이다
+        "KR_5", version="16.14.1.1", start_ms=START_MS - 3 * 86_400_000
+    )
+    handed: list[Match] = []
+
+    def other(match: Match) -> bool:
+        handed.append(match)
+        return True
+
+    got, written, skipped, _ = run_collect(small_ladder, target=10, other=other)
+
+    assert got == 2
+    assert [(m.match_id, m.patch) for m in handed] == [("KR_3", "16_14")]
+    assert sorted(m.match_id for m in written) == ["KR_1", "KR_2"]
+    assert sorted(skipped) == ["KR_3", "KR_4", "KR_5"]
+
+
+def test_collect_goes_on_while_the_hook_keeps_games(
+    small_ladder: FakeRiot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """이 패치 경기가 한 판도 없어도, 넘긴 경기를 받아 주는 동안은 멈추지 않는다.
+
+    패치가 바뀌는 날 아침에는 창 안이 전부 앞 패치다. 그 경기를 받고 있는데 「전부
+    버려진다」며 멈추면 앞 패치의 끝을 다 못 받는다. 받아 주기를 그치면 그때 멈춘다.
+    """
+    monkeypatch.setattr(riot, "MAX_WASTED_PLAYERS", 1)
+    for game in small_ladder.games.values():
+        if game:
+            game["info"]["gameVersion"] = "16.14.1.1"
+    kept: list[str] = []
+
+    def keep_two(match: Match) -> bool:
+        if len(kept) < 2:
+            kept.append(match.match_id)
+            return True
+        return False
+
+    got, written, _, lines = run_collect(small_ladder, target=5, other=keep_two)
+
+    assert got == 0 and written == []
+    assert len(kept) == 2
     assert "다른 패치다. 멈춘다" in lines[-1]
 
 

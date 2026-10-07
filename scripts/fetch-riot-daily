@@ -10,8 +10,9 @@
 놓치는 틈을 없앤다. 겹친 경기는 경기 ID 로 걸러진다. 며칠 못 돌았으면 마지막으로
 받은 경기부터 메운다(`window_start`).
 
-패치가 바뀐 날에는 창 안에 앞 패치 경기가 섞인다. `gameVersion` 으로 걸러
-`.skip` 으로 가므로 섞이지 않는다.
+패치가 바뀐 날에는 창 안에 앞 패치 경기가 섞인다. `gameVersion` 으로 갈라 **앞 패치
+경기는 그 패치 파일에 잇는다**(`fetch-riot --tail` — 받던 패치만, 하루치까지). 버리면
+패치마다 마지막 날이 빈다. 새 패치의 첫 실행은 앞 패치에서 마지막으로 받은 경기부터 본다.
 
 예약은 `./scripts/install-riot-daily` 가 건다. 예약 작업은 매시간 `--scheduled` 로
 부르고, 그때는 **마지막으로 경기를 받은 지 20시간이 지났고 맥이 제대로 깨어 있을
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -37,6 +39,8 @@ from lol_balance.fetch import get_with_retry  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = "https://ddragon.leagueoflegends.com/api/versions.json"
 WINDOW_HOURS = 26
+# 우리 패치 표기. `data/riot/` 에는 `v1`(옛 형식 보관함)도 있다
+PATCH = re.compile(r"^(\d+)_(\d+)$")
 # **한 번에 이만큼을 넘기면 포기한다.** 맥이 자는 동안 멈췄다 깨기를 되풀이하면
 # 한 실행이 며칠씩 걸리고, `launchd` 는 같은 작업이 돌고 있으면 새로 안 띄운다.
 # 그래서 하루가 늦는 것이 아니라 **그 뒤로 전부 건너뛴다** — 2026-09-22 실행이
@@ -93,6 +97,28 @@ def last_game(patch: str) -> datetime | None:
     return datetime.fromtimestamp(newest / 1000, UTC) if newest else None
 
 
+def previous_patch(patch: str) -> str | None:
+    """`patch` 앞에서 **받던** 패치 — 경기가 있는 폴더 가운데 가장 새 것. 없으면 `None`.
+
+    이름을 숫자로 견준다(`16_9` < `16_19` < `17_1`). 빈 파일뿐인 폴더는 받은 것이
+    아니다 — 0판으로 끝난 실행이 그런 폴더를 남긴다.
+    """
+    current = PATCH.match(patch)
+    if current is None:
+        return None
+    older: list[tuple[tuple[int, int], str]] = []
+    for folder in (ROOT / "data" / "riot").glob("*"):
+        named = PATCH.match(folder.name)
+        if named is None or not folder.is_dir():
+            continue
+        number = (int(named[1]), int(named[2]))
+        if number < (int(current[1]), int(current[2])) and any(
+            f.stat().st_size for f in folder.glob("*.jsonl")
+        ):
+            older.append((number, folder.name))
+    return max(older)[1] if older else None
+
+
 def window_start(patch: str) -> datetime:
     """창의 시작. **놓친 날이 있으면 마지막으로 받은 경기부터 메운다.**
 
@@ -105,11 +131,19 @@ def window_start(patch: str) -> datetime:
     틀렸다 — 경기 목록은 창(`startTime` · `endTime`)으로 묻고, `16_13` 은 75 ~ 88일
     지난 창을 평소 속도로 받았다. 그날 실행은 한계 164초 전에 시작해 겨우 이어졌다.
 
-    보는 것은 **이 패치의** 마지막 경기라 아무리 멀어도 패치가 나온 날까지다.
+    보는 것은 **이 패치의** 마지막 경기다. **이 패치를 아직 한 판도 안 받았으면 앞
+    패치에서 마지막으로 받은 경기부터 본다** — 패치 교체일을 끼고 덮개를 닫아 두면
+    26시간 창으로는 앞 패치의 끝도 새 패치의 처음도 못 받는다. 2026-10-06 에는 「앞
+    패치가 창을 끌고 가면 몇 주를 거슬러 가 전부 버린다」며 막아 뒀는데, 창 안의 앞 패치
+    경기를 그 패치에 잇게 되어(`fetch-riot --tail`) 하루 만에 풀었다.
+
     **양은 그대로다** — 창이 넓어져도 `--add` 만큼만 받으므로 빈 날은 얇게 찬다.
     """
     usual = datetime.fromtimestamp(time.time() - WINDOW_HOURS * 3600, UTC)
     seen = last_game(patch)
+    if seen is None:
+        before = previous_patch(patch)
+        seen = last_game(before) if before else None
     if seen is None or seen >= usual:
         return usual
     return seen
@@ -121,8 +155,11 @@ def too_soon(now: datetime) -> float | None:
     **받은 파일이 마지막으로 바뀐 때**를 본다. 따로 기록 파일을 두지 않는다 — 받은
     것이 곧 기록이다. 그래서 손으로 더 받은 날도 「받았다」로 치고, 한 판도 못 받은
     실행은 「안 받았다」로 쳐서 다음 확인 때 다시 돈다.
+
+    **빈 파일은 세지 않는다.** 새 패치의 첫 실행이 0판으로 끝나면 빈 파일이 남는다.
+    2026-10-07 에 그 파일이 방금 생겼다는 이유로 스무 시간 동안 다시 돌지 않았다.
     """
-    files = list((ROOT / "data" / "riot").glob("*/*.jsonl"))
+    files = [f for f in (ROOT / "data" / "riot").glob("*/*.jsonl") if f.stat().st_size]
     if not files:
         return None
     newest = datetime.fromtimestamp(max(f.stat().st_mtime for f in files), UTC)
@@ -222,20 +259,22 @@ def main() -> int:
         else f"**{gap:.0f}시간을 메운다** — 마지막 경기 뒤로 못 돌았다"
     )
     print(f"=== {stamp} · 현재 패치 {patch} · {how} · {code_line()}", flush=True)
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "fetch-riot"),
+        patch,
+        "--since",
+        since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "--add",
+        str(args.add),
+    ]
+    # 창 안에서 앞 패치 경기를 만나면 버리지 않고 그 패치에 잇는다. 만나지 않는 날에는
+    # 아무 일도 없다 — 패치가 바뀌는 며칠만 쓰인다
+    before = previous_patch(patch)
+    if before:
+        command += ["--tail", before]
     try:
-        return subprocess.call(
-            [
-                sys.executable,
-                str(ROOT / "scripts" / "fetch-riot"),
-                patch,
-                "--since",
-                since.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "--add",
-                str(args.add),
-            ],
-            cwd=ROOT,
-            timeout=args.deadline * 60,
-        )
+        return subprocess.call(command, cwd=ROOT, timeout=args.deadline * 60)
     except subprocess.TimeoutExpired:
         # **받은 것은 남는다** — `fetch-riot` 은 한 판씩 파일에 덧붙인다.
         print(

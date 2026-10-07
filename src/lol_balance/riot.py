@@ -73,10 +73,11 @@ PER_PLAYER = 20
 # 너무 멀어 지금 랭커가 그때 안 뛰었다는 뜻이라, 계속 돌리면 한도만 쓴다.
 MAX_IDLE_PLAYERS = 400
 
-# 받은 경기가 **전부** 버려지는 이용자가 이만큼 이어져도 멈춘다. 패치가 바뀌는 날
+# **이 패치 경기를 한 판도 못 건진** 이용자가 이만큼 이어져도 멈춘다. 패치가 바뀌는 날
 # Data Dragon 이 라이브보다 앞서거나 뒤처지면 창 안 경기가 전부 다른 패치라서,
 # 이것이 없으면 사다리 전체를 돌며 한도만 쓴다 — 매일 수집이 그렇게 며칠씩 막힐
 # 수 있었다(2026-09-20 감사). 이용자 40명이면 요청 800회 남짓, 15분이다.
+# 다른 패치 경기를 받아 주는 곳(`collect` 의 `other`)이 있으면 받아 주는 동안은 더 간다.
 MAX_WASTED_PLAYERS = 40
 
 # 요청에 밝히는 이름. **파이썬 기본 이름(`Python-urllib`)은 Cloudflare 가
@@ -673,12 +674,18 @@ def collect(
     write: Callable[[Match], None],
     skip: Callable[[str], None],
     log: Callable[[str], None] = print,
+    other: Callable[[Match], bool] | None = None,
 ) -> int:
     """`target` 판을 채울 때까지 받는다. 받은 판 수를 돌려준다.
 
     `seen` 에 있는 경기는 다시 받지 않는다 — 이어받기와 플랫폼 안 중복을 함께
     막는다. 쓸 수 없는 경기(다른 패치 · 리메이크 · 창 밖)는 `skip` 으로 넘겨
     다음에도 안 받게 한다.
+
+    **창 안에서 만난 다른 패치 경기는 `other` 에도 넘긴다.** 패치가 바뀌는 날에는 창
+    안이 앞 패치 경기다. 버리면 그 패치의 끝이 빈다 — 2026-10-07 에는 세 플랫폼이 그
+    경기만 받다가 0판으로 끝났다. `other` 는 받았으면 참을 돌려준다. 받아도 이 패치의
+    `skip` 에는 적는다 — 이 패치로는 쓸 수 없고 다시 받을 까닭도 없다.
     """
     ladder = Ladder(client, platform)
     groups = strata(ladder)
@@ -736,16 +743,19 @@ def collect(
         idle = 0
         player += 1
         written_here = 0
+        kept_here = 0
         for match_id in rng.sample(fresh, min(PER_PLAYER, len(fresh))):
             seen.add(match_id)
             payload = client.get(route, f"/lol/match/v5/matches/{match_id}")
             match = slim(payload, platform, player, pick.origin) if payload else None
-            if (
-                match is None
-                or match.patch != window.patch
-                or not window.start * 1000 <= match.start_ms <= window.end * 1000
-            ):
+            inside = (
+                match is not None
+                and window.start * 1000 <= match.start_ms <= window.end * 1000
+            )
+            if match is None or not inside or match.patch != window.patch:
                 skip(match_id)
+                if match is not None and inside and other is not None and other(match):
+                    kept_here += 1
                 continue
             write(match)
             collected += 1
@@ -757,9 +767,10 @@ def collect(
             if collected >= target:
                 break
         wasted = 0 if written_here else wasted + 1
-        if wasted >= MAX_WASTED_PLAYERS:
+        # 넘긴 경기를 받아 주는 동안은 헛돈 것이 아니다. 받아 주기를 그치면 멈춘다
+        if wasted >= MAX_WASTED_PLAYERS and not kept_here:
             log(
-                f"[{platform}] 받은 경기가 전부 버려지는 이용자가 {wasted}명째다"
+                f"[{platform}] 이 패치 경기가 없는 이용자가 {wasted}명째다"
                 " — 창 안 경기가 다른 패치다. 멈춘다"
             )
             break
