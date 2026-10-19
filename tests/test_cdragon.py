@@ -46,6 +46,73 @@ def value(name: str, *numbers: float) -> dict[str, Any]:
     return {"mName": name, "mValues": list(numbers), "__type": "SpellDataValue"}
 
 
+def champion_new(values_: list[dict[str, Any]]) -> dict[str, Any]:
+    """`15.18` 이후 모양. **키에서 `m` 이 빠졌다.**
+
+    CommunityDragon 이 `15.18` 부터 `mDataValues` 를 `DataValues` 로 바꿨다.
+    받아 둔 69개 버전에서 경계가 딱 갈린다 — `13.14` ~ `15.16` 은 옛 이름,
+    `15.18` ~ `16.20` 은 새 이름이다.
+    """
+    return {
+        "Characters/Aatrox/Spells/AatroxQAbility/AatroxQ": {
+            "mSpell": {
+                "DataValues": values_,
+                "mSpellCalculations": {},
+                "__type": "SpellObject",
+            }
+        },
+    }
+
+
+def value_new(name: str, *numbers: float) -> dict[str, Any]:
+    return {"name": name, "values": list(numbers), "__type": "SpellDataValue"}
+
+
+def test_the_unprefixed_key_is_read_too() -> None:
+    """**이것이 조용히 틀리고 있었다.**
+
+    `15.18` 이후 패치에서 스킬 수치를 한 칸도 안 보고 있었다. 오류는 안 나고
+    변경이 0칸으로 나왔다 — Kennen `16_20` 의 공격 속도 `0.40 → 0.50` 이
+    파일 안에 있는데도 `diff_versions` 가 빈 값을 냈다.
+    """
+    got = values(champion_new([value_new("RushAttackSpeed", 0.4, 0.5)]))
+
+    assert got[("value", "AatroxQ.RushAttackSpeed[0]")] == 0.4
+    assert got[("value", "AatroxQ.RushAttackSpeed[1]")] == 0.5
+
+
+def test_a_changed_slot_is_found_in_the_new_shape() -> None:
+    before = champion_new([value_new("RushAttackSpeed", 0.4, 0.5)])
+    after = champion_new([value_new("RushAttackSpeed", 0.5, 0.6)])
+
+    changed = diff_versions(before, after, "Kennen")
+
+    assert [(c.field, c.before, c.after) for c in changed] == [
+        ("AatroxQ.RushAttackSpeed[0]", 0.4, 0.5),
+        ("AatroxQ.RushAttackSpeed[1]", 0.5, 0.6),
+    ]
+
+
+def test_rank_arrays_read_the_new_shape_too() -> None:
+    """**같은 결함이 여기에도 있었다.** 수치 기록 채점이 이 단위로 맞춘다."""
+    got = rank_arrays(champion_new([value_new("QBaseDamage", 10.0, 20.0, 30.0)]))
+
+    assert got[("AatroxQ", "QBaseDamage")] == (10.0, 20.0, 30.0)
+
+
+def test_both_shapes_in_one_file_do_not_collide() -> None:
+    """한 파일에 둘이 섞여 와도 각자 읽힌다. **덮어쓰지 않는다.**"""
+    data = champion([value("QBaseDamage", 10.0)])
+    data["Characters/Aatrox/Spells/AatroxQAbility/AatroxQ"]["mSpell"]["DataValues"] = [
+        value_new("QCooldown", 12.0)
+    ]
+
+    got = values(data)
+
+    assert got[("value", "AatroxQ.QBaseDamage[0]")] == 10.0
+    assert got[("value", "AatroxQ.QCooldown[0]")] == 12.0
+
+
 def test_only_spell_nodes_are_picked_up() -> None:
     """최상위에 해시 키 노드가 섞여 있다. 실제 파일이 그렇다."""
     assert list(spells(champion())) == ["AatroxQ"]

@@ -103,7 +103,9 @@ def directions_in(
     손으로 붙인 라벨은 노트 전체를 읽은 것이라 더 정확하고, 라벨이 쌓일수록
     패널이 좋아진다. 어느 쪽에서 왔는지는 `direction_source` 에 남긴다.
 
-    **cdragon 판정은 손 라벨 241개에 붙여 충돌 0 을 확인하고 넣었다.**
+    **cdragon 판정을 넣을 때는 손 라벨 241개로 충돌 0 이었다. 지금은 아니다** —
+    라벨 1,630종에 파이프라인째로 맞대면 채점 519종에 충돌 16건이고(96.9%),
+    정반대가 둘이다. 어디서 나는지는 [`direction`](direction.py) 에 적어 두었다.
     """
     after = json.loads((ddragon / f"{version(patch)}.json").read_bytes())["data"]
     before = json.loads((ddragon / f"{version(previous)}.json").read_bytes())["data"]
