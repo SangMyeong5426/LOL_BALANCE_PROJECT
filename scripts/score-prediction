@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""미리 적어 둔 예측을 채점한다 — **모델을 다시 돌리지 않는다.**
+
+    ./scripts/score-prediction pre-16_20          적어 둔 목록을 지금 라벨로 채점
+    ./scripts/score-prediction --list             적어 둔 것 전부
+    ./scripts/score-prediction pre-16_20 --top 5
+
+`run-live-predict --score` 와 무엇이 다른가 — 저쪽은 **목록을 지금 코드로 다시
+낸다.** 코드를 고치면 같은 묶음에서도 다른 목록이 나오므로 적어 둔 예측을 채점할
+수 없다. 실제로 두 번 걸렸다.
+
+- `16_20` 두 벌은 `runs/before-kda-fix/` 의 순위를 손으로 맞춰 셌다. 그 파일은
+  커밋하지 않으므로 **「대상 131종」이 저장소만으로 되짚이지 않았다.**
+- `16_19` 를 다시 셀 때는 대상이 48 · 80 · 167종이 아니라 48 · 104 · 48 종으로
+  나왔다. 세 벌 중 둘은 묶음이 없다.
+
+이 도구는 `ground_truth/predictions/<이름>.json` 과 방향 라벨만 읽는다. 원자료도
+시드도 모델도 필요 없고, **코드를 고쳐도 값이 안 바뀐다.**
+
+## 두 기준을 같이 낸다
+
+버그 수정은 밸런스 의도가 아니다(ADR 0015). `16_20` 은 뺀 수를 따로 적었고 `16_19`
+는 안 적어서 두 지점을 나란히 읽을 수 없었다. 같은 함수가 둘 다 낸다.
+
+키가 필요 없다 — 커밋된 텍스트만 읽는다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.assemble import adjusted_in  # noqa: E402
+from lol_balance.direction import Direction  # noqa: E402
+from lol_balance.forecast import Registered, positives, score_side  # noqa: E402
+from lol_balance.groundtruth import read_labels  # noqa: E402
+
+WRITTEN = ROOT / "ground_truth" / "predictions"
+LABELS = ROOT / "ground_truth" / "directions"
+NOTES = ROOT / "data" / "patchnotes"
+
+
+def load(name: str) -> Registered:
+    raw = json.loads((WRITTEN / f"{name}.json").read_bytes())
+    return Registered(
+        name=name,
+        base=raw["base"],
+        target=raw["target"],
+        snapshot=raw["snapshot"],
+        recorded=raw["recorded"],
+        targets=tuple(raw["targets"]),
+        nerf=tuple(raw["nerf"]),
+        buff=tuple(raw["buff"]),
+    )
+
+
+def answer_for(patch: str) -> frozenset[str]:
+    """그 패치에 조정된 챔피언. 우리 구간 밖 노트는 `live/` 에 있다."""
+    return adjusted_in(patch, NOTES) | adjusted_in(patch, NOTES / "live")
+
+
+def labels_for(patch: str) -> dict[str, Direction]:
+    path = LABELS / f"{patch}.jsonl"
+    if not path.exists():
+        return {}
+    return {x.champion: x.direction for x in read_labels(path)}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("name", nargs="?")
+    parser.add_argument("--top", type=int, default=5)
+    parser.add_argument("--list", action="store_true", help="적어 둔 것 전부")
+    args = parser.parse_args()
+
+    if args.list or not args.name:
+        for path in sorted(WRITTEN.glob("*.json")):
+            raw = json.loads(path.read_bytes())
+            print(
+                f"  {path.stem:18} {raw['base']} → {raw['target']}"
+                f" · 대상 {len(raw['targets'])}종 · {raw['recorded']}"
+            )
+        return 0
+
+    written = load(args.name)
+    answer = answer_for(written.target)
+    directions = labels_for(written.target)
+    if not answer:
+        print(f"{written.target} 패치 노트가 없다 — 채점할 수 없다", file=sys.stderr)
+        return 1
+
+    touched, intended = positives(written, answer, directions)
+    print(
+        f"■ {written.name} — {written.base} 자료로 {written.target} 예측"
+        f" ({written.recorded} 에 적음)"
+    )
+    print(
+        f"  대상 {len(written.targets)}종 · 묶음 «{written.snapshot}»"
+        f" · 방향 라벨 {len(directions)}종"
+    )
+    print(
+        f"  {written.target} 조정 {len(answer)}종 중 대상 안에 {len(touched)}종"
+        f" · 버그 수정을 빼면 {len(intended)}종"
+    )
+
+    for label, want in (("너프", "nerf"), ("버프", "buff")):
+        got = score_side(written, want, answer, directions, args.top)  # type: ignore[arg-type]
+        print(f"\n  {label} 상위 {args.top}")
+        for i, champion in enumerate(written.side(want)[: args.top], 1):  # type: ignore[arg-type]
+            if champion in touched:
+                got_dir = directions.get(champion, "라벨 없음")
+                mark = "✅" if got_dir == want else "·"
+            else:
+                mark, got_dir = "  ", "조정 안 됨"
+            print(f"    {i:2} {champion:16}{mark} {got_dir}")
+        print(
+            f"    → 조정 {len(got.hits)}종 (기준선 {got.expected:.1f})"
+            f" · 버그 수정 빼면 {len(got.intended)}종"
+            f" (기준선 {got.expected_intended:.1f})"
+            f" · 방향까지 {len(got.matched)}종"
+        )
+        if got.unlabelled:
+            print(
+                f"    ⚠ 조정됐는데 방향 라벨이 없는 것 {len(got.unlabelled)}종"
+                f" — {' · '.join(got.unlabelled)} (틀린 것이 아니라 못 잰 것이다)"
+            )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
