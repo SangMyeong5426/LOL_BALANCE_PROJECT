@@ -60,6 +60,21 @@ RANK_SLOTS = 7
 # 변경일 수 있다.
 SPELL_FIELDS = ("cooldownTime", "castRange")
 
+# 스킬 수치 목록의 키 이름. **CommunityDragon 이 `15.18` 부터 `m` 을 뗐다.**
+#
+#   13.14 ~ 15.16   mDataValues · mName · mValues
+#   15.18 ~ 16.20   DataValues  · name  · values
+#
+# 받아 둔 69개 버전에서 경계가 딱 갈린다(`15.17` 은 받은 적이 없다). 옛 이름만
+# 읽던 동안 **그 뒤 패치의 스킬 수치를 한 칸도 안 보고 있었다** — 오류는 안 나고
+# 변경이 0칸으로 나왔다. Kennen `16_20` 의 공격 속도가 파일 안에 있는데도
+# `diff_versions` 가 빈 값을 냈다. 둘 다 읽는다 — 어느 쪽이 올지 버전마다 다르고,
+# 미러가 또 바꿀 수도 있다.
+DATA_VALUE_KEYS = (
+    ("mDataValues", "mName", "mValues"),
+    ("DataValues", "name", "values"),
+)
+
 Kind = str  # "value" | "formula" | "spell"
 
 
@@ -125,13 +140,14 @@ def values(data: dict[str, Any]) -> dict[tuple[Kind, str], float]:
     """`.bin.json` 하나에서 (종류, 경로) → 숫자를 전부 뽑는다."""
     out: dict[tuple[Kind, str], float] = {}
     for name, spell in spells(data).items():
-        for entry in spell.get("mDataValues") or []:
-            if not isinstance(entry, dict):
-                continue
-            label = entry.get("mName", "?")
-            for index, value in enumerate(entry.get("mValues") or []):
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    out[("value", f"{name}.{label}[{index}]")] = float(value)
+        for list_key, name_key, values_key in DATA_VALUE_KEYS:
+            for entry in spell.get(list_key) or []:
+                if not isinstance(entry, dict):
+                    continue
+                label = entry.get(name_key, "?")
+                for index, value in enumerate(entry.get(values_key) or []):
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        out[("value", f"{name}.{label}[{index}]")] = float(value)
 
         found: dict[str, float] = {}
         _numbers(spell.get("mSpellCalculations") or {}, name, found)
@@ -155,16 +171,17 @@ def rank_arrays(data: dict[str, Any]) -> dict[tuple[str, str], tuple[float, ...]
     """
     out: dict[tuple[str, str], tuple[float, ...]] = {}
     for name, spell in spells(data).items():
-        for entry in spell.get("mDataValues") or []:
-            if not isinstance(entry, dict):
-                continue
-            row = [
-                float(v)
-                for v in entry.get("mValues") or []
-                if isinstance(v, (int, float)) and not isinstance(v, bool)
-            ]
-            if row:
-                out[(name, str(entry.get("mName", "?")))] = tuple(row)
+        for list_key, name_key, values_key in DATA_VALUE_KEYS:
+            for entry in spell.get(list_key) or []:
+                if not isinstance(entry, dict):
+                    continue
+                row = [
+                    float(v)
+                    for v in entry.get(values_key) or []
+                    if isinstance(v, (int, float)) and not isinstance(v, bool)
+                ]
+                if row:
+                    out[(name, str(entry.get(name_key, "?")))] = tuple(row)
     return out
 
 
