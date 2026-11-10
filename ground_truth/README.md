@@ -94,7 +94,7 @@ labeling-guide 에 있다. **전량을 붙인 지금도 그 기록은 지우지 
 
 | | |
 | --- | --- |
-| 규모 | 네 벌 — `pre-16_19` · `pre-16_20` · `pre-16_20-big` · `pre-16_21` |
+| 규모 | 다섯 벌 — `pre-16_19` · `pre-16_20` · `pre-16_20-big` · `pre-16_21` · `pre-16_22` |
 | 만든 방법 | `run-live-predict` 가 낸 목록을 적어 둔 것. 대상은 고정 묶음에서 나온다(ADR 0013) |
 | **API 호출** | **없다** |
 | 채점 | [`score-prediction`](../scripts/score-prediction) — 이 파일과 방향 라벨만 읽는다 |
