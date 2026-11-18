@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""미리 적은 예측을 **정답지가 공개되기 전에** 굳혔는지 본다.
+
+    ./scripts/check-registration-order              # 여섯 벌 전부
+    ./scripts/check-registration-order --pool 16_22 # 며칠째에 대상이 몇 종이 되나
+    ./scripts/check-registration-order --offline    # 위키를 안 부른다
+
+전향 평가의 값은 **정답지를 볼 수 없었다**는 데서 온다. 「보지 않았다」가 아니다.
+그 둘이 갈리는 자리를 두 번 놓쳤으므로(아래) 이제 수치로 남긴다.
+
+| 벌 | 정답지보다 |
+| --- | --- |
+| `pre-16_19` · `pre-16_20` · `pre-16_20-big` · `pre-16_22` | 앞섰다 (2 ~ 8일) |
+| **`pre-16_21`** | **3시간 늦었다** |
+| **`pre-16_22-big`** | **30시간 늦었다** |
+
+## 무엇을 두 시각으로 잡는가
+
+**굳힌 시각** — 그 벌의 상위 3이 저장소에 처음 들어온 커밋의 시각이다. 예측 JSON 의
+커밋 날짜가 아니다: 앞 네 벌의 JSON 은 채점 도구를 만든 날(2026-10-19)에 한꺼번에
+들어왔고, 목록 자체는 그 전에 `docs/results/README.md` 에 적혀 있었다.
+
+**정답지 시각** — 라이엇 공식 위키의 그 패치 문서가 **처음 생긴** 판의 시각이다
+(`rvdir=newer` 로 가장 오래된 판 하나). 패치 노트는 이 위키에서 받고
+(`fetch-patchnotes`) 방향 라벨도 이것을 읽어 붙이므로, 이 문서가 생긴 때가 곧
+우리 정답지가 공개된 때다.
+
+**더 이른 공개는 못 잡는다.** PBE 미리보기, 개발자 영상, 커뮤니티 유출은 위키보다
+앞선다. 그래서 이 검사가 「앞섰다」고 해도 **아무도 알 수 없었다는 뜻은 아니다** —
+우리 정답지보다 앞섰다는 뜻이다.
+
+**`check-all` 에 안 넣는다.** 위키를 불러야 하고, 늦은 두 벌은 이미 일어난 일이라
+매번 걸린다. 통과·실패를 가리는 관문이 아니라 **읽는 검사**다 — 새 벌을 굳힌 직후에
+한 번 돌려 「앞섰다」를 확인하는 것이 쓰임이다.
+
+키가 필요 없다 — 위키 API 는 공개고, 나머지는 저장소를 읽는다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+from datetime import UTC, datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.forecast import OrderCheck, pool_growth  # noqa: E402
+from lol_balance.panel import MIN_MATCHES  # noqa: E402
+from lol_balance.patchnotes import wiki_version  # noqa: E402
+
+WRITTEN = ROOT / "ground_truth" / "predictions"
+RIOT = ROOT / "data" / "riot"
+WIKI = "https://wiki.leagueoflegends.com/en-us/api.php"
+# 공개 API 를 부르므로 주인을 밝히지 않는 이름을 쓴다
+AGENT = "lol-balance-project/1.0 (registration-order audit)"
+
+# 위키를 못 부를 때 쓰는, 2026-11-18 에 받아 적은 값. **갱신하면 출처를 같이 남긴다.**
+RECORDED_ANSWERS: dict[str, str] = {
+    "16_19": "2026-09-22T16:13:10Z",
+    "16_20": "2026-10-06T14:57:22Z",
+    "16_21": "2026-10-19T09:57:47Z",
+    "16_22": "2026-11-02T13:47:37Z",
+    "16_23": "2026-11-16T19:02:46Z",
+}
+
+
+def first_revision(patch: str) -> datetime | None:
+    """그 패치의 위키 문서가 처음 생긴 시각. 문서가 없으면 `None`."""
+    title = wiki_version(f"{patch.replace('_', '.')}.1")
+    query = urllib.parse.urlencode(
+        {
+            "action": "query",
+            "prop": "revisions",
+            "titles": title,
+            "rvlimit": "1",
+            "rvdir": "newer",
+            "rvprop": "timestamp",
+            "format": "json",
+        }
+    )
+    request = urllib.request.Request(f"{WIKI}?{query}", headers={"User-Agent": AGENT})
+    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+        body = json.loads(response.read())
+    for page in body.get("query", {}).get("pages", {}).values():
+        revisions = page.get("revisions", [])
+        if revisions:
+            return datetime.fromisoformat(revisions[0]["timestamp"])
+    return None
+
+
+def registered_at(name: str) -> datetime | None:
+    """그 벌의 상위 3이 저장소에 처음 들어온 커밋 시각."""
+    written = json.loads((WRITTEN / f"{name}.json").read_bytes())
+    needle = " · ".join(written["nerf"][:3])
+    found = subprocess.run(
+        ["git", "log", "--all", "--format=%aI", "-S", needle],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    return datetime.fromisoformat(found[-1]) if found else None
+
+
+def checks(*, offline: bool) -> list[OrderCheck]:
+    out: list[OrderCheck] = []
+    answers: dict[str, datetime | None] = {}
+    for path in sorted(WRITTEN.glob("*.json")):
+        written = json.loads(path.read_bytes())
+        target = written["target"]
+        if target not in answers:
+            if offline:
+                recorded = RECORDED_ANSWERS.get(target)
+                answers[target] = datetime.fromisoformat(recorded) if recorded else None
+            else:
+                answers[target] = first_revision(target)
+        when = registered_at(path.stem)
+        if when is None:
+            print(f"  ⚠ {path.stem} — 목록이 들어온 커밋을 못 찾았다", file=sys.stderr)
+            continue
+        out.append(
+            OrderCheck(
+                name=path.stem,
+                target=target,
+                registered=when.astimezone(UTC),
+                answer=answers[target],
+            )
+        )
+    return sorted(out, key=lambda c: c.registered)
+
+
+def show_order(*, offline: bool) -> int:
+    rows = checks(offline=offline)
+    print("■ 미리 적은 예측을 정답지보다 먼저 굳혔나")
+    print(
+        f"  정답지 = 라이엇 공식 위키 문서가 처음 생긴 판{' (받아 적은 값)' if offline else ''}\n"
+    )
+    print(f"  {'벌':16} {'대상':7} {'굳힌 시각':17} {'정답지':17} {'차':>12}")
+    late = [c for c in rows if not c.clean]
+    for c in rows:
+        answer = f"{c.answer:%Y-%m-%d %H:%MZ}" if c.answer else "아직 없다"
+        hours = c.late_hours
+        if hours is None:
+            gap = "—"
+        elif hours < 0:
+            gap = f"{-hours / 24:.1f}일 앞"
+        else:
+            gap = f"{hours:.1f}시간 늦음"
+        mark = " " if c.clean else "⚠"
+        print(
+            f"  {mark}{c.name:15} {c.target:7} {c.registered:%Y-%m-%d %H:%MZ} "
+            f"{answer:17} {gap:>12}"
+        )
+    print(f"\n  앞선 벌 {len(rows) - len(late)} · 늦은 벌 {len(late)}")
+    if late:
+        print(
+            "  **늦은 벌은 전향 평가로 못 읽는다.** 입력이 깨끗해도 「볼 수 없었다」가"
+            " 아니라 「보지 않았다」에 서게 된다 — results 문서의 해당 절을 본다"
+        )
+    return 0
+
+
+def show_pool(patch: str) -> int:
+    from lol_balance.riot import read_games
+
+    folder = RIOT / patch
+    if not folder.is_dir():
+        print(f"{folder} 가 없다", file=sys.stderr)
+        return 1
+    games = [(m.start_ms, [p.champion_id for p in m.picks]) for m in read_games(folder)]
+    rows = pool_growth(games, min_matches=MIN_MATCHES)
+    print(f"■ {patch} — 며칠째에 대상이 몇 종이 되나 (문턱 {MIN_MATCHES}판)")
+    print(
+        "  **언제 굳혀야 하는가의 근거다.** 종수가 안 늘기 시작하면 더 기다릴 이유가 없다\n"
+    )
+    print(f"  {'일째':>4} {'누적 판수':>10} {'대상 종수':>10}")
+    for day, seen, pool in rows:
+        print(f"  {day:4} {seen:10,} {pool:10}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pool", metavar="패치", help="대상 종수가 며칠째에 멈추는지")
+    parser.add_argument("--offline", action="store_true", help="위키를 안 부른다")
+    args = parser.parse_args()
+    if args.pool:
+        return show_pool(args.pool)
+    return show_order(offline=args.offline)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
