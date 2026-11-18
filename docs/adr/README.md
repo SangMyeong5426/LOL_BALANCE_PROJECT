@@ -37,3 +37,4 @@
 - [ADR 0016: 확장은 Python 하나로 — 정적 API 와 로컬 Q&A, 서버를 두지 않는다](0016-static-api-and-local-qa.md)
 - [ADR 0017: 후속 답의 노트 인용은 코드가 붙인다 — 모델이 적지 않는다](0017-note-citations-by-code.md)
 - [ADR 0018: 노트 문장에서 조정 방향을 읽는다 — 재 보고 보류했다](0018-direction-from-note-text.md)
+- [ADR 0019: 프로덕션 키를 받았다 — 요청 한도와 공개 범위를 다시 정한다](0019-production-key-limits-and-public-scope.md)
