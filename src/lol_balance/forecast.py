@@ -183,3 +183,55 @@ def pool_growth(
             picks[cid] += 1
     out.append((day, seen, sum(1 for v in picks.values() if v >= min_matches)))
     return tuple(out)
+
+
+# ## 적어 두는 것도 한 곳에서 한다
+#
+# 처음에는 `run-live-predict` 의 화면 출력에서 챔피언 이름을 정규식으로 긁어 JSON 을
+# 손으로 만들었다. **거기서 한 번 걸렸다** — 이름이 열넷 자인 `Nunu & Willump` 가
+# 「점수」 칸에 붙어 잘렸다. 적는 쪽과 읽는 쪽을 같은 함수로 묶는다.
+
+REGISTERED_KEYS = ("base", "target", "snapshot", "recorded", "targets", "nerf", "buff")
+
+
+def as_json(registered: Registered) -> dict[str, object]:
+    """커밋할 모양으로. **`name` 은 파일명이라 안 넣는다.**"""
+    return {
+        "base": registered.base,
+        "target": registered.target,
+        "snapshot": registered.snapshot,
+        "recorded": registered.recorded,
+        "targets": list(registered.targets),
+        "nerf": list(registered.nerf),
+        "buff": list(registered.buff),
+    }
+
+
+def from_json(name: str, raw: Mapping[str, object]) -> Registered:
+    """읽는 쪽. 칸이 빠졌으면 **조용히 비우지 않고** 멈춘다."""
+    missing = [k for k in REGISTERED_KEYS if k not in raw]
+    if missing:
+        raise ValueError(f"{name}: 칸이 없다 — {' · '.join(missing)}")
+
+    def text(key: str) -> str:
+        value = raw[key]
+        if not isinstance(value, str):
+            raise ValueError(f"{name}.{key} 가 글자가 아니다")
+        return value
+
+    def names(key: str) -> tuple[str, ...]:
+        value = raw[key]
+        if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+            raise ValueError(f"{name}.{key} 가 이름 목록이 아니다")
+        return tuple(value)
+
+    return Registered(
+        name=name,
+        base=text("base"),
+        target=text("target"),
+        snapshot=text("snapshot"),
+        recorded=text("recorded"),
+        targets=names("targets"),
+        nerf=names("nerf"),
+        buff=names("buff"),
+    )
