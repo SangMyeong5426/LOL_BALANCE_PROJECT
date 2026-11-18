@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""한 번 돌린 상위 5 와 **흔들어 여러 번 돌려 평균 낸 상위 5** 중 어느 것이 맞나.
+
+    ./scripts/run-stability              # 20겹 · 재표본 50회
+    ./scripts/run-stability --resamples 10 --folds 5   # 빨리 보기
+
+판정 기준은 **재기 전에** 적었다 —
+[results](../docs/results/README.md#갈라-돌려-공통분을-쓸-것인가--재기-전에-기준을-적는다-2026-11-18).
+요지는 둘이다.
+
+## 재표본은 없는 정보를 만들지 않는다
+
+우리에게는 9,900판 **한 벌**밖에 없다. 그것을 부트스트랩해도 참값이 아니라 **우리
+추정값**으로 수렴한다. 그래서 얻을 수 있는 것은 「순위가 칼날 위에 선 챔피언을 피하는
+것」 하나뿐이다.
+
+## 흔들기를 참값에서 하면 안 된다
+
+    참값   u.gg 행                       — 챔피언당 중앙 4만 판대
+    관측   참값을 한 번 흔든 것 (obs)     — 우리가 실제로 가진 것
+    A팔    obs 로 한 번 줄 세운다         — 지금 하는 것
+    B팔    obs 를 또 흔들어 K번, 평균     — 우리 자료를 부트스트랩하는 것과 같다
+
+**B팔의 흔들기를 참값에서 하면 B팔이 참값으로 수렴해 반드시 이긴다.** 그것은 우리가
+할 수 없는 일이다 — 손에 있는 것은 `obs` 뿐이다.
+
+키가 필요 없다 — 커밋된 패널만 읽는다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import random
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from lol_balance.arms import (  # noqa: E402
+    _narrow,  # 라벨만 「너프되나」로 바꿔 끼운다 — 행을 걸러 내지 않는다
+    rank_candidates,
+    split,
+)
+from lol_balance.baseline import r_precision  # noqa: E402
+from lol_balance.config import load_settings  # noqa: E402
+from lol_balance.panel import PanelRow, patch_index  # noqa: E402
+from lol_balance.store import read_panel  # noqa: E402
+
+PANEL = ROOT / "data" / "panel.sqlite"
+SPLIT = "15_13"  # run-metrics 와 같은 경계 — 평가 구간은 건드리지 않는다
+TOP = 5
+# **재기 전에 고정한 값이다.** 결과를 보고 고치지 않는다
+RESAMPLES = 50
+FOLDS = 20
+SAMPLE_GAMES = 9_900  # 우리가 실제로 가진 직접 집계 한 벌의 크기
+
+# **①″ 버프는 사전 등록 밖이다.** 기준을 적을 때 ① 과 ①′ 만 적었는데, 적어 두는
+# 예측이 너프 열 · 버프 열 두 벌이라 버프를 안 보면 반쪽이다. 같이 내되 **채택·기각에
+# 쓰지 않는다** — 뒤늦게 더한 지표로 이긴 것은 이긴 것이 아니다.
+TASKS: tuple[tuple[str, str | None], ...] = (
+    ("① 조정", None),
+    ("①′ 너프", "nerf"),
+    ("①″ 버프(등록 밖)", "buff"),
+)
+PICKS_PER_GAME = 10
+
+
+def jitter(
+    rows: tuple[PanelRow, ...],
+    rng: np.random.Generator,
+    games: int = SAMPLE_GAMES,
+) -> tuple[PanelRow, ...]:
+    """지표를 `games` 판 표본의 이항 오차만큼 흔든다.
+
+    **추세 피처는 √2 배로 흔든다** — 두 패치의 추정값 차이라 오차가 그만큼 쌓인다.
+    `None` 은 그대로 둔다(「모름」과 「변화 없음」은 다르다).
+    """
+    slots = games * PICKS_PER_GAME
+    out = []
+    for r in rows:
+        seen = max(games * r.pick_rate, 1.0)  # 그 챔피언이 나온 판수
+        q = r.pick_rate / PICKS_PER_GAME  # 자리 하나가 그 챔피언일 확률
+        se_win = math.sqrt(max(r.win_rate * (1 - r.win_rate), 1e-9) / seen)
+        se_pick = PICKS_PER_GAME * math.sqrt(max(q * (1 - q), 1e-9) / slots)
+        se_ban = (
+            None
+            if r.ban_rate is None
+            else math.sqrt(max(r.ban_rate * (1 - r.ban_rate), 1e-9) / games)
+        )
+        root2 = math.sqrt(2)
+
+        def shift(value: float | None, se: float | None) -> float | None:
+            if value is None or se is None:
+                return value
+            return float(value + rng.normal(0.0, se))
+
+        out.append(
+            replace(
+                r,
+                win_rate=min(max(shift(r.win_rate, se_win) or 0.0, 0.0), 1.0),
+                pick_rate=max(shift(r.pick_rate, se_pick) or 0.0, 0.0),
+                ban_rate=None
+                if r.ban_rate is None
+                else min(max(shift(r.ban_rate, se_ban) or 0.0, 0.0), 1.0),
+                d_win_rate=shift(r.d_win_rate, se_win * root2),
+                d_pick_rate=shift(r.d_pick_rate, se_pick * root2),
+                d_ban_rate=None
+                if se_ban is None
+                else shift(r.d_ban_rate, se_ban * root2),
+            )
+        )
+    return tuple(out)
+
+
+def top_hit(rows: tuple[PanelRow, ...], score: np.ndarray, top: int = TOP) -> float:
+    """상위 `top` 중 실제로 그 대상이 된 비율. **패치 하나 안에서 센다.**"""
+    y = np.array([int(r.adjusted_next) for r in rows])
+    order = np.argsort(-score)[:top]
+    return float(y[order].sum()) / top
+
+
+def one_fold(
+    rows: tuple[PanelRow, ...],
+    at: str,
+    want: str | None,
+    seed: int,
+    resamples: int,
+    rng: np.random.Generator,
+    shuffler: random.Random,
+) -> tuple[float, float, float, float, float]:
+    """(A팔 적중, B팔 적중, 무작위 적중, A팔 R-정확도, B팔 R-정확도)."""
+    task = rows if want is None else _narrow(rows, want)
+    train, _ = split(task, at)
+    truth = tuple(r for r in task if r.patch == at)
+
+    observed = jitter(truth, rng)  # 우리가 가진 한 벌
+    single = rank_candidates(train, observed, want=want, with_pro=True, seed=seed)
+
+    stacked = np.zeros(len(observed))
+    for _ in range(resamples):
+        # **obs 에서 흔든다.** 참값에서 흔들면 B팔이 참값으로 수렴해 버린다
+        stacked += rank_candidates(
+            train, jitter(observed, rng), want=want, with_pro=True, seed=seed
+        )
+    bagged = stacked / resamples
+
+    noise = np.array([shuffler.random() for _ in observed])
+    y = np.array([int(r.adjusted_next) for r in truth])
+    return (
+        top_hit(truth, single),
+        top_hit(truth, bagged),
+        top_hit(truth, noise),
+        r_precision(y, single),
+        r_precision(y, bagged),
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--resamples", type=int, default=RESAMPLES)
+    parser.add_argument("--folds", type=int, default=FOLDS)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="흔들기의 씨앗. **여러 개로 돌리면 전부 적는다** — 가장 좋은 것을"
+        " 고르면 그것이 또 하나의 자유도다",
+    )
+    args = parser.parse_args()
+
+    rows = tuple(read_panel(PANEL))
+    order = sorted({r.patch for r in rows}, key=patch_index)
+    cut = order.index(SPLIT)
+    folds = order[max(cut - args.folds, 1) : cut]
+    seed = load_settings().seed
+    noise_seed = args.seed if args.seed is not None else seed
+
+    median = int(np.median([r.matches for r in rows if r.patch in set(folds)]))
+    print(
+        f"■ 갈라 돌려 공통분을 쓸 것인가 — 겹 {len(folds)}개 · 재표본 {args.resamples}회"
+    )
+    print(f"  겹 {folds[0]} ~ {folds[-1]} (학습 구간 · 평가 구간 {SPLIT}+ 은 안 쓴다)")
+    print(f"  참값의 판수 중앙 {median:,} — u.gg 오차 {0.5 / math.sqrt(median):.4f}")
+    print(f"  관측은 {SAMPLE_GAMES:,}판 수준으로 흔든다\n")
+
+    print(f"  흔들기 씨앗 {noise_seed}\n")
+    for label, want in TASKS:
+        rng = np.random.default_rng(noise_seed)
+        shuffler = random.Random(noise_seed)
+        got = [
+            one_fold(rows, at, want, seed, args.resamples, rng, shuffler)
+            for at in folds
+        ]
+        single, bagged, noise, rp_single, rp_bagged = (
+            np.array([g[i] for g in got]) for i in range(5)
+        )
+        for name, a, b in (
+            (f"{label} 상위 {TOP} 적중", single, bagged),
+            (f"{label} R-정확도", rp_single, rp_bagged),
+        ):
+            diff = b - a
+            se = float(diff.std(ddof=1) / math.sqrt(len(diff)))
+            bar = abs(diff.mean()) / se if se else 0.0
+            verdict = "채택" if diff.mean() > 0 and bar >= 2 else "채택 못 한다"
+            print(
+                f"  {name:22} 한 번 {a.mean():.4f} · 갈라 공통 {b.mean():.4f}"
+                f" · 차이 {diff.mean():+.4f} ± {se:.4f} → {bar:.1f} 표준오차 · {verdict}"
+            )
+        print(f"  {label} 무작위 대조          {noise.mean():.4f}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
