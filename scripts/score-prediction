@@ -37,7 +37,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from lol_balance.assemble import adjusted_in  # noqa: E402
 from lol_balance.direction import Direction  # noqa: E402
-from lol_balance.forecast import Registered, positives, score_side  # noqa: E402
+from lol_balance.forecast import (  # noqa: E402
+    Registered,  # noqa: E402
+    from_json,
+    positives,
+    score_side,
+)
 from lol_balance.groundtruth import read_labels  # noqa: E402
 
 WRITTEN = ROOT / "ground_truth" / "predictions"
@@ -46,17 +51,7 @@ NOTES = ROOT / "data" / "patchnotes"
 
 
 def load(name: str) -> Registered:
-    raw = json.loads((WRITTEN / f"{name}.json").read_bytes())
-    return Registered(
-        name=name,
-        base=raw["base"],
-        target=raw["target"],
-        snapshot=raw["snapshot"],
-        recorded=raw["recorded"],
-        targets=tuple(raw["targets"]),
-        nerf=tuple(raw["nerf"]),
-        buff=tuple(raw["buff"]),
-    )
+    return from_json(name, json.loads((WRITTEN / f"{name}.json").read_bytes()))
 
 
 def answer_for(patch: str) -> frozenset[str]:

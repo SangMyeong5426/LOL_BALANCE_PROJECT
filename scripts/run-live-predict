@@ -28,6 +28,7 @@ import argparse
 import datetime
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -50,6 +51,7 @@ from lol_balance.builds import (  # noqa: E402
 )
 from lol_balance.config import load_settings  # noqa: E402
 from lol_balance.direction import Direction  # noqa: E402
+from lol_balance.forecast import Registered, as_json  # noqa: E402
 from lol_balance.oracle import read_pro  # noqa: E402
 from lol_balance.panel import (  # noqa: E402
     MIN_MATCHES,
@@ -69,8 +71,12 @@ DDRAGON = ROOT / "data" / "ddragon"
 ORACLE = ROOT / "data" / "oracle"
 CDRAGON = ROOT / "data" / "cdragon"
 LABELS = ROOT / "ground_truth" / "directions"
+WRITTEN = ROOT / "ground_truth" / "predictions"
 
 VIEWS = (("너프 후보", "nerf"), ("버프 후보", "buff"))
+
+# 적어 둘 때는 한쪽 열씩 남긴다 — 채점은 상위 5 로 하고 10 까지 같이 본다
+REGISTER_TOP = 10
 
 
 def collected() -> list[str]:
@@ -190,6 +196,53 @@ def build(
     return out
 
 
+def register(
+    args: argparse.Namespace,
+    test: Sequence[PanelRow],
+    written: Mapping[str, tuple[str, ...]],
+    target: str,
+) -> int:
+    """미리 적어 둔 예측으로 커밋한다 — **화면 출력을 되긁지 않는다.**
+
+    `--until` 도 `--snapshot` 도 없으면 **거절한다.** 매일 수집이 현재 패치를 계속
+    불려서, 자르지 않은 목록은 다음 날 같은 명령으로 되살아나지 않는다 — `16_19`
+    를 다시 셀 때 대상이 48 · 80 · 167종에서 48 · 104 · 48종으로 나왔다.
+    """
+    if not (args.until or args.snapshot):
+        print(
+            "--register 는 --until 이나 --snapshot 과 같이 쓴다 —"
+            " 자르지 않은 목록은 되살아나지 않는다",
+            file=sys.stderr,
+        )
+        return 2
+    if len(written.get("nerf", ())) < REGISTER_TOP:
+        print(
+            f"--top 을 {REGISTER_TOP} 이상으로 둔다 — 적어 둘 열 칸이 안 찬다",
+            file=sys.stderr,
+        )
+        return 2
+    path = WRITTEN / f"{args.register}.json"
+    if path.exists():
+        print(f"{path} 가 이미 있다 — 덮어쓰지 않는다", file=sys.stderr)
+        return 2
+    row = Registered(
+        name=args.register,
+        base=args.patch,
+        target=target,
+        snapshot=args.snapshot or f"없음 · --until {args.until}",
+        recorded=datetime.datetime.now(datetime.UTC).date().isoformat(),
+        targets=tuple(sorted(r.champion for r in test)),
+        nerf=written["nerf"],
+        buff=written["buff"],
+    )
+    path.write_text(
+        json.dumps(as_json(row), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"\n■ {path.relative_to(ROOT)} 에 적었다 — 대상 {len(row.targets)}종")
+    print("  굳힌 순서를 확인한다 — ./scripts/check-registration-order")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("patch", help="기준 패치 — 예: 16_16")
@@ -204,6 +257,12 @@ def main() -> int:
         "--snapshot",
         metavar="이름",
         help="고정 묶음의 경기만 쓴다 — 코드·모델을 견줄 때(./scripts/freeze-eval)",
+    )
+    parser.add_argument(
+        "--register",
+        metavar="이름",
+        help="ground_truth/predictions/<이름>.json 으로 적어 둔다 — --until 이나"
+        " --snapshot 이 있어야 한다. 덮어쓰지 않는다",
     )
     parser.add_argument(
         "--min-matches",
@@ -271,11 +330,13 @@ def main() -> int:
         )
 
     seed = load_settings().seed
+    written: dict[str, tuple[str, ...]] = {}
     for label, want in VIEWS:
         score = rank_candidates(train, test, want=want, with_pro=True, seed=seed)
         order = np.argsort(-score)[: args.top]
         print(f"\n=== {label} 상위 {args.top} ===")
         picked = [test[j] for j in order]
+        written[want] = tuple(r.champion for r in picked[:REGISTER_TOP])
         for i, r in enumerate(picked, 1):
             line = f"  {i:2} {r.champion:14}점수 {score[order[i - 1]]:.2f}"
             if scored:
@@ -299,6 +360,8 @@ def main() -> int:
                 print(f"     그중 {want} 방향까지 맞은 것 {right}종")
     if not scored:
         print(f"\n{nxt} 노트가 나오면 --score 로 채점한다")
+    if args.register:
+        return register(args, test, written, nxt)
     return 0
 
 

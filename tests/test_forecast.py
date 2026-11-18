@@ -8,9 +8,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from lol_balance.forecast import (
     OrderCheck,
     Registered,
+    as_json,
+    from_json,
     pool_growth,
     positives,
     score_side,
@@ -188,3 +192,31 @@ def test_the_target_pool_stops_growing_before_the_patch_ends() -> None:
 
 def test_pool_growth_on_nothing() -> None:
     assert pool_growth([]) == ()
+
+
+def test_writing_and_reading_a_registration_round_trips() -> None:
+    """**적는 쪽과 읽는 쪽이 같은 함수여야 한다.**
+
+    처음에는 화면 출력에서 이름을 정규식으로 긁었고, 열넷 자인 `Nunu & Willump` 가
+    「점수」 칸에 붙어 잘렸다.
+    """
+    want = registered(name="pre-16_24", targets=("Nunu & Willump", "Ahri"))
+
+    assert from_json("pre-16_24", as_json(want)) == want
+
+
+def test_a_registration_missing_a_field_stops() -> None:
+    """**기준선이 대상 수에 달려 있다.** `targets` 가 비면 성적을 읽을 수 없다."""
+    raw = as_json(registered())
+    del raw["targets"]
+
+    with pytest.raises(ValueError, match="targets"):
+        from_json("pre-test", raw)
+
+
+def test_a_registration_with_a_wrong_type_stops() -> None:
+    raw = as_json(registered())
+    raw["nerf"] = "Ahri"
+
+    with pytest.raises(ValueError, match="nerf"):
+        from_json("pre-test", raw)
